@@ -1,0 +1,34 @@
+version: 1
+disable_existing_loggers: false
+
+formatters:
+  standard:
+    format: "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+    datefmt: "%Y-%m-%d %H:%M:%S"
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: DEBUG          # <-- change independently for console
+    formatter: standard
+    stream: ext://sys.stdout
+
+  file:
+    class: logging.handlers.RotatingFileHandler
+    level: DEBUG          # <-- change independently for file
+    formatter: standard
+    filename: logs/app.log
+    maxBytes: 5242880    # 5 MB
+    backupCount: 3
+    encoding: utf8
+
+root:
+  level: DEBUG             # <-- floor for all loggers; handlers can only be stricter, not looser
+  handlers: [console, file]
+
+# Example: quiet down a noisy third-party library independently
+# loggers:
+#   urllib3:
+#     level: WARNING
+#     handlers: [console, file]
+#     propagate: false
