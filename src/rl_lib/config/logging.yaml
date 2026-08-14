@@ -6,29 +6,35 @@ formatters:
     format: "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
     datefmt: "%Y-%m-%d %H:%M:%S"
 
+# These handlers are NOT attached to root directly.
+# They are picked up by setup_logging() and run in a background thread via QueueListener.
 handlers:
   console:
     class: logging.StreamHandler
-    level: DEBUG          # <-- change independently for console
+    level: DEBUG
     formatter: standard
     stream: ext://sys.stdout
 
   file:
     class: logging.handlers.RotatingFileHandler
-    level: DEBUG          # <-- change independently for file
+    level: DEBUG
     formatter: standard
     filename: logs/app.log
-    maxBytes: 5242880    # 5 MB
+    maxBytes: 5242880
     backupCount: 3
     encoding: utf8
 
+  queue_handler:
+    class: logging.handlers.QueueHandler
+    handlers: [console, file]
+    respect_handler_level: true
+
 root:
-  level: DEBUG             # <-- floor for all loggers; handlers can only be stricter, not looser
-  handlers: [console, file]
+  level: DEBUG
+  handlers: [queue_handler]
 
 # Example: quiet down a noisy third-party library independently
 # loggers:
 #   urllib3:
 #     level: WARNING
-#     handlers: [console, file]
 #     propagate: false

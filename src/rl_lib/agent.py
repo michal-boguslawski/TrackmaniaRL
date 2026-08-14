@@ -25,8 +25,8 @@ class Agent:
             action_dim,
             stack_size
         ).to(self._device)
-        # self._clamp_min = T.Tensor([-1., 0., 0.]).to(self._device)
-        # self._clamp_max = T.Tensor([1., 1., 1.]).to(self._device)
+        self._clamp_min = T.Tensor([-1., 0., 0.]).to(self._device)
+        self._clamp_max = T.Tensor([1., 1., 1.]).to(self._device)
 
     def _preprocess_observation(self, observation: NDArray[np.uint8] | T.Tensor) -> T.Tensor:
         if isinstance(observation, np.ndarray):
@@ -49,6 +49,7 @@ class Agent:
 
         action_tensor = T.from_numpy(action) if isinstance(action, np.ndarray) else action
         action_tensor = action_tensor.to(self._device)
+        action_tensor = T.clamp(action_tensor, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
         log_probs = action_dist.log_prob(action_tensor).sum(dim=-1)
         return log_probs, value, action_dist
 

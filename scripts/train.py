@@ -1,7 +1,7 @@
 import numpy as np
 import torch as T
 
-from src.rl_lib.logger_setup import setup_logging
+from src.rl_lib.logger_setup import setup_logging, shutdown_logging
 from src.rl_lib.envs.make_env import make_env
 from src.rl_lib.training.rollout_collector import RolloutCollector
 from src.rl_lib.buffers.rollout_buffer import RolloutBuffer
@@ -13,11 +13,11 @@ from src.rl_lib.training.callbacks.record_video import RecordVideoCallback
 from src.rl_lib.agent import Agent
 
 
-BATCH_SIZE = 1024
-NUM_ENVS = 2
+BATCH_SIZE = 2048
+NUM_ENVS = 8
 STACK_SIZE = 4
 SKIP = 4
-MINIBATCH_SIZE = 128
+MINIBATCH_SIZE = 256
 EPOCHS = 4
 DEVICE = T.device("cuda" if T.cuda.is_available() else "cpu")
 
@@ -55,6 +55,7 @@ def main():
     console_metrics_logger = ConsoleMetricsLogger()
     trainer = PPOTrainer(
         agent=agent,
+        entropy_coef=1e-4,
         callbacks=[MetricsLoggingCallback(console_metrics_logger, granularity="batch")]
     )
 
@@ -72,7 +73,7 @@ def main():
             RecordVideoCallback(
                 "CarRacing-v3",
                 agent=agent,
-                video_folder="/opt/TrackmaniaRL/videos",
+                video_folder="./videos",
                 metrics_logger=console_metrics_logger,
                 skip=SKIP,
                 wrappers=[
@@ -90,4 +91,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        shutdown_logging()
