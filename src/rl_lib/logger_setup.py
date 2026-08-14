@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import atexit
 import logging
 import logging.config
+import logging.handlers
 from pathlib import Path
 
 import yaml
@@ -30,3 +32,15 @@ def setup_logging(
             Path(handler["filename"]).parent.mkdir(parents=True, exist_ok=True)
 
     logging.config.dictConfig(config)
+
+    queue_handler = logging.getHandlerByName("queue_handler")
+    if queue_handler is not None and queue_handler.listener is not None:
+        queue_handler.listener.start()
+
+    atexit.register(shutdown_logging)
+
+
+def shutdown_logging() -> None:
+    queue_handler = logging.getHandlerByName("queue_handler")
+    if queue_handler is not None and queue_handler.listener is not None and queue_handler.listener._thread is not None:
+        queue_handler.listener.stop()

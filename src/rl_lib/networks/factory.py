@@ -15,7 +15,7 @@ class Network(nn.Module):
         self.sequence_encoder = nn.Conv1d(
             512, 512, kernel_size=stack_size
         )
-        # self.norm = nn.LayerNorm(512)
+        self.norm = nn.LayerNorm(512)
         self.actor = Actor(action_dim)
         self.critic = Critic()
 
@@ -25,7 +25,7 @@ class Network(nn.Module):
 
         x = x.view(observation.shape[0], -1, x.shape[-1])
         x = self.sequence_encoder(x.permute(0, 2, 1)).squeeze_(-1)
-        # x = self.norm(x)
+        x = self.norm(x)
 
         action_dist = self.actor(x, temperature=temperature)
         value = self.critic(x)

@@ -47,7 +47,7 @@ class PPOTrainer:
 
     def _actor_loss(self, advantages: T.Tensor, log_probs: T.Tensor, old_log_probs: T.Tensor) -> T.Tensor:
         log_ratio = (log_probs - old_log_probs).clamp(-10, 10)  # prevent exp overflow
-        ratio = log_ratio.exp_()
+        ratio = log_ratio.exp()
         # ratio = (log_probs - old_log_probs).exp_()
         clipped_ratio = ratio.clamp(min=1 - self.ppo_epsilon, max=1 + self.ppo_epsilon)
         surrogate_loss = -T.minimum(ratio * advantages, clipped_ratio * advantages)
