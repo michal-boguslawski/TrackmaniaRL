@@ -1,9 +1,9 @@
 from copy import copy
 from gymnasium import make_vec, VectorizeMode
+from gymnasium.vector import VectorEnv
 from functools import partial
 
 from src.rl_lib.envs.wrappers import WRAPPERS
-
 
 def make_env(
     env_id: str,
@@ -15,7 +15,7 @@ def make_env(
     continuous: bool = True,
     vectorization_mode: str = "async",
     wrappers: list[str] | None = None
-):
+) -> VectorEnv:
     _wrappers = copy(wrappers or [])
     if record:
         _wrappers.insert(0, "record_video")

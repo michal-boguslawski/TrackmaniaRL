@@ -57,7 +57,7 @@ class RolloutBuffer:
         critic_value: NDArray[np.float32],
         done: NDArray[np.bool_],
         gamma: float = 0.99,
-        gae_lambda: float = 0.95,
+        gae_lambda: float = 0.97,
     ) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
         delta = reward[:, :-1] + gamma * critic_value[:, 1:] * np.logical_not(done[:, :-1]) - critic_value[:, :-1]
         advantages = np.zeros_like(delta)
@@ -91,7 +91,7 @@ class RolloutBuffer:
                 stacked[n, t] = frames
         return stacked
 
-    def get_flat_trajectory(self, stack_size: int, gamma: float = 0.99, gae_lambda: float = 0.95) -> dict[str, NDArray]:
+    def get_flat_trajectory(self, stack_size: int, gamma: float = 0.99, gae_lambda: float = 0.97) -> dict[str, NDArray]:
         cache_key = (stack_size, gamma, gae_lambda)
         if self._cached_flat is not None and self._cache_key == cache_key:
             return self._cached_flat
@@ -100,11 +100,15 @@ class RolloutBuffer:
         returns, advantages = self.compute_returns_and_advantages(
             self._buffer["reward"], self._buffer["critic_value"], done, gamma, gae_lambda,
         )
+        
+        # normalized_advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        
         obs_windows = self._build_observation_windows(self._buffer["observation"], done, stack_size=stack_size)
         flat = {
             "observation": obs_windows[:, :-1].reshape(-1, stack_size, *self._observation_space),
             "action": self._buffer["action"][:, :-1].reshape(-1, *self._action_space),
             "old_log_probs": self._buffer["old_log_probs"][:, :-1].reshape(-1),
+            "old_values": self._buffer["critic_value"][:, :-1].reshape(-1),
             "returns": returns.reshape(-1),
             "advantages": advantages.reshape(-1),
         }
@@ -127,7 +131,7 @@ class RolloutBuffer:
             return float("nan")  # degenerate — targets have no variance to explain
         return float(1 - np.var(returns - values) / var_returns)
 
-    def get_metrics(self, stack_size: int, gamma: float = 0.99, gae_lambda: float = 0.95) -> dict[str, float]:
+    def get_metrics(self, stack_size: int, gamma: float = 0.99, gae_lambda: float = 0.97) -> dict[str, float]:
         flat = self.get_flat_trajectory(stack_size, gamma, gae_lambda)  # reuses cache
         returns = flat["returns"]
         values = self._buffer["critic_value"][:, :-1].reshape(-1)

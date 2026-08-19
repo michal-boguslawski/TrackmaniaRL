@@ -15,9 +15,9 @@ class CNN(nn.Module):
             init_layer(nn.Conv2d(64, 64, kernel_size=3, stride=1)),
             nn.ReLU(),
             nn.Flatten(),
-            init_layer(nn.Linear(4096, 512)),
+            init_layer(nn.Linear(4096, 256)),
             nn.ReLU(),
-            init_layer(nn.Linear(512, 512)),
+            init_layer(nn.Linear(256, 256)),
         )
 
     def forward(self, x: T.Tensor) -> T.Tensor:

@@ -10,15 +10,16 @@ from src.rl_lib.tracking.console_logger import ConsoleMetricsLogger
 from src.rl_lib.training.callbacks.metrics_logger import MetricsLoggingCallback
 from src.rl_lib.training.callbacks.record_statistics import RecordStatisticLoggerCallback
 from src.rl_lib.training.callbacks.record_video import RecordVideoCallback
+from src.rl_lib.training.callbacks.checkpoints_save import CheckpointsSaveCallback
 from src.rl_lib.agent import Agent
 
 
 BATCH_SIZE = 2048
 NUM_ENVS = 8
 STACK_SIZE = 4
-SKIP = 4
-MINIBATCH_SIZE = 256
-EPOCHS = 4
+SKIP = 2
+MINIBATCH_SIZE = 512
+EPOCHS = 6
 DEVICE = T.device("cuda" if T.cuda.is_available() else "cpu")
 
 setup_logging()
@@ -55,8 +56,12 @@ def main():
     console_metrics_logger = ConsoleMetricsLogger()
     trainer = PPOTrainer(
         agent=agent,
-        entropy_coef=1e-4,
-        callbacks=[MetricsLoggingCallback(console_metrics_logger, granularity="batch")]
+        entropy_coef=5e-3,
+        # entropy_decay=0.95,
+        callbacks=[
+            CheckpointsSaveCallback("./logs/checkpoints", agent, intervals=200),
+            MetricsLoggingCallback(console_metrics_logger, granularity="batch"),
+        ]
     )
 
     rng = np.random.default_rng(seed=42)
@@ -73,7 +78,7 @@ def main():
             RecordVideoCallback(
                 "CarRacing-v3",
                 agent=agent,
-                video_folder="./videos",
+                video_folder="./logs/videos",
                 metrics_logger=console_metrics_logger,
                 skip=SKIP,
                 wrappers=[

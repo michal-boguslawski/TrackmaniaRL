@@ -78,3 +78,9 @@ class Agent:
         action = action_dist.sample().detach()
         log_probs = action_dist.log_prob(action).sum(dim=-1)
         return action.cpu().numpy(), log_probs.detach().cpu().numpy(), value.detach().cpu().numpy()
+
+    def save_state_dict(self, path: str) -> None:
+        self._network.save_state_dict(path)
+
+    def load_state_dict(self, path: str) -> None:
+        self._network.load_state_dict(path)

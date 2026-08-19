@@ -5,6 +5,7 @@ from src.rl_lib.agent import Agent
 from src.rl_lib.envs.make_env import make_env
 from src.rl_lib.training.callbacks.base import CollectorCallback
 from src.rl_lib.tracking.base import MetricsLogger
+from src.rl_lib.training.callbacks.utils import stop_video_recording
 
 
 logger = getLogger(__name__)
@@ -46,9 +47,12 @@ class RecordVideoCallback(CollectorCallback):
             action, _, _ = self.agent.act(state, temperature=1e-4)
             state, _, terminated, truncated, info = self.env.step(action)
             done = np.logical_or(terminated, truncated).any()
+
+        stop_video_recording(self.env.envs[0])
+        
         metrics = {
             "evaluation/episode_returns": float(info["episode"]["r"][0]),
-            "evaluation/episode_lenghts": float(info["episode"]["l"][0]),
+            "evaluation/episode_lengths": float(info["episode"]["l"][0]),
         }
         self._logger.log_metrics(metrics, step=self._step)
         self.agent.train()
