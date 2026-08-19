@@ -8,7 +8,7 @@ class Critic(nn.Module):
     def __init__(self):
         super().__init__()
         self._network = nn.Sequential(
-            init_layer(nn.Linear(512, 256)),
+            init_layer(nn.Linear(256, 256)),
             nn.ReLU(),
             init_layer(nn.Linear(256, 1), gain=1.0),  # standard, not sqrt(2), for value head
         )

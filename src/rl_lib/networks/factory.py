@@ -13,9 +13,9 @@ class Network(nn.Module):
 
         self.cnn = CNN(observation_dim)
         self.sequence_encoder = nn.Conv1d(
-            512, 512, kernel_size=stack_size
+            256, 256, kernel_size=stack_size
         )
-        self.norm = nn.LayerNorm(512)
+        self.norm = nn.LayerNorm(256)
         self.actor = Actor(action_dim)
         self.critic = Critic()
 
@@ -31,3 +31,9 @@ class Network(nn.Module):
         value = self.critic(x)
 
         return action_dist, value
+
+    def save_state_dict(self, path: str) -> None:
+        T.save(self.state_dict(), path)
+
+    def load_state_dict(self, path: str) -> None:
+        self.load_state_dict(T.load(path, weights_only=True))

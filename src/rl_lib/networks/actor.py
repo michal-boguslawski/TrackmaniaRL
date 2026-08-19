@@ -14,7 +14,7 @@ class Actor(nn.Module):
     def __init__(self, action_dim: int):
         super().__init__()
         self._network = nn.Sequential(
-            init_layer(nn.Linear(512, 256)),
+            init_layer(nn.Linear(256, 256)),
             nn.ReLU(),
             init_layer(nn.Linear(256, action_dim), gain=0.01),  # near-uniform initial policy
         )
@@ -40,3 +40,14 @@ class Actor(nn.Module):
                 ]
             )
         )
+
+
+if __name__ == "__main__":
+    actor = Actor(3)
+    test = T.randn(10, 512)
+    dist = actor(test)
+    action = dist.sample()
+    print(action.shape)
+    print(dist.log_prob(action).shape)
+    print(dist.base_dist.entropy().shape)
+    print(actor)
