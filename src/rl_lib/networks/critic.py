@@ -1,7 +1,7 @@
 import torch as T
 from torch import nn
 
-from src.rl_lib.networks.utils import init_layer
+from rl_lib.networks.utils import init_layer
 
 
 class Critic(nn.Module):
