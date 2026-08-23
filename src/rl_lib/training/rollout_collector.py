@@ -45,15 +45,15 @@ class RolloutCollector:
             action, log_probs, critic_value = self.trainer.act(state, done)
             next_state, reward, terminated, truncated, info = self.env.step(action.cpu().numpy())
 
-            terminated = T.from_numpy(terminated)
-            truncated = T.from_numpy(truncated)
+            terminated = T.from_numpy(terminated).to(self.trainer.device)
+            truncated = T.from_numpy(truncated).to(self.trainer.device)
             done = T.logical_or(terminated, truncated)
             self.buffer.add(RolloutStep(
                 observation=state,
                 action=action,
                 critic_value=critic_value,
                 old_log_probs=log_probs,
-                reward=T.from_numpy(reward).to(T.float32),
+                reward=T.from_numpy(reward).to(T.float32).to(self.trainer.device),
                 terminated=terminated,
                 truncated=truncated,
             ))

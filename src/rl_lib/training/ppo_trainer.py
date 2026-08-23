@@ -30,7 +30,11 @@ class PPOTrainer:
         callbacks: list[TrainingCallback] | None = None,
     ):
         self._agent = agent
-        self._optimizer = Adam(agent.network_parameters(), lr=3e-4, eps=1e-5)
+        self._optimizer = Adam(
+            agent.network_parameters(),
+            # lr=3e-4,
+            eps=1e-5,
+        )
         self._scheduler = LinearLR(
             self._optimizer,
             start_factor=1,
@@ -44,6 +48,7 @@ class PPOTrainer:
         self._critic_loss_fn = nn.HuberLoss(reduction="none")
         self._callbacks = CallbackList(callbacks)
         self._step = 0
+        self.target_kl = 0.025
         self._agent.train()
 
     @property
@@ -52,7 +57,7 @@ class PPOTrainer:
 
     @property
     def device(self) -> T.device:
-        return self._agent._device
+        return self._agent.device
 
     def act(self, observation: T.Tensor, done: T.Tensor) -> tuple[T.Tensor, T.Tensor, T.Tensor]:
         action, log_probs, critic_value = self._agent.act(observation, done)
@@ -74,7 +79,7 @@ class PPOTrainer:
 
         self._optimizer.zero_grad()
         loss.backward()
-        self._agent.clip_grad_norm(0.5)
+        grad_norm = self._agent.clip_grad_norm(0.5)
         self._optimizer.step()
         if self._scheduler:
             self._scheduler.step()
@@ -82,6 +87,7 @@ class PPOTrainer:
 
         metrics = {
             "loss/total": loss.detach().item(),
+            "metrics/grad_norm": grad_norm.item() if isinstance(grad_norm, T.Tensor) else grad_norm,
             # "loss/actor": actor_loss.detach().item(),
             # "loss/critic": critic_loss.detach().item(),
             # "loss/entropy": entropy_loss.detach().item(),
@@ -108,10 +114,14 @@ class PPOTrainer:
 
         with T.no_grad():
             approx_kl = (ratio - 1 - log_ratio).mean()
+            clip_fraction = (T.abs(ratio - 1) > self.ppo_epsilon).float().mean()
+            ratio_max = ratio.max()
 
         metrics = {
             "metrics/approx_kl": approx_kl.item(),
-            "loss/actor": actor_loss.detach().item()
+            "loss/actor": actor_loss.detach().item(),
+            "metrics/clip_fraction": clip_fraction.item(),
+            "metrics/ratio_max": ratio_max.item(),
         }
         return actor_loss, metrics
 
@@ -121,8 +131,12 @@ class PPOTrainer:
         loss_clipped = self._critic_loss_fn(clipped_values, returns)
         
         critic_loss = T.maximum(loss_unclipped, loss_clipped).mean()
+        
+        with T.no_grad():
+            explained_var = 1 - (returns - values).var() / (returns.var() + 1e-8)
         metrics = {
             "loss/critic": critic_loss.detach().item(),
+            "metrics/explained_variance": explained_var.item(),
         }
         return critic_loss, metrics
 
@@ -136,6 +150,11 @@ class PPOTrainer:
             f"metrics/entropy_{i}": value.item() for i, value in enumerate(mean_entropy)
         }
         metrics["loss/entropy"] = entropy_loss.detach().item()
+
+        with T.no_grad():
+            log_std = dist.base_dist.scale.log().mean(0)
+        metrics.update({f"metrics/log_std_{i}": v.item() for i, v in enumerate(log_std)})
+
         return entropy_loss, metrics
 
 
@@ -192,7 +211,8 @@ class PPOTrainer:
     def _get_metrics_from_batch(batch: T.Tensor):
         metrics = {
             "rollout/returns": batch["returns"].mean().item(),
-            "rollout/advantages": batch["advantages"].mean().item(),
+            "rollout/advantages_mean": batch["advantages"].mean().item(),
+            "rollout/advantages_std": batch["advantages"].std().item(),
             "rollout/critic_values": batch["critic_value"].mean().item(),
         }
         action_means = batch["action"].mean((0, 1))
@@ -217,14 +237,22 @@ class PPOTrainer:
             metrics=self._get_metrics_from_batch(batch)
         )
         for epoch in range(epochs):
+            epoch_kls = []
             for minibatch in self._get_iid_minibatches(batch, minibatch_size, self.stack_size):
                 minibatch_metrics = self.train_step(**minibatch)
+                epoch_kls.append(minibatch_metrics["metrics/approx_kl"])
                 self._on_minibatch(metrics=minibatch_metrics, step=self._step)
+            mean_epoch_kl = float(np.mean(epoch_kls))
             self._on_epoch()
+            if mean_epoch_kl > self.target_kl:
+                logger.warning(f"Early stop epoch {epoch}: KL {mean_epoch_kl:.4f} > {self.target_kl}")
+                break
 
         # self.entropy_coef = max(self.entropy_coef - 1e-5, 1e-5)
-        # metrics = {
-        #     "training/entropy_coef": self.entropy_coef,
-        #     "training/lr": self._optimizer.param_groups[0]["lr"]
-        # }
-        self._on_end(metrics=None, step=training_step)
+        metrics = {
+            "training/entropy_coef": self.entropy_coef,
+            # "training/lr": self._optimizer.param_groups[0]["lr"]
+        }
+        for i, pg in enumerate(self._optimizer.param_groups):
+            metrics[f"training/lr_{i}"] = pg["lr"]
+        self._on_end(metrics=metrics, step=training_step)

@@ -1,11 +1,11 @@
 from logging import getLogger
-import numpy as np
+import torch as T
 
-from src.rl_lib.agent import Agent
-from src.rl_lib.envs.make_env import make_env
-from src.rl_lib.training.callbacks.base import CollectorCallback
-from src.rl_lib.tracking.base import MetricsLogger
-from src.rl_lib.training.callbacks.utils import stop_video_recording
+from rl_lib.agent import Agent
+from rl_lib.envs.make_env import make_env
+from rl_lib.training.callbacks.base import CollectorCallback
+from rl_lib.tracking.base import MetricsLogger
+from rl_lib.training.callbacks.utils import stop_video_recording
 
 
 logger = getLogger(__name__)
@@ -40,13 +40,18 @@ class RecordVideoCallback(CollectorCallback):
 
     def record(self):
         self.agent.eval()
+        self.agent.reset()
         logger.debug("Recording video...")
         state, _ = self.env.reset()
-        done = False
-        while not done:
-            action, _, _ = self.agent.act(state, temperature=1e-4)
-            state, _, terminated, truncated, info = self.env.step(action)
-            done = np.logical_or(terminated, truncated).any()
+        done = T.zeros(self.env.num_envs, dtype=T.bool).to(self.agent.device)
+        while not done.any():
+            state = T.from_numpy(state).to(self.agent.device)
+            action, _, _ = self.agent.act(state, done, temperature=1e-4)
+            state, _, terminated, truncated, info = self.env.step(action.cpu().numpy())
+
+            terminated = T.from_numpy(terminated).to(self.agent.device)
+            truncated = T.from_numpy(truncated).to(self.agent.device)
+            done = T.logical_or(terminated, truncated)
 
         stop_video_recording(self.env.envs[0])
         

@@ -11,6 +11,7 @@ from rl_lib.networks.factory import Network
 class Agent:
     def __init__(
         self,
+        network: Network,
         observation_dim: int,
         action_dim: int,
         stack_size: int,
@@ -23,13 +24,13 @@ class Agent:
         self._device = device
         self._obs_window: deque[T.Tensor] = deque(maxlen=stack_size)
         self._done_window: deque[T.Tensor] = deque(maxlen=stack_size)
-        self._network = Network(
-            observation_dim,
-            action_dim,
-            stack_size
-        ).to(self._device)
+        self._network = network
         self._clamp_min = T.Tensor([-1., 0., 0.]).to(self._device)
         self._clamp_max = T.Tensor([1., 1., 1.]).to(self._device)
+
+    @property
+    def device(self) -> T.device:
+        return self._device
 
     def _preprocess_observation(self, observation: T.Tensor) -> T.Tensor:
         """Input shape (batch, height, width, channel)"""
@@ -115,14 +116,25 @@ class Agent:
     def train(self) -> None:
         self._network.train()
 
-    def network_parameters(self) -> Iterator[Parameter]:
-        return self._network.parameters()
+    # def network_parameters(self) -> Iterator[Parameter]:
+    #     return self._network.parameters()
+    def network_parameters(self) -> dict:
+        trunk_params = list(self._network.cnn.parameters()) + list(self._network.sequence_encoder.parameters())
+        head_params = list(self._network.actor.parameters()) + list(self._network.critic.parameters())
+        return [
+            {"params": trunk_params, "lr": 1e-4},
+            {"params": head_params, "lr": 3e-4},
+        ]
 
-    def clip_grad_norm(self, max_norm: float) -> None:
-        nn.utils.clip_grad_norm_(self._network.parameters(), max_norm)
+    def clip_grad_norm(self, max_norm: float) -> T.Tensor:
+        return nn.utils.clip_grad_norm_(self._network.parameters(), max_norm)
 
     def save_state_dict(self, path: str) -> None:
         self._network.save_state_dict(path)
 
     def load_state_dict(self, path: str) -> None:
         self._network.load_state_dict(path)
+
+    def reset(self):
+        self._obs_window.clear()
+        self._done_window.clear()
