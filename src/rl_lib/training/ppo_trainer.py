@@ -195,10 +195,10 @@ class PPOTrainer:
             "rollout/advantages": batch["advantages"].mean().item(),
             "rollout/critic_values": batch["critic_value"].mean().item(),
         }
-        action_means = batch["action"].mean(-1)
+        action_means = batch["action"].mean((0, 1))
         for i, mean in enumerate(action_means):
             metrics[f"rollout/action_mean_{i}"] = mean.item()
-        action_stds = batch["action"].std(-1, unbiased=True)
+        action_stds = batch["action"].std((0, 1), unbiased=True)
         for i, std in enumerate(action_stds):
             metrics[f"rollout/action_std_{i}"] = std.item()
         return metrics
