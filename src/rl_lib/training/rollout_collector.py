@@ -36,29 +36,33 @@ class RolloutCollector:
 
     def run(self, training_steps: int):
         state, _ = self.env.reset()
+        done = T.zeros(self.env.num_envs, dtype=T.bool).to(self.trainer.device)
         self.buffer.reset()
         self._on_rollout_start()
 
         for i in tqdm(range(training_steps)):
             state = T.from_numpy(state).to(self.trainer.device)
-            action, log_probs, critic_value = self.trainer.act(state)
+            action, log_probs, critic_value = self.trainer.act(state, done)
             next_state, reward, terminated, truncated, info = self.env.step(action.cpu().numpy())
 
+            terminated = T.from_numpy(terminated)
+            truncated = T.from_numpy(truncated)
+            done = T.logical_or(terminated, truncated)
             self.buffer.add(RolloutStep(
                 observation=state,
                 action=action,
                 critic_value=critic_value,
                 old_log_probs=log_probs,
-                reward=T.from_numpy(reward),
-                terminated=T.from_numpy(terminated),
-                truncated=T.from_numpy(truncated),
+                reward=T.from_numpy(reward).to(T.float32),
+                terminated=terminated,
+                truncated=truncated,
             ))
 
             state = next_state
             self._on_env_step(step=i, info=info)
 
             if self.buffer.is_full():
-                self.trainer.train(self.buffer.get(), epochs=self.epochs, minibatch_size=self.minibatch_size)
-                self.buffer.reset()
+                self.trainer.train(self.buffer.get(), epochs=self.epochs, minibatch_size=self.minibatch_size, training_step=i)
+                self.buffer.reset_counter()
 
         self._on_rollout_end()

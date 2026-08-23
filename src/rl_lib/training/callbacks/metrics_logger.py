@@ -31,8 +31,9 @@ class MetricsLoggingCallback(TrainingCallback):
             self._logger.log_metrics(aggregated, step=self._step)
             self._epoch_buffer.clear()
 
-    def on_end(self, step: int, metrics: dict[str, float], *args, **kwargs):
-        self._logger.log_metrics(metrics, step=step)
+    def on_end(self, step: int, metrics: dict[str, float] | None, *args, **kwargs):
+        if metrics:
+            self._logger.log_metrics(metrics, step=step)
 
         if self.granularity == "batch" and self._epoch_buffer:
             keys = self._epoch_buffer[0].keys()
