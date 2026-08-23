@@ -1071,3 +1071,19 @@
 2026-08-18 22:07:18 | DEBUG    | src.rl_lib.tracking.console_logger | Step 305094: {'episode/returns': '785.813149', 'episode/lengths': '1000.000000'}
 2026-08-18 22:07:18 | DEBUG    | src.rl_lib.tracking.console_logger | Step 305107: {'episode/returns': '515.156227', 'episode/lengths': '1000.000000'}
 2026-08-18 22:07:20 | DEBUG    | src.rl_lib.tracking.console_logger | Step 28416: {'rollout/value_target_mean': '72.548576', 'rollout/value_target_std': '22.667765', 'rollout/value_pred_mean': '58.271938', 'rollout/explained_variance': '0.406202', 'rollout/action_mean_0': '0.006322', 'rollout/action_mean_1': '0.739666', 'rollout/action_mean_2': '0.107600', 'rollout/action_std_0': '0.689952', 'rollout/action_std_1': '0.263099', 'rollout/action_std_2': '0.128256'}
+2026-08-20 17:58:19 | DEBUG    | src.rl_lib.training.callbacks.checkpoints_save | CheckpointsSaveCallback created with intervals=200
+2026-08-20 17:59:44 | DEBUG    | src.rl_lib.training.callbacks.checkpoints_save | CheckpointsSaveCallback created with intervals=200
+2026-08-20 18:00:00 | DEBUG    | src.rl_lib.training.callbacks.checkpoints_save | CheckpointsSaveCallback created with intervals=200
+2026-08-20 18:00:09 | DEBUG    | src.rl_lib.training.callbacks.checkpoints_save | CheckpointsSaveCallback created with intervals=200
+2026-08-20 18:00:38 | DEBUG    | src.rl_lib.training.callbacks.checkpoints_save | CheckpointsSaveCallback created with intervals=200
+2026-08-20 18:02:07 | DEBUG    | src.rl_lib.training.callbacks.checkpoints_save | CheckpointsSaveCallback created with intervals=200
+2026-08-20 18:24:38 | DEBUG    | src.rl_lib.training.callbacks.checkpoints_save | CheckpointsSaveCallback created with intervals=200
+2026-08-20 18:24:52 | DEBUG    | src.rl_lib.training.callbacks.checkpoints_save | CheckpointsSaveCallback created with intervals=200
+2026-08-20 18:25:12 | DEBUG    | src.rl_lib.training.callbacks.checkpoints_save | CheckpointsSaveCallback created with intervals=200
+2026-08-20 18:28:34 | DEBUG    | src.rl_lib.training.callbacks.checkpoints_save | CheckpointsSaveCallback created with intervals=200
+2026-08-20 18:30:32 | DEBUG    | src.rl_lib.training.callbacks.checkpoints_save | CheckpointsSaveCallback created with intervals=200
+2026-08-20 18:31:35 | DEBUG    | src.rl_lib.training.callbacks.checkpoints_save | CheckpointsSaveCallback created with intervals=200
+2026-08-20 18:32:59 | DEBUG    | src.rl_lib.training.callbacks.checkpoints_save | CheckpointsSaveCallback created with intervals=200
+2026-08-20 18:33:35 | DEBUG    | src.rl_lib.training.callbacks.checkpoints_save | CheckpointsSaveCallback created with intervals=200
+2026-08-20 18:37:02 | DEBUG    | src.rl_lib.training.callbacks.checkpoints_save | CheckpointsSaveCallback created with intervals=200
+2026-08-20 18:39:43 | DEBUG    | src.rl_lib.training.callbacks.checkpoints_save | CheckpointsSaveCallback created with intervals=200

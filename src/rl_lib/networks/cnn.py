@@ -1,7 +1,7 @@
 import torch as T
 from torch import nn
 
-from src.rl_lib.networks.utils import init_layer
+from rl_lib.networks.utils import init_layer
 
 
 class CNN(nn.Module):
@@ -18,6 +18,7 @@ class CNN(nn.Module):
             init_layer(nn.Linear(4096, 256)),
             nn.ReLU(),
             init_layer(nn.Linear(256, 256)),
+            # nn.LayerNorm(256),
         )
 
     def forward(self, x: T.Tensor) -> T.Tensor:

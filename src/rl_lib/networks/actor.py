@@ -7,16 +7,16 @@ from torch.distributions.transforms import (
     TanhTransform,
 )
 
-from src.rl_lib.networks.utils import init_layer
+from rl_lib.networks.utils import init_layer
 
 
 class Actor(nn.Module):
-    def __init__(self, action_dim: int):
+    def __init__(self, action_dim: int, input_dim: int = 256, hidden_dim: int = 256):
         super().__init__()
         self._network = nn.Sequential(
-            init_layer(nn.Linear(256, 256)),
+            init_layer(nn.Linear(input_dim, hidden_dim)),
             nn.ReLU(),
-            init_layer(nn.Linear(256, action_dim), gain=0.01),  # near-uniform initial policy
+            init_layer(nn.Linear(hidden_dim, action_dim), gain=0.01),  # near-uniform initial policy
         )
         self._log_std = nn.Parameter(T.full((action_dim,), -0.5))
 
@@ -41,13 +41,7 @@ class Actor(nn.Module):
             )
         )
 
-
-if __name__ == "__main__":
-    actor = Actor(3)
-    test = T.randn(10, 512)
-    dist = actor(test)
-    action = dist.sample()
-    print(action.shape)
-    print(dist.log_prob(action).shape)
-    print(dist.base_dist.entropy().shape)
-    print(actor)
+    def act_deterministic(self, x: T.Tensor) -> T.Tensor:
+        mean = self._network(x)
+        action = TanhTransform()(mean)
+        return self._affine_loc + self._affine_scale * action

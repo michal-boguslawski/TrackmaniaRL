@@ -14,11 +14,11 @@ from src.rl_lib.training.callbacks.checkpoints_save import CheckpointsSaveCallba
 from src.rl_lib.agent import Agent
 
 
-BATCH_SIZE = 2048
-NUM_ENVS = 8
+BATCH_SIZE = 32
+NUM_ENVS = 1
 STACK_SIZE = 4
 SKIP = 2
-MINIBATCH_SIZE = 512
+MINIBATCH_SIZE = 16
 EPOCHS = 6
 DEVICE = T.device("cuda" if T.cuda.is_available() else "cpu")
 
@@ -35,7 +35,6 @@ def main():
             "record_episode_stats",
             "grayscale",
             "max_and_skip",
-            "frame_stack",
         ]
     )
     
@@ -56,7 +55,7 @@ def main():
     console_metrics_logger = ConsoleMetricsLogger()
     trainer = PPOTrainer(
         agent=agent,
-        entropy_coef=5e-3,
+        entropy_coef=1e-3,
         # entropy_decay=0.95,
         callbacks=[
             CheckpointsSaveCallback("./logs/checkpoints", agent, intervals=200),
@@ -66,7 +65,8 @@ def main():
 
     rng = np.random.default_rng(seed=42)
 
-    training_steps = 1_000_000
+    # training_steps = 1_000_000
+    training_steps = 32
     rollout_collector = RolloutCollector(
         env,
         buffer,
@@ -75,24 +75,23 @@ def main():
         MINIBATCH_SIZE,
         callbacks=[
             RecordStatisticLoggerCallback(console_metrics_logger),
-            RecordVideoCallback(
-                "CarRacing-v3",
-                agent=agent,
-                video_folder="./logs/videos",
-                metrics_logger=console_metrics_logger,
-                skip=SKIP,
-                wrappers=[
-                    "record_episode_stats",
-                    "grayscale",
-                    "max_and_skip",
-                    "frame_stack",
-                ],
-                interval=50_000,
-            )
+            # RecordVideoCallback(
+            #     "CarRacing-v3",
+            #     agent=agent,
+            #     video_folder="./logs/videos",
+            #     metrics_logger=console_metrics_logger,
+            #     skip=SKIP,
+            #     wrappers=[
+            #         "record_episode_stats",
+            #         "grayscale",
+            #         "max_and_skip",
+            #     ],
+            #     interval=50_000,
+            # ),
         ]
     )
 
-    rollout_collector.run(training_steps, rng)
+    rollout_collector.run(training_steps)
 
 
 if __name__ == "__main__":

@@ -34,31 +34,31 @@ class RolloutCollector:
     def _on_rollout_end(self, *args, **kwargs):
         self._callbacks.on_rollout_end(*args, **kwargs)
 
-    def run(self, training_steps: int, rng: np.random.Generator):
+    def run(self, training_steps: int):
         state, _ = self.env.reset()
         self.buffer.reset()
         self._on_rollout_start()
 
         for i in tqdm(range(training_steps)):
-            with T.no_grad():
-                action, log_probs, critic_value = self.trainer._agent.act(state)
-            next_state, reward, terminated, truncated, info = self.env.step(action)
+            state = T.from_numpy(state).to(self.trainer.device)
+            action, log_probs, critic_value = self.trainer.act(state)
+            next_state, reward, terminated, truncated, info = self.env.step(action.cpu().numpy())
 
             self.buffer.add(RolloutStep(
-                observation=state[:, -1, ...],
+                observation=state,
                 action=action,
                 critic_value=critic_value,
                 old_log_probs=log_probs,
-                reward=reward,
-                terminated=terminated,
-                truncated=truncated,
+                reward=T.from_numpy(reward),
+                terminated=T.from_numpy(terminated),
+                truncated=T.from_numpy(truncated),
             ))
 
             state = next_state
             self._on_env_step(step=i, info=info)
 
             if self.buffer.is_full():
-                self.trainer.train(self.buffer, epochs=self.epochs, minibatch_size=self.minibatch_size, rng=rng)
+                self.trainer.train(self.buffer.get(), epochs=self.epochs, minibatch_size=self.minibatch_size)
                 self.buffer.reset()
 
         self._on_rollout_end()
