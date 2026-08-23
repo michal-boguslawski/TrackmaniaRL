@@ -15,7 +15,7 @@ class Network(nn.Module):
         self.sequence_encoder = nn.Conv1d(
             256, 256, kernel_size=stack_size
         )
-        # self.norm = nn.LayerNorm(256)
+        self.norm = nn.LayerNorm(256)
         self.actor = Actor(action_dim)
         self.critic = Critic()
 
@@ -29,6 +29,7 @@ class Network(nn.Module):
         x = self.sequence_encoder(x)
         x = x.permute(0, 2, 1)
         x.squeeze_(1)
+        x = self.norm(x)
         return x
 
     def heads(self, x: T.Tensor) -> tuple[Distribution, T.Tensor]:
