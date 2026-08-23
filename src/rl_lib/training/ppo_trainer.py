@@ -1,3 +1,4 @@
+from math import ceil
 import numpy as np
 from numpy.typing import NDArray
 from logging import getLogger
@@ -7,11 +8,12 @@ from torch.optim import Adam
 from torch.distributions import Distribution
 from torch.optim.lr_scheduler import LinearLR
 from torch.nn.modules.loss import _Loss
+from typing import Iterator
 
-from src.rl_lib.agent import Agent
-from src.rl_lib.buffers.rollout_buffer import RolloutBuffer
-from src.rl_lib.buffers.utils import to_tensor_batch
-from src.rl_lib.training.callbacks.base import TrainingCallback, CallbackList
+from rl_lib.agent import Agent
+from rl_lib.buffers.rollout_buffer import RolloutBuffer
+from rl_lib.buffers.utils import to_tensor_batch
+from rl_lib.training.callbacks.base import TrainingCallback, CallbackList
 
 
 logger = getLogger(__name__)
@@ -52,16 +54,22 @@ class PPOTrainer:
     def device(self) -> T.device:
         return self._agent._device
 
-    def act(self, observation: T.Tensor) -> tuple[T.Tensor, T.Tensor, T.Tensor]:
-        action, log_probs, critic_value = self._agent.act(observation)
+    def act(self, observation: T.Tensor, done: T.Tensor) -> tuple[T.Tensor, T.Tensor, T.Tensor]:
+        action, log_probs, critic_value = self._agent.act(observation, done)
         return action, log_probs, critic_value
 
     def train_step(
         self,
         observation: T.Tensor,
+        action: T.Tensor,
+        old_log_probs: T.Tensor,
+        old_values: T.Tensor,
+        returns: T.Tensor,
+        advantages: T.Tensor,
+        dones: T.Tensor,
     ) -> dict[str, float]:
 
-        (actor_loss, critic_loss, entropy_loss), loss_metrics = self.calculate_losses(advantages, returns, old_log_probs, old_values, observation, action)
+        (actor_loss, critic_loss, entropy_loss), loss_metrics = self.calculate_losses(advantages, returns, old_log_probs, old_values, observation, action, dones)
         loss = actor_loss + self.critic_beta * critic_loss - self.entropy_coef * entropy_loss
 
         self._optimizer.zero_grad()
@@ -138,13 +146,10 @@ class PPOTrainer:
         old_log_probs: T.Tensor,
         old_values: T.Tensor,
         observation: T.Tensor,
-        action: T.Tensor
+        action: T.Tensor,
+        dones: T.Tensor | None = None
     ) -> tuple[tuple[T.Tensor, T.Tensor, T.Tensor], dict[str, float]]:
-        extracted_features = self._agent._feature_extract(observation)
-        windowed_features = self._agent.temporal_encode(extracted_features.unfold(0, self.stack_size, 1))
-        action_dist, values = self._agent.heads(windowed_features)
-
-        log_probs, values, dist = self._agent.evaluate_actions(observation, action)
+        log_probs, values, dist = self._agent.evaluate_actions(observation, action, dones)
         actor_loss, actor_metrics = self._actor_loss(advantages, log_probs, old_log_probs)
         critic_loss, critic_metrics = self._critic_loss(returns, values, old_values)
         entropy_loss, entropy_metrics = self._entropy_loss(dist)
@@ -164,31 +169,62 @@ class PPOTrainer:
         self._callbacks.on_epoch(*args, **kwargs)
 
     @staticmethod
-    def _get_iid_minibatches(batch: dict[str, T.Tensor], minibatch_size: int, stack_size: int) -> dict[str, T.Tensor]:
-        for key, value in batch.items():
-            print(key, value.shape)
-            # if key != "observation":
-            #     print(value)
+    def _get_iid_minibatches(batch: dict[str, T.Tensor], minibatch_size: int, stack_size: int) -> Iterator[dict[str, T.Tensor]]:
+        """Iterate over IID minibatches from a batch of sequences."""
+
+        num_envs, batch_size, _ = batch["action"].shape
+        indices = np.random.permutation(ceil(batch_size * num_envs / minibatch_size))
+        for index in indices:
+            i, k = index % num_envs, index // num_envs
+            k_start = k * minibatch_size
+            k_end = (k + 1) * minibatch_size
+            yield {
+                "observation": batch["observation"][i, k_start:(k_end+stack_size-1)],
+                "action": batch["action"][i, k_start:k_end],
+                "old_log_probs": batch["old_log_probs"][i, k_start:k_end],
+                "old_values": batch["critic_value"][i, k_start:k_end],
+                "returns": batch["returns"][i, k_start:k_end],
+                "advantages": batch["advantages"][i, k_start:k_end],
+                "dones": batch["dones"][i, k_start:(k_end+stack_size-1)],
+            }
+
+    @staticmethod
+    def _get_metrics_from_batch(batch: T.Tensor):
+        metrics = {
+            "rollout/returns": batch["returns"].mean().item(),
+            "rollout/advantages": batch["advantages"].mean().item(),
+            "rollout/critic_values": batch["critic_value"].mean().item(),
+        }
+        action_means = batch["action"].mean(-1)
+        for i, mean in enumerate(action_means):
+            metrics[f"rollout/action_mean_{i}"] = mean.item()
+        action_stds = batch["action"].std(-1, unbiased=True)
+        for i, std in enumerate(action_stds):
+            metrics[f"rollout/action_std_{i}"] = std.item()
+        return metrics
 
     def train(
         self,
         batch: dict[str, T.Tensor],
         epochs: int,
         minibatch_size: int,
+        training_step: int,
         # rng: np.random.Generator,
     ):
 
-        # self._on_start(step=self._step, metrics=buffer.get_metrics(self.stack_size))
-        self._get_iid_minibatches(batch, minibatch_size, self.stack_size)
-        # for epoch in range(epochs):
-            # for minibatch in self._get_iid_minibatches(batch, minibatch_size, self.stack_size):
-                # metrics = self.train_step(**minibatch)
-            #     self._on_minibatch(metrics=metrics, step=self._step)
-            # self._on_epoch()
+        self._on_start(
+            step=training_step,
+            metrics=self._get_metrics_from_batch(batch)
+        )
+        for epoch in range(epochs):
+            for minibatch in self._get_iid_minibatches(batch, minibatch_size, self.stack_size):
+                minibatch_metrics = self.train_step(**minibatch)
+                self._on_minibatch(metrics=minibatch_metrics, step=self._step)
+            self._on_epoch()
 
         # self.entropy_coef = max(self.entropy_coef - 1e-5, 1e-5)
         # metrics = {
         #     "training/entropy_coef": self.entropy_coef,
         #     "training/lr": self._optimizer.param_groups[0]["lr"]
         # }
-        # self._on_end(metrics=metrics, step=self._step)
+        self._on_end(metrics=None, step=training_step)

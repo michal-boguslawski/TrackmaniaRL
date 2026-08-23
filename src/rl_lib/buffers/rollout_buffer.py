@@ -1,6 +1,8 @@
 from collections import deque
 from dataclasses import dataclass
+import numpy as np
 import torch as T
+from math import ceil
 
 
 @dataclass(slots=True, frozen=True)
@@ -100,13 +102,13 @@ class RolloutBuffer:
         )
 
         flat = {
-            "observation": buffer["observation"][:, :-1],  # (batch, length + stack_size - 1, *obs_shape)
+            "observation": buffer["observation"][:, :-1],  # (batch, length + stack_size - 2, *obs_shape)
             "action": buffer["action"][:, :-1],  # (batch, length-1, *action_shape)
             "old_log_probs": buffer["old_log_probs"][:, :-1],  # (batch, length-1)
             "critic_value": buffer["critic_value"][:, :-1],  # (batch, length-1)
             "returns": returns,  # (batch, length - 1)
             "advantages": advantages,  # (batch, length - 1)
-            "dones": dones[:, :-1],  # (batch, length + stack_size - 1)
+            "dones": dones[:, :-1],  # (batch, length + stack_size - 2)
         }
         return flat
 
@@ -128,8 +130,8 @@ class RolloutBuffer:
 
 
 if __name__ == "__main__":
-    buffer = RolloutBuffer(4, 4)
-    for i in range(1, 10):
+    buffer = RolloutBuffer(32, 4)
+    for i in range(1, 37):
         step = RolloutStep(
             T.tensor([[i],[i+1]]).to(T.float32),
             T.tensor([i, i+1]).to(T.float32),
@@ -140,9 +142,19 @@ if __name__ == "__main__":
             T.tensor([False, False]),
         )
         buffer.add(step)
-    print({key: value.shape for key, value in buffer.get().items()})
-    obs = buffer.get()["observation"]
-    print(obs.unfold(1, 4, 1).shape)
+    batch = buffer.get()
+    print({key: value.shape for key, value in batch.items()})
+    actions = batch["action"]
+    num_envs, batch_size = actions.shape
+    indices = np.random.permutation(ceil(batch_size * num_envs / 8))
+    print(indices * 8)
+    for ind in indices:
+        i, k = ind % num_envs, ind // num_envs
+        print(i, k)
+    print(indices[0])
+    # print(
+    #     batch["observation"][i, k:(k+32)]
+    # )
     # print(buffer.is_full())
     # buffer.reset()
     # print(buffer._buffer)

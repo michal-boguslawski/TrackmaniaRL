@@ -14,12 +14,12 @@ from src.rl_lib.training.callbacks.checkpoints_save import CheckpointsSaveCallba
 from src.rl_lib.agent import Agent
 
 
-BATCH_SIZE = 32
-NUM_ENVS = 1
+BATCH_SIZE = 256
+NUM_ENVS = 2
 STACK_SIZE = 4
 SKIP = 2
-MINIBATCH_SIZE = 16
-EPOCHS = 6
+MINIBATCH_SIZE = 128
+EPOCHS = 4
 DEVICE = T.device("cuda" if T.cuda.is_available() else "cpu")
 
 setup_logging()
@@ -40,9 +40,10 @@ def main():
     
     buffer = RolloutBuffer(
         size=BATCH_SIZE,
-        num_envs=NUM_ENVS,
-        observation_space=env.observation_space.shape[-3:],
-        action_space=env.action_space.shape[-1:]
+        stack_size=STACK_SIZE,
+        # num_envs=NUM_ENVS,
+        # observation_space=env.observation_space.shape[-3:],
+        # action_space=env.action_space.shape[-1:]
     )
     
     agent = Agent(
@@ -65,8 +66,8 @@ def main():
 
     rng = np.random.default_rng(seed=42)
 
-    # training_steps = 1_000_000
-    training_steps = 32
+    training_steps = 1_000_000
+    # training_steps = 64
     rollout_collector = RolloutCollector(
         env,
         buffer,

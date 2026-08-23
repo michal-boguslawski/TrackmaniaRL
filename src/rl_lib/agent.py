@@ -57,9 +57,12 @@ class Agent:
         mask = stacked_done_window.logical_not() & (stacked_done_window.flip(1).cumsum(dim=1).flip(1) > 0)
         return mask
 
-    def temporal_encode(self, x: T.Tensor, mask: T.Tensor):
+    def temporal_encode(self, x: T.Tensor, mask: T.Tensor | None = None):
         """input shape (batch, stack_size, feature_dim)"""
-        masked_x = x.masked_fill(mask.unsqueeze(-1), 0.)
+        if mask is None:
+            masked_x = x
+        else:
+            masked_x = x.masked_fill(mask.unsqueeze(-1), 0.)
         return self._network.temporal_encode(masked_x).squeeze(1)
 
     def heads(self, temporal: T.Tensor) -> tuple[Distribution, T.Tensor]:
@@ -90,18 +93,17 @@ class Agent:
             value
         )
 
-    # def evaluate_actions(
-    #     self, observation: NDArray[np.uint8] | T.Tensor, action: NDArray[np.float32] | T.Tensor
-    # ) -> tuple[T.Tensor, T.Tensor, Distribution]:
-    #     obs = self._preprocess_observation(observation)
-    #     result: tuple[Distribution, T.Tensor] = self._network(obs)
-    #     action_dist, value = result
+    def evaluate_actions(
+        self, observation: T.Tensor | T.Tensor, action: T.Tensor, dones: T.Tensor | None = None
+    ) -> tuple[T.Tensor, T.Tensor, Distribution]:
+        extracted_features = self.feature_extract(observation)
+        windowed_features = extracted_features.unfold(0, self._stack_size, 1).permute(0, 2, 1)
+        temporal_encoding = self.temporal_encode(windowed_features, None)
+        action_dist, values = self.heads(temporal_encoding)
 
-    #     action_tensor = T.from_numpy(action) if isinstance(action, np.ndarray) else action
-    #     action_tensor = action_tensor.to(self._device)
-    #     action_tensor = T.clamp(action_tensor, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
-    #     log_probs = action_dist.log_prob(action_tensor).sum(dim=-1)
-    #     return log_probs, value, action_dist
+        # action_tensor = T.clamp(action_tensor, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
+        log_probs = action_dist.log_prob(action).sum(dim=-1)
+        return log_probs, values, action_dist
 
     @property
     def stack_size(self) -> int:
