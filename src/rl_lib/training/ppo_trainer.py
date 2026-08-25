@@ -8,7 +8,7 @@ from torch.optim import Adam
 from torch.distributions import Distribution
 from torch.optim.lr_scheduler import LinearLR
 from torch.nn.modules.loss import _Loss
-from typing import Iterator
+from typing import Iterator, Literal
 
 from rl_lib.agent import Agent
 from rl_lib.buffers.rollout_buffer import RolloutBuffer
@@ -26,6 +26,7 @@ class PPOTrainer:
         ppo_epsilon: float = 0.2,
         critic_beta: float = 0.5,
         entropy_coef: float = 0.001,
+        advantage_normalization_strategy: Literal["batch", "global"] | None = None,
         # entropy_decay: float = 0.995,
         callbacks: list[TrainingCallback] | None = None,
     ):
@@ -39,16 +40,17 @@ class PPOTrainer:
             self._optimizer,
             start_factor=1,
             end_factor=0.01,
-            total_iters=100_000
+            total_iters=200_000
         )
         self.ppo_epsilon = ppo_epsilon
         self.critic_beta = critic_beta
         self.entropy_coef = entropy_coef
+        self.advantage_normalization_strategy = advantage_normalization_strategy
         # self.entropy_decay = entropy_decay
         self._critic_loss_fn = nn.HuberLoss(reduction="none")
         self._callbacks = CallbackList(callbacks)
         self._step = 0
-        self.target_kl = 0.025
+        self.target_kl = 0.1
         self._agent.train()
 
     @property
@@ -95,7 +97,8 @@ class PPOTrainer:
         return {**loss_metrics, **metrics}
 
     def _actor_loss(self, advantages: T.Tensor, log_probs: T.Tensor, old_log_probs: T.Tensor) -> tuple[T.Tensor, dict[str, float]]:
-        normalized_advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        if self.advantage_normalization_strategy and self.advantage_normalization_strategy == "batch":
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         log_ratio = log_probs - old_log_probs
 
@@ -107,8 +110,8 @@ class PPOTrainer:
         )
 
         surrogate_loss = -T.minimum(
-            ratio * normalized_advantages,
-            clipped_ratio * normalized_advantages
+            ratio * advantages,
+            clipped_ratio * advantages
         )
         actor_loss = surrogate_loss.mean()
 
@@ -131,12 +134,9 @@ class PPOTrainer:
         loss_clipped = self._critic_loss_fn(clipped_values, returns)
         
         critic_loss = T.maximum(loss_unclipped, loss_clipped).mean()
-        
-        with T.no_grad():
-            explained_var = 1 - (returns - values).var() / (returns.var() + 1e-8)
+
         metrics = {
             "loss/critic": critic_loss.detach().item(),
-            "metrics/explained_variance": explained_var.item(),
         }
         return critic_loss, metrics
 
@@ -192,19 +192,25 @@ class PPOTrainer:
         """Iterate over IID minibatches from a batch of sequences."""
 
         num_envs, batch_size, _ = batch["action"].shape
-        indices = np.random.permutation(ceil(batch_size * num_envs / minibatch_size))
-        for index in indices:
-            i, k = index % num_envs, index // num_envs
-            k_start = k * minibatch_size
-            k_end = (k + 1) * minibatch_size
+        indices = np.random.permutation(batch_size * num_envs)
+        for index in range(0, batch_size * num_envs, minibatch_size):
+            subindices = [(ind % num_envs, ind // num_envs) for ind in indices[index:(index+minibatch_size)]]
+            
+            
             yield {
-                "observation": batch["observation"][i, k_start:(k_end+stack_size-1)],
-                "action": batch["action"][i, k_start:k_end],
-                "old_log_probs": batch["old_log_probs"][i, k_start:k_end],
-                "old_values": batch["critic_value"][i, k_start:k_end],
-                "returns": batch["returns"][i, k_start:k_end],
-                "advantages": batch["advantages"][i, k_start:k_end],
-                "dones": batch["dones"][i, k_start:(k_end+stack_size-1)],
+                "observation": T.cat(
+                    [batch["observation"][i, k:(k+stack_size)] for i, k in subindices],
+                    dim=0,
+                ),
+                "action": T.stack([batch["action"][i, k] for i, k in subindices], dim=0),
+                "old_log_probs": T.stack([batch["old_log_probs"][i, k] for i, k in subindices], dim=0),
+                "old_values": T.stack([batch["critic_value"][i, k] for i, k in subindices], dim=0),
+                "returns": T.stack([batch["returns"][i, k] for i, k in subindices], dim=0),
+                "advantages": T.stack([batch["advantages"][i, k] for i, k in subindices], dim=0),
+                "dones": T.cat(
+                    [batch["dones"][i, k:(k+stack_size)] for i, k in subindices],
+                    dim=0,
+                ),
             }
 
     @staticmethod
@@ -221,6 +227,9 @@ class PPOTrainer:
         action_stds = batch["action"].std((0, 1), unbiased=True)
         for i, std in enumerate(action_stds):
             metrics[f"rollout/action_std_{i}"] = std.item()
+
+        explained_variance = 1 - (batch["returns"] - batch["critic_value"]).var() / (batch["returns"].var() + 1e-8)
+        metrics["rollout/explained_variance"] = explained_variance
         return metrics
 
     def train(
@@ -236,10 +245,18 @@ class PPOTrainer:
             step=training_step,
             metrics=self._get_metrics_from_batch(batch)
         )
+
+        if self.advantage_normalization_strategy and self.advantage_normalization_strategy == "global":
+            batch["advantages"] = (batch["advantages"] - batch["advantages"].mean()) / (batch["advantages"].std() + 1e-6)
+
         for epoch in range(epochs):
             epoch_kls = []
             for minibatch in self._get_iid_minibatches(batch, minibatch_size, self.stack_size):
-                minibatch_metrics = self.train_step(**minibatch)
+                try:
+                    minibatch_metrics = self.train_step(**minibatch)
+                except Exception as e:
+                    logger.error(f"Error at training step {training_step}, epoch {epoch}: {e}")
+                    raise e
                 epoch_kls.append(minibatch_metrics["metrics/approx_kl"])
                 self._on_minibatch(metrics=minibatch_metrics, step=self._step)
             mean_epoch_kl = float(np.mean(epoch_kls))
@@ -248,7 +265,7 @@ class PPOTrainer:
                 logger.warning(f"Early stop epoch {epoch}: KL {mean_epoch_kl:.4f} > {self.target_kl}")
                 break
 
-        # self.entropy_coef = max(self.entropy_coef - 1e-5, 1e-5)
+        self.entropy_coef = max(self.entropy_coef - 1e-5, 1e-5)
         metrics = {
             "training/entropy_coef": self.entropy_coef,
             # "training/lr": self._optimizer.param_groups[0]["lr"]

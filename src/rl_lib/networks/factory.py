@@ -32,9 +32,9 @@ class Network(nn.Module):
         x = self.norm(x)
         return x
 
-    def heads(self, x: T.Tensor) -> tuple[Distribution, T.Tensor]:
+    def heads(self, x: T.Tensor, temperature: float) -> tuple[Distribution, T.Tensor]:
         """Expects input of shape (batch, feature)"""
-        action_dist = self.actor(x)
+        action_dist = self.actor(x, temperature)
         value = self.critic(x)
 
         return action_dist, value

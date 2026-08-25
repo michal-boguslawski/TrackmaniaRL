@@ -71,18 +71,18 @@ def main():
     console_metrics_logger = ConsoleMetricsLogger()
     trainer = PPOTrainer(
         agent=agent,
-        entropy_coef=1e-2,
+        entropy_coef=5e-3,
         # entropy_decay=0.95,
+        advantage_normalization_strategy="batch",
         callbacks=[
             CheckpointsSaveCallback("./logs/checkpoints", agent, intervals=200),
-            MetricsLoggingCallback(console_metrics_logger, granularity="batch"),
+            MetricsLoggingCallback(console_metrics_logger, granularity="global"),
         ]
     )
 
     rng = np.random.default_rng(seed=42)
 
     training_steps = 3_000_000
-    # training_steps = 64
     rollout_collector = RolloutCollector(
         env,
         buffer,

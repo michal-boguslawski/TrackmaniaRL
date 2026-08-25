@@ -66,8 +66,8 @@ class Agent:
             masked_x = x.masked_fill(mask.unsqueeze(-1), 0.)
         return self._network.temporal_encode(masked_x).squeeze(1)
 
-    def heads(self, temporal: T.Tensor) -> tuple[Distribution, T.Tensor]:
-        return self._network.heads(temporal)
+    def heads(self, temporal: T.Tensor, temperature: float = 1.) -> tuple[Distribution, T.Tensor]:
+        return self._network.heads(temporal, temperature)
 
     def act(
         self,
@@ -84,10 +84,12 @@ class Agent:
                 self._get_mask_window(done)
             )
 
-            action_dist, value = self.heads(temporal)
+            action_dist, value = self.heads(temporal, temperature)
 
             action = action_dist.sample()
-            log_probs = action_dist.log_prob(action).sum(dim=-1)
+            action_tensor = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
+            log_probs = action_dist.log_prob(action_tensor).sum(dim=-1)
+
         return (
             action,
             log_probs,
@@ -98,12 +100,12 @@ class Agent:
         self, observation: T.Tensor | T.Tensor, action: T.Tensor, dones: T.Tensor | None = None
     ) -> tuple[T.Tensor, T.Tensor, Distribution]:
         extracted_features = self.feature_extract(observation)
-        windowed_features = extracted_features.unfold(0, self._stack_size, 1).permute(0, 2, 1)
+        windowed_features = extracted_features.unfold(0, self._stack_size, self._stack_size).permute(0, 2, 1)
         temporal_encoding = self.temporal_encode(windowed_features, None)
         action_dist, values = self.heads(temporal_encoding)
 
-        # action_tensor = T.clamp(action_tensor, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
-        log_probs = action_dist.log_prob(action).sum(dim=-1)
+        action_tensor = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
+        log_probs = action_dist.log_prob(action_tensor).sum(dim=-1)
         return log_probs, values, action_dist
 
     @property
@@ -122,8 +124,8 @@ class Agent:
         trunk_params = list(self._network.cnn.parameters()) + list(self._network.sequence_encoder.parameters())
         head_params = list(self._network.actor.parameters()) + list(self._network.critic.parameters())
         return [
-            {"params": trunk_params, "lr": 1e-4},
-            {"params": head_params, "lr": 3e-4},
+            {"params": trunk_params, "lr": 3e-4},
+            {"params": head_params, "lr": 1e-4},
         ]
 
     def clip_grad_norm(self, max_norm: float) -> T.Tensor:
