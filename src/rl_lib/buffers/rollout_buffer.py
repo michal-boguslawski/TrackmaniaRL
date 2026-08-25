@@ -87,7 +87,7 @@ class RolloutBuffer:
         returns = advantages + critic_value[:, :1]
         return returns, advantages
 
-    def get(self, gamma: float = 0.99, gae_lambda: float = 0.95) -> dict[str, T.Tensor]:
+    def get(self, gamma: float = 0.99, gae_lambda: float = 0.97) -> dict[str, T.Tensor]:
         buffer = {key: T.stack(list(value), dim=1) for key, value in self._buffer.items()}
         returns, advantages = self.compute_returns_and_advantages(
             buffer["reward"][:, :-1],
