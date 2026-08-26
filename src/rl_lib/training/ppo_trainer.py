@@ -247,7 +247,7 @@ class PPOTrainer:
         )
 
         if self.advantage_normalization_strategy and self.advantage_normalization_strategy == "global":
-            batch["advantages"] = (batch["advantages"] - batch["advantages"].mean()) / (batch["advantages"].std() + 1e-6)
+            batch["advantages"] = (batch["advantages"] - batch["advantages"].mean()) / (batch["advantages"].std() + 1e-4)
 
         for epoch in range(epochs):
             epoch_kls = []

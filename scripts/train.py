@@ -82,7 +82,7 @@ def main():
 
     rng = np.random.default_rng(seed=42)
 
-    training_steps = 3_000_000
+    training_steps = 1_000_000
     rollout_collector = RolloutCollector(
         env,
         buffer,
