@@ -68,6 +68,7 @@ class RolloutBuffer:
         reward: T.Tensor,
         critic_value: T.Tensor,
         terminated: T.Tensor,
+        truncated: T.Tensor,
         gamma: float,
         gae_lambda: float,
     ) -> tuple[T.Tensor, T.Tensor]:
@@ -79,12 +80,12 @@ class RolloutBuffer:
         
         delta = reward + gamma * critic_value[:, 1:] * T.logical_not(terminated) - critic_value[:, :-1]
         advantages = T.zeros_like(reward)
-        returns = T.zeros_like(reward)
         last_gae_lam = 0.
-        for i in reversed(range(1, reward.shape[1])):
-            last_gae_lam = delta[:, i] + gamma * gae_lambda * last_gae_lam * T.logical_not(terminated[:, i])
+        dones = T.logical_or(terminated, truncated)
+        for i in reversed(range(reward.shape[1])):
+            last_gae_lam = delta[:, i] + gamma * gae_lambda * last_gae_lam * T.logical_not(dones[:, i])
             advantages[:, i] = last_gae_lam
-        returns = advantages + critic_value[:, :1]
+        returns = advantages + critic_value[:, :-1]
         return returns, advantages
 
     def get(self, gamma: float = 0.99, gae_lambda: float = 0.97) -> dict[str, T.Tensor]:
@@ -93,6 +94,7 @@ class RolloutBuffer:
             buffer["reward"][:, :-1],
             buffer["critic_value"],
             buffer["terminated"][:, (self._stack_size-1):-1],
+            buffer["truncated"][:, (self._stack_size-1):-1],
             gamma,
             gae_lambda,
         )
