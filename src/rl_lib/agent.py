@@ -81,7 +81,7 @@ class Agent:
 
             temporal = self.temporal_encode(
                 self._get_features_window(features),
-                self._get_mask_window(done)
+                # self._get_mask_window(done),
             )
 
             action_dist, value = self.heads(temporal, temperature)
@@ -124,11 +124,12 @@ class Agent:
         trunk_params = list(self._network.cnn.parameters()) + list(self._network.sequence_encoder.parameters())
         head_params = list(self._network.actor.parameters()) + list(self._network.critic.parameters())
         return [
-            {"params": trunk_params, "lr": 3e-4},
-            {"params": head_params, "lr": 1e-4},
+            {"params": trunk_params, "lr": 1e-4},
+            {"params": head_params, "lr": 3e-4},
         ]
 
     def clip_grad_norm(self, max_norm: float) -> T.Tensor:
+        # add per group grad norm
         return nn.utils.clip_grad_norm_(self._network.parameters(), max_norm)
 
     def save_state_dict(self, path: str) -> None:

@@ -73,10 +73,10 @@ def main():
         agent=agent,
         entropy_coef=5e-3,
         # entropy_decay=0.95,
-        advantage_normalization_strategy="batch",
+        advantage_normalization_strategy="global",
         callbacks=[
             CheckpointsSaveCallback("./logs/checkpoints", agent, intervals=200),
-            MetricsLoggingCallback(console_metrics_logger, granularity="global"),
+            MetricsLoggingCallback(console_metrics_logger, granularity="batch"),
         ]
     )
 
