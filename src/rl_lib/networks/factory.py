@@ -5,6 +5,7 @@ from torch.distributions import Distribution
 from rl_lib.networks.actor import Actor
 from rl_lib.networks.critic import Critic
 from rl_lib.networks.cnn import CNN
+from rl_lib.networks.temporal import TemporalCNN1D
 
 
 class Network(nn.Module):
@@ -12,9 +13,7 @@ class Network(nn.Module):
         super().__init__()
 
         self.cnn = CNN(observation_dim)
-        self.sequence_encoder = nn.Conv1d(
-            256, 256, kernel_size=stack_size
-        )
+        self.sequence_encoder = TemporalCNN1D(stack_size)
         self.norm = nn.LayerNorm(256)
         self.actor = Actor(action_dim)
         self.critic = Critic()
@@ -25,12 +24,7 @@ class Network(nn.Module):
 
     def temporal_encode(self, x: T.Tensor) -> T.Tensor:
         """Expects input of shape (batch, seq, feature)"""
-        x = x.permute(0, 2, 1)
-        x = self.sequence_encoder(x)
-        x = x.permute(0, 2, 1)
-        x.squeeze_(1)
-        x = self.norm(x)
-        return x
+        return self.sequence_encoder(x)
 
     def heads(self, x: T.Tensor, temperature: float) -> tuple[Distribution, T.Tensor]:
         """Expects input of shape (batch, feature)"""
@@ -56,4 +50,4 @@ class Network(nn.Module):
         T.save(self.state_dict(), path)
 
     def load_state_dict(self, path: str) -> None:
-        self.load_state_dict(T.load(path, weights_only=True))
+        super().load_state_dict(T.load(path, weights_only=True))

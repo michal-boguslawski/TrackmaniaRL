@@ -34,9 +34,7 @@ class Agent:
 
     def _preprocess_observation(self, observation: T.Tensor) -> T.Tensor:
         """Input shape (batch, height, width, channel)"""
-        observation_tensor = observation.to(self._device, T.float32)
-        observation_tensor.div_(255. / 2.).sub_(1.)
-
+        observation_tensor = observation.to(self._device, T.float32) / (255. / 2.) - 1.
         return observation_tensor.permute(0, 3, 1, 2)
 
     def feature_extract(self, observation: T.Tensor) -> T.Tensor:
@@ -81,14 +79,14 @@ class Agent:
 
             temporal = self.temporal_encode(
                 self._get_features_window(features),
-                # self._get_mask_window(done),
+                self._get_mask_window(done),
             )
 
             action_dist, value = self.heads(temporal, temperature)
 
             action = action_dist.sample()
-            action_tensor = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
-            log_probs = action_dist.log_prob(action_tensor).sum(dim=-1)
+            action = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
+            log_probs = action_dist.log_prob(action).sum(dim=-1)
 
         return (
             action,
@@ -99,9 +97,17 @@ class Agent:
     def evaluate_actions(
         self, observation: T.Tensor | T.Tensor, action: T.Tensor, dones: T.Tensor | None = None
     ) -> tuple[T.Tensor, T.Tensor, Distribution]:
+        print(
+            observation.dtype,
+            observation.min().item(),
+            observation.max().item(),
+        )
         extracted_features = self.feature_extract(observation)
         windowed_features = extracted_features.unfold(0, self._stack_size, self._stack_size).permute(0, 2, 1)
-        temporal_encoding = self.temporal_encode(windowed_features, None)
+        
+        windowed_dones = dones.unfold(0, self._stack_size, self._stack_size)  # (batch, stack_size)
+        mask = windowed_dones.logical_not() & (windowed_dones.flip(1).cumsum(1).flip(1) > 0)
+        temporal_encoding = self.temporal_encode(windowed_features, mask)
         action_dist, values = self.heads(temporal_encoding)
 
         action_tensor = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
