@@ -19,10 +19,15 @@ class Actor(nn.Module):
             init_layer(nn.Linear(hidden_dim, action_dim), gain=0.01),  # near-uniform initial policy
         )
         self._log_std = nn.Parameter(T.full((action_dim,), -0.5))
-
         # register as buffers instead of plain tensors
         self.register_buffer("_affine_loc", T.tensor([0., 0.5, 0.5]))
         self.register_buffer("_affine_scale", T.tensor([1., 0.5, 0.5]))
+        self._transforms = ComposeTransform(
+            [
+                TanhTransform(),
+                AffineTransform(loc=self._affine_loc, scale=self._affine_scale),
+            ]
+        )
 
     def forward(self, x: T.Tensor, temperature: float = 1.) -> Distribution:
         mean = self._network(x)
@@ -33,15 +38,10 @@ class Actor(nn.Module):
 
         return TransformedDistribution(
             Normal(mean, std),
-            transforms=ComposeTransform(
-                [
-                    TanhTransform(),
-                    AffineTransform(loc=self._affine_loc, scale=self._affine_scale),
-                ]
-            )
+            transforms=self._transforms
         )
 
     def act_deterministic(self, x: T.Tensor) -> T.Tensor:
         mean = self._network(x)
-        action = TanhTransform()(mean)
-        return self._affine_loc + self._affine_scale * action
+        action = self._transforms(mean)
+        return action

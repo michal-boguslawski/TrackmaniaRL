@@ -16,7 +16,7 @@ from src.rl_lib.agent import Agent
 
 
 BATCH_SIZE = 1024
-NUM_ENVS = 16
+NUM_ENVS = 2
 STACK_SIZE = 4
 SKIP = 2
 MINIBATCH_SIZE = 256
@@ -29,13 +29,13 @@ def main():
     env = make_env(
         "CarRacing-v3",
         num_envs=NUM_ENVS,
-        skip=SKIP,
+        # skip=SKIP,
         record=False,
         stack_size=STACK_SIZE,
         wrappers=[
             "record_episode_stats",
             "grayscale",
-            "max_and_skip",
+            # "max_and_skip",
         ]
     )
     
@@ -100,7 +100,7 @@ def main():
                 wrappers=[
                     "record_episode_stats",
                     "grayscale",
-                    "max_and_skip",
+                    # "max_and_skip",
                 ],
                 interval=50_000,
             ),
