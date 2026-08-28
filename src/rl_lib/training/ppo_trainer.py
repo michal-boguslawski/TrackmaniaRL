@@ -81,54 +81,73 @@ class PPOTrainer:
 
         self._optimizer.zero_grad()
         loss.backward()
+
+        metrics = self._get_train_step_metrics(loss)
         grad_norm = self._agent.clip_grad_norm(0.5)
+
         self._optimizer.step()
         if self._scheduler:
             self._scheduler.step()
         self._step += 1
 
-        metrics = {
-            "loss/total": loss.detach().item(),
-            "metrics/grad_norm": grad_norm.item() if isinstance(grad_norm, T.Tensor) else grad_norm,
-            # "loss/actor": actor_loss.detach().item(),
-            # "loss/critic": critic_loss.detach().item(),
-            # "loss/entropy": entropy_loss.detach().item(),
-        }
         return {**loss_metrics, **metrics}
+
+    def _get_train_step_metrics(self, loss: T.Tensor) -> dict[str, float]:
+        with T.no_grad():
+            metrics = {
+                "loss/total": loss.detach().item(),
+                **self._agent.get_parital_clip_grad_norms()
+            }
+        return metrics
 
     def _actor_loss(self, advantages: T.Tensor, log_probs: T.Tensor, old_log_probs: T.Tensor) -> tuple[T.Tensor, dict[str, float]]:
         if self.advantage_normalization_strategy and self.advantage_normalization_strategy == "batch":
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-4)
 
+        assert log_probs.shape == old_log_probs.shape
         log_ratio = log_probs - old_log_probs
 
-        ratio = log_ratio.exp()
+        ratio = log_ratio.sum(-1).exp()
 
         clipped_ratio = ratio.clamp(
             min=1 - self.ppo_epsilon,
             max=1 + self.ppo_epsilon
         )
 
+        assert advantages.shape == ratio.shape
         surrogate_loss = -T.minimum(
             ratio * advantages,
             clipped_ratio * advantages
         )
         actor_loss = surrogate_loss.mean()
 
+        metrics = self._actor_loss_metrics(log_ratio)
+
+        return actor_loss, metrics
+
+    def _actor_loss_metrics(self, log_ratio: T.Tensor) -> dict[str, float]:
         with T.no_grad():
-            approx_kl = (ratio - 1 - log_ratio).mean()
-            clip_fraction = (T.abs(ratio - 1) > self.ppo_epsilon).float().mean()
-            ratio_max = ratio.max()
+            log_ratio_total = log_ratio.sum(-1)
+            ratio_total = log_ratio_total.exp()
+            approx_kl = (ratio_total - 1 - log_ratio_total).mean()
+            ratio_per_action = log_ratio.exp()
+            approx_kl_per_action = (ratio_per_action - 1 - log_ratio).mean(dim=0)
+            ratio_max = ratio_total.max()
+            clip_fraction = (T.abs(ratio_total - 1) > self.ppo_epsilon).float().mean()
 
         metrics = {
             "metrics/approx_kl": approx_kl.item(),
-            "loss/actor": actor_loss.detach().item(),
-            "metrics/clip_fraction": clip_fraction.item(),
             "metrics/ratio_max": ratio_max.item(),
+            "metrics/clip_fraction": clip_fraction.item(),
         }
-        return actor_loss, metrics
+        
+        for i, value in enumerate(approx_kl_per_action):
+            metrics[f"metrics/approx_kl_{i}"] = value.item()
+
+        return metrics
 
     def _critic_loss(self, returns: T.Tensor, values: T.Tensor, old_values: T.Tensor) -> tuple[T.Tensor, dict[str, float]]:
+        assert values.shape == old_values.shape == returns.shape
         clipped_values = old_values + (values - old_values).clamp(-self.ppo_epsilon, self.ppo_epsilon)
         loss_unclipped = self._critic_loss_fn(values, returns)
         loss_clipped = self._critic_loss_fn(clipped_values, returns)

@@ -34,6 +34,11 @@ class Agent:
 
     def _preprocess_observation(self, observation: T.Tensor) -> T.Tensor:
         """Input shape (batch, height, width, channel)"""
+        assert observation.dtype == T.uint8
+        assert (
+            observation.min() < 10 and observation.max() > 245,
+            f"Observation values should be in [0, 255], got [{observation.min()}, {observation.max()}]"
+        )
         observation_tensor = observation.to(self._device, T.float32) / (255. / 2.) - 1.
         return observation_tensor.permute(0, 3, 1, 2)
 
@@ -61,6 +66,7 @@ class Agent:
         if mask is None:
             masked_x = x
         else:
+            assert mask.shape == x.shape[:2], f"mask: {mask.shape}, x: {x.shape}"
             masked_x = x.masked_fill(mask.unsqueeze(-1), 0.)
         return self._network.temporal_encode(masked_x).squeeze(1)
 
@@ -86,7 +92,7 @@ class Agent:
 
             action = action_dist.sample()
             action = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
-            log_probs = action_dist.log_prob(action).sum(dim=-1)
+            log_probs = action_dist.log_prob(action)
 
         return (
             action,
@@ -97,21 +103,18 @@ class Agent:
     def evaluate_actions(
         self, observation: T.Tensor | T.Tensor, action: T.Tensor, dones: T.Tensor | None = None
     ) -> tuple[T.Tensor, T.Tensor, Distribution]:
-        print(
-            observation.dtype,
-            observation.min().item(),
-            observation.max().item(),
-        )
+
         extracted_features = self.feature_extract(observation)
         windowed_features = extracted_features.unfold(0, self._stack_size, self._stack_size).permute(0, 2, 1)
         
         windowed_dones = dones.unfold(0, self._stack_size, self._stack_size)  # (batch, stack_size)
         mask = windowed_dones.logical_not() & (windowed_dones.flip(1).cumsum(1).flip(1) > 0)
+
         temporal_encoding = self.temporal_encode(windowed_features, mask)
         action_dist, values = self.heads(temporal_encoding)
 
         action_tensor = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
-        log_probs = action_dist.log_prob(action_tensor).sum(dim=-1)
+        log_probs = action_dist.log_prob(action_tensor)
         return log_probs, values, action_dist
 
     @property
@@ -137,6 +140,15 @@ class Agent:
     def clip_grad_norm(self, max_norm: float) -> T.Tensor:
         # add per group grad norm
         return nn.utils.clip_grad_norm_(self._network.parameters(), max_norm)
+
+    def get_parital_clip_grad_norms(self) -> dict[str, float]:
+        return {
+            "grad_norm/cnn": nn.utils.clip_grad_norm_(self._network.cnn.parameters(), float("inf")).item(),
+            "grad_norm/sequence_encoder": nn.utils.clip_grad_norm_(self._network.sequence_encoder.parameters(), float("inf")).item(),
+            "grad_norm/actor": nn.utils.clip_grad_norm_(self._network.actor.parameters(), float("inf")).item(),
+            "grad_norm/critic": nn.utils.clip_grad_norm_(self._network.critic.parameters(), float("inf")).item(),
+            "metrics/grad_norm/max": nn.utils.clip_grad_norm_(self._network.parameters(), float("inf")).item(),
+        }
 
     def save_state_dict(self, path: str) -> None:
         self._network.save_state_dict(path)

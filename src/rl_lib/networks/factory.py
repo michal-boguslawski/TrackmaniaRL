@@ -14,7 +14,6 @@ class Network(nn.Module):
 
         self.cnn = CNN(observation_dim)
         self.sequence_encoder = TemporalCNN1D(stack_size)
-        self.norm = nn.LayerNorm(256)
         self.actor = Actor(action_dim)
         self.critic = Critic()
 
