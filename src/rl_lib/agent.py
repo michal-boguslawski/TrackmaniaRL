@@ -91,7 +91,7 @@ class Agent:
             action_dist, value = self.heads(temporal, temperature)
 
             action = action_dist.sample()
-            action = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
+            # action = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
             log_probs = action_dist.log_prob(action)
 
         return (
@@ -113,8 +113,8 @@ class Agent:
         temporal_encoding = self.temporal_encode(windowed_features, mask)
         action_dist, values = self.heads(temporal_encoding)
 
-        action_tensor = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
-        log_probs = action_dist.log_prob(action_tensor)
+        # action_tensor = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
+        log_probs = action_dist.log_prob(action)
         return log_probs, values, action_dist
 
     @property

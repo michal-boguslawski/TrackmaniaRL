@@ -71,7 +71,7 @@ def main():
     console_metrics_logger = ConsoleMetricsLogger()
     trainer = PPOTrainer(
         agent=agent,
-        entropy_coef=5e-3,
+        entropy_coef=1e-2,
         # entropy_decay=0.95,
         advantage_normalization_strategy="global",
         callbacks=[

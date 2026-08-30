@@ -107,7 +107,7 @@ class PPOTrainer:
         assert log_probs.shape == old_log_probs.shape
         log_ratio = log_probs - old_log_probs
 
-        ratio = log_ratio.sum(-1).exp()
+        ratio = log_ratio.sum(-1).clamp(-20, 20).exp()
 
         clipped_ratio = ratio.clamp(
             min=1 - self.ppo_epsilon,
@@ -122,6 +122,7 @@ class PPOTrainer:
         actor_loss = surrogate_loss.mean()
 
         metrics = self._actor_loss_metrics(log_ratio)
+        metrics["metrics/actor_loss"] = actor_loss.detach().item()
 
         return actor_loss, metrics
 
@@ -239,6 +240,7 @@ class PPOTrainer:
             "rollout/advantages_mean": batch["advantages"].mean().item(),
             "rollout/advantages_std": batch["advantages"].std().item(),
             "rollout/critic_values": batch["critic_value"].mean().item(),
+            "rollout/old_log_probs" : batch["old_log_probs"].mean().item(),
         }
         action_means = batch["action"].mean((0, 1))
         for i, mean in enumerate(action_means):
@@ -284,7 +286,7 @@ class PPOTrainer:
                 logger.warning(f"Early stop epoch {epoch}: KL {mean_epoch_kl:.4f} > {self.target_kl}")
                 break
 
-        self.entropy_coef = max(self.entropy_coef - 1e-5, 1e-5)
+        # self.entropy_coef = max(self.entropy_coef - 1e-5, 1e-5)
         metrics = {
             "training/entropy_coef": self.entropy_coef,
             # "training/lr": self._optimizer.param_groups[0]["lr"]

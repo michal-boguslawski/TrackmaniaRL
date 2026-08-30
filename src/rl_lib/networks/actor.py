@@ -30,7 +30,7 @@ class Actor(nn.Module):
         )
 
     def forward(self, x: T.Tensor, temperature: float = 1.) -> Distribution:
-        mean = self._network(x)
+        mean = self._network(x).clamp(-6, 6)
         std = self._log_std.clamp(-2.0, 0.5).exp() * temperature
 
         assert T.isfinite(mean).all(), mean
