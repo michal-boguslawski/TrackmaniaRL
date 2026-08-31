@@ -22,12 +22,6 @@ class Actor(nn.Module):
         # register as buffers instead of plain tensors
         self.register_buffer("_affine_loc", T.tensor([0., 0.5, 0.5]))
         self.register_buffer("_affine_scale", T.tensor([1., 0.5, 0.5]))
-        self._transforms = ComposeTransform(
-            [
-                TanhTransform(),
-                AffineTransform(loc=self._affine_loc, scale=self._affine_scale),
-            ]
-        )
 
     def forward(self, x: T.Tensor, temperature: float = 1.) -> Distribution:
         mean = self._network(x).clamp(-6, 6)
@@ -35,13 +29,23 @@ class Actor(nn.Module):
 
         assert T.isfinite(mean).all(), mean
         assert T.isfinite(std).all(), std
+        
+        transforms = ComposeTransform([
+            TanhTransform(),
+            AffineTransform(loc=self._affine_loc, scale=self._affine_scale),
+        ])
 
         return TransformedDistribution(
             Normal(mean, std),
-            transforms=self._transforms
+            transforms=transforms
         )
 
     def act_deterministic(self, x: T.Tensor) -> T.Tensor:
         mean = self._network(x)
-        action = self._transforms(mean)
+        
+        transforms = ComposeTransform([
+            TanhTransform(),
+            AffineTransform(loc=self._affine_loc, scale=self._affine_scale),
+        ])
+        action = transforms(mean)
         return action

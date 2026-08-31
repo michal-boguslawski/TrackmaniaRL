@@ -15,8 +15,8 @@ from src.rl_lib.training.callbacks.checkpoints_save import CheckpointsSaveCallba
 from src.rl_lib.agent import Agent
 
 
-BATCH_SIZE = 1024
-NUM_ENVS = 2
+BATCH_SIZE = 2048
+NUM_ENVS = 8
 STACK_SIZE = 4
 SKIP = 2
 MINIBATCH_SIZE = 256
@@ -29,13 +29,13 @@ def main():
     env = make_env(
         "CarRacing-v3",
         num_envs=NUM_ENVS,
-        # skip=SKIP,
+        skip=SKIP,
         record=False,
         stack_size=STACK_SIZE,
         wrappers=[
             "record_episode_stats",
             "grayscale",
-            # "max_and_skip",
+            "max_and_skip",
         ]
     )
     
@@ -82,7 +82,7 @@ def main():
 
     rng = np.random.default_rng(seed=42)
 
-    training_steps = 1_000_000
+    training_steps = 3_000_000
     rollout_collector = RolloutCollector(
         env,
         buffer,
@@ -100,7 +100,7 @@ def main():
                 wrappers=[
                     "record_episode_stats",
                     "grayscale",
-                    # "max_and_skip",
+                    "max_and_skip",
                 ],
                 interval=50_000,
             ),

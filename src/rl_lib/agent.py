@@ -133,8 +133,8 @@ class Agent:
         trunk_params = list(self._network.cnn.parameters()) + list(self._network.sequence_encoder.parameters())
         head_params = list(self._network.actor.parameters()) + list(self._network.critic.parameters())
         return [
-            {"params": trunk_params, "lr": 1e-4},
-            {"params": head_params, "lr": 3e-4},
+            {"params": trunk_params, "lr": 2e-5},
+            {"params": head_params, "lr": 6e-5},
         ]
 
     def clip_grad_norm(self, max_norm: float) -> T.Tensor:
