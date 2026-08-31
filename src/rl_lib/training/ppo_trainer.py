@@ -40,7 +40,7 @@ class PPOTrainer:
             self._optimizer,
             start_factor=1,
             end_factor=0.01,
-            total_iters=200_000
+            total_iters=400_000
         )
         self.ppo_epsilon = ppo_epsilon
         self.critic_beta = critic_beta
