@@ -1,18 +1,13 @@
-from math import ceil
 import numpy as np
-from numpy.typing import NDArray
 from logging import getLogger
 import torch as T
 from torch import nn
-from torch.optim import Adam
+from torch.optim import AdamW
 from torch.distributions import Distribution
 from torch.optim.lr_scheduler import LinearLR
-from torch.nn.modules.loss import _Loss
 from typing import Iterator, Literal
 
 from rl_lib.agent import Agent
-from rl_lib.buffers.rollout_buffer import RolloutBuffer
-from rl_lib.buffers.utils import to_tensor_batch
 from rl_lib.training.callbacks.base import TrainingCallback, CallbackList
 
 
@@ -27,11 +22,11 @@ class PPOTrainer:
         critic_beta: float = 0.5,
         entropy_coef: float = 0.001,
         advantage_normalization_strategy: Literal["batch", "global"] | None = None,
-        # entropy_decay: float = 0.995,
+        entropy_decay: float = 0.995,
         callbacks: list[TrainingCallback] | None = None,
     ):
         self._agent = agent
-        self._optimizer = Adam(
+        self._optimizer = AdamW(
             agent.network_parameters(),
             # lr=3e-4,
             eps=1e-5,
@@ -40,17 +35,17 @@ class PPOTrainer:
             self._optimizer,
             start_factor=1,
             end_factor=0.01,
-            total_iters=400_000
+            total_iters=1_000
         )
         self.ppo_epsilon = ppo_epsilon
         self.critic_beta = critic_beta
         self.entropy_coef = entropy_coef
         self.advantage_normalization_strategy = advantage_normalization_strategy
-        # self.entropy_decay = entropy_decay
+        self.entropy_decay = entropy_decay
         self._critic_loss_fn = nn.HuberLoss(reduction="none")
         self._callbacks = CallbackList(callbacks)
         self._step = 0
-        self.target_kl = 0.1
+        self.target_kl = 0.03
         self._agent.train()
 
     @property
@@ -80,14 +75,17 @@ class PPOTrainer:
         loss = actor_loss + self.critic_beta * critic_loss - self.entropy_coef * entropy_loss
 
         self._optimizer.zero_grad()
+
+        if not T.isfinite(loss):
+            logger.error(f"Non-finite loss, skipping update")
+            return {}
+
         loss.backward()
 
         metrics = self._get_train_step_metrics(loss)
         grad_norm = self._agent.clip_grad_norm(0.5)
 
         self._optimizer.step()
-        if self._scheduler:
-            self._scheduler.step()
         self._step += 1
 
         return {**loss_metrics, **metrics}
@@ -286,7 +284,9 @@ class PPOTrainer:
                 logger.warning(f"Early stop epoch {epoch}: KL {mean_epoch_kl:.4f} > {self.target_kl}")
                 break
 
-        # self.entropy_coef = max(self.entropy_coef - 1e-5, 1e-5)
+        if self._scheduler:
+            self._scheduler.step()
+        self.entropy_coef *= self.entropy_decay
         metrics = {
             "training/entropy_coef": self.entropy_coef,
             # "training/lr": self._optimizer.param_groups[0]["lr"]

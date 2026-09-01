@@ -8,7 +8,6 @@ from src.rl_lib.envs.wrappers import WRAPPERS
 def make_env(
     env_id: str,
     num_envs: int,
-    stack_size: int = 4,
     skip: int = 4,
     video_folder: str = "./logs/videos",
     record: bool = False,
@@ -23,7 +22,6 @@ def make_env(
     wrappers_fn = [
         partial(
             WRAPPERS[wrapper_name],
-            stack_size=stack_size,
             video_folder=video_folder,
             skip=skip,
         )

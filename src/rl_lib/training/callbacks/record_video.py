@@ -28,7 +28,6 @@ class RecordVideoCallback(CollectorCallback):
         self.env = make_env(
             env_id,
             1,
-            self.agent.stack_size,
             skip=skip,
             video_folder=video_folder,
             record=True,
@@ -74,3 +73,6 @@ class RecordVideoCallback(CollectorCallback):
     def on_rollout_end(self, *args, **kwargs):
         self.record()
         self.env.close()
+
+    def flush(self, *args, **kwargs):
+        pass

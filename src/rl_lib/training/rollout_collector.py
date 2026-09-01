@@ -34,6 +34,9 @@ class RolloutCollector:
     def _on_rollout_end(self, *args, **kwargs):
         self._callbacks.on_rollout_end(*args, **kwargs)
 
+    def _callback_flush(self, *args, **kwargs):
+        self._callbacks.flush(*args, **kwargs)
+
     def run(self, training_steps: int):
         state, _ = self.env.reset()
         done = T.zeros(self.env.num_envs, dtype=T.bool).to(self.trainer.device)
@@ -64,5 +67,6 @@ class RolloutCollector:
             if self.buffer.is_full():
                 self.trainer.train(self.buffer.get(), epochs=self.epochs, minibatch_size=self.minibatch_size, training_step=i)
                 self.buffer.reset_counter()
+                self._callback_flush()
 
         self._on_rollout_end()

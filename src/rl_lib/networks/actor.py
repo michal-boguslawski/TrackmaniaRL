@@ -1,3 +1,4 @@
+from logging import getLogger
 import torch as T
 from torch import nn
 from torch.distributions import Distribution, Normal, TransformedDistribution
@@ -8,6 +9,9 @@ from torch.distributions.transforms import (
 )
 
 from rl_lib.networks.utils import init_layer
+
+
+logger = getLogger(__name__)
 
 
 class Actor(nn.Module):
@@ -27,8 +31,13 @@ class Actor(nn.Module):
         mean = self._network(x).clamp(-6, 6)
         std = self._log_std.clamp(-2.0, 0.5).exp() * temperature
 
-        assert T.isfinite(mean).all(), mean
-        assert T.isfinite(std).all(), std
+        if not T.isfinite(mean).all():
+            logger.error(f"mean is not finite {mean}")
+            raise ValueError(f"Mean is not finite")
+
+        if not T.isfinite(std).all():
+            logger.error(f"std is not finite {std}")
+            raise ValueError(f"Std is not finite")
         
         transforms = ComposeTransform([
             TanhTransform(),
