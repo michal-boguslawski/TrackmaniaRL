@@ -26,6 +26,9 @@ class CollectorCallback(ABC):
     @abstractmethod
     def on_rollout_end(self, *args, **kwargs) -> None: ...
 
+    @abstractmethod
+    def flush(self, *args, **kwargs) -> None: ...
+
 
 C = TypeVar("C", TrainingCallback, CollectorCallback)
 

@@ -1,4 +1,3 @@
-import numpy as np
 import torch as T
 
 from src.rl_lib.logger_setup import setup_logging, shutdown_logging
@@ -31,7 +30,6 @@ def main():
         num_envs=NUM_ENVS,
         skip=SKIP,
         record=False,
-        stack_size=STACK_SIZE,
         wrappers=[
             "record_episode_stats",
             "grayscale",
@@ -72,15 +70,13 @@ def main():
     trainer = PPOTrainer(
         agent=agent,
         entropy_coef=1e-2,
-        # entropy_decay=0.95,
+        entropy_decay=0.999,
         advantage_normalization_strategy="global",
         callbacks=[
             CheckpointsSaveCallback("./logs/checkpoints", agent, intervals=200),
             MetricsLoggingCallback(console_metrics_logger, granularity="batch"),
         ]
     )
-
-    rng = np.random.default_rng(seed=42)
 
     training_steps = 3_000_000
     rollout_collector = RolloutCollector(
@@ -90,7 +86,7 @@ def main():
         EPOCHS,
         MINIBATCH_SIZE,
         callbacks=[
-            RecordStatisticLoggerCallback(console_metrics_logger),
+            RecordStatisticLoggerCallback(console_metrics_logger, mode="mean"),
             RecordVideoCallback(
                 "CarRacing-v3",
                 agent=record_agent,

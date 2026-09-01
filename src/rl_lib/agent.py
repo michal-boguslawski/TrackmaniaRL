@@ -1,4 +1,5 @@
 from collections import deque
+from logging import getLogger
 import torch as T
 from torch import nn
 from torch.distributions import Distribution
@@ -6,6 +7,9 @@ from torch.nn.parameter import Parameter
 from typing import Iterator
 
 from rl_lib.networks.factory import Network
+
+
+logger = getLogger(__name__)
 
 
 class Agent:
@@ -94,6 +98,10 @@ class Agent:
             # action = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
             log_probs = action_dist.log_prob(action)
 
+            if not T.isfinite(log_probs).all():
+                logger.error(f"log_probs are not finite {tuple(action, action_dist.base_dist.mean, action_dist.base_dist.stddev)}")
+                raise ValueError("log_probs are not finite")
+
         return (
             action,
             log_probs,
@@ -129,12 +137,22 @@ class Agent:
 
     # def network_parameters(self) -> Iterator[Parameter]:
     #     return self._network.parameters()
-    def network_parameters(self) -> dict:
-        trunk_params = list(self._network.cnn.parameters()) + list(self._network.sequence_encoder.parameters())
-        head_params = list(self._network.actor.parameters()) + list(self._network.critic.parameters())
+    def network_parameters(self) -> list[dict]:
+        decay, no_decay = [], []
+        for module in [self._network.cnn, self._network.sequence_encoder]:
+            for name, p in module.named_parameters():
+                (no_decay if "bias" in name or "norm" in name.lower() else decay).append(p)
+
+        head_decay, head_no_decay = [], []
+        for module in [self._network.actor, self._network.critic]:
+            for name, p in module.named_parameters():
+                (head_no_decay if "bias" in name or "_log_std" in name else head_decay).append(p)
+
         return [
-            {"params": trunk_params, "lr": 2e-5},
-            {"params": head_params, "lr": 6e-5},
+            {"params": decay, "lr": 2e-5, "weight_decay": 1e-5},
+            {"params": no_decay, "lr": 2e-5, "weight_decay": 0.0},
+            {"params": head_decay, "lr": 6e-5, "weight_decay": 1e-5},
+            {"params": head_no_decay, "lr": 6e-5, "weight_decay": 0.0},
         ]
 
     def clip_grad_norm(self, max_norm: float) -> T.Tensor:
