@@ -1,7 +1,7 @@
 from typing import Any, Literal
 
-from src.rl_lib.tracking.base import MetricsLogger
-from src.rl_lib.training.callbacks.base import CollectorCallback
+from rl_lib.tracking.base import MetricsLogger
+from rl_lib.training.callbacks.base import CollectorCallback
 
 
 class RecordStatisticLoggerCallback(CollectorCallback):

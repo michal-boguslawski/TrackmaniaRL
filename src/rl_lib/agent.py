@@ -1,5 +1,7 @@
 from collections import deque
+from numpy.typing import NDArray
 from logging import getLogger
+from gymnasium import Env
 import torch as T
 from torch import nn
 from torch.distributions import Distribution
@@ -149,10 +151,10 @@ class Agent:
                 (head_no_decay if "bias" in name or "_log_std" in name else head_decay).append(p)
 
         return [
-            {"params": decay, "lr": 2e-5, "weight_decay": 1e-5},
-            {"params": no_decay, "lr": 2e-5, "weight_decay": 0.0},
-            {"params": head_decay, "lr": 6e-5, "weight_decay": 1e-5},
-            {"params": head_no_decay, "lr": 6e-5, "weight_decay": 0.0},
+            {"params": decay, "lr": 1e-5, "weight_decay": 1e-5},
+            {"params": no_decay, "lr": 1e-5, "weight_decay": 0.0},
+            {"params": head_decay, "lr": 3e-5, "weight_decay": 1e-5},
+            {"params": head_no_decay, "lr": 3e-5, "weight_decay": 0.0},
         ]
 
     def clip_grad_norm(self, max_norm: float) -> T.Tensor:
@@ -177,3 +179,24 @@ class Agent:
     def reset(self):
         self._obs_window.clear()
         self._done_window.clear()
+
+    def step_env(
+        self,
+        env: Env,
+        state: NDArray,
+        done: T.Tensor,
+        temperature: float = 1.,
+    ) -> tuple:
+        """Steps `env` using this agent's policy. Owns all numpy<->tensor
+        conversion and terminated/truncated -> done logic so callers don't
+        duplicate it."""
+        state_t = T.from_numpy(state).to(self._device)
+        action, log_probs, value = self.act(state_t, done, temperature)
+
+        next_state, reward, terminated, truncated, info = env.step(action.cpu().numpy())
+
+        terminated_t = T.from_numpy(terminated).to(self._device)
+        truncated_t = T.from_numpy(truncated).to(self._device)
+        done_t = T.logical_or(terminated_t, truncated_t)
+
+        return next_state, state_t, action, log_probs, value, reward, terminated_t, truncated_t, done_t, info

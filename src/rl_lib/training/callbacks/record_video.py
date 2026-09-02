@@ -44,13 +44,7 @@ class RecordVideoCallback(CollectorCallback):
         state, _ = self.env.reset()
         done = T.zeros(self.env.num_envs, dtype=T.bool).to(self.agent.device)
         while not done.any():
-            state = T.from_numpy(state).to(self.agent.device)
-            action, _, _ = self.agent.act(state, done, temperature=1e-4)
-            state, _, terminated, truncated, info = self.env.step(action.cpu().numpy())
-
-            terminated = T.from_numpy(terminated).to(self.agent.device)
-            truncated = T.from_numpy(truncated).to(self.agent.device)
-            done = T.logical_or(terminated, truncated)
+            state, _, _, _, _, _, _, _, done, info = self.agent.step_env(self.env, state, done, temperature=1e-4)
 
         stop_video_recording(self.env.envs[0])
         

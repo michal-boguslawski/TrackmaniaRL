@@ -1,6 +1,6 @@
 from logging import getLogger
 
-from src.rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.base import MetricsLogger
 
 
 logger = getLogger(__name__)
