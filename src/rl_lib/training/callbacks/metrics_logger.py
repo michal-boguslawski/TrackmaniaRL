@@ -1,8 +1,8 @@
 import numpy as np
 from typing import Literal, Any
 
-from src.rl_lib.tracking.base import MetricsLogger
-from src.rl_lib.training.callbacks.base import TrainingCallback
+from rl_lib.tracking.base import MetricsLogger
+from rl_lib.training.callbacks.base import TrainingCallback
 
 
 class MetricsLoggingCallback(TrainingCallback):

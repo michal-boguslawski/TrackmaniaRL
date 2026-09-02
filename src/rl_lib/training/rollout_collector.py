@@ -3,9 +3,9 @@ import numpy as np
 import torch as T
 from tqdm import tqdm
 
-from src.rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
-from src.rl_lib.training.ppo_trainer import PPOTrainer
-from src.rl_lib.training.callbacks.base import CollectorCallback, CallbackList
+from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
+from rl_lib.training.ppo_trainer import PPOTrainer
+from rl_lib.training.callbacks.base import CollectorCallback, CallbackList
 
 
 class RolloutCollector:
@@ -44,13 +44,7 @@ class RolloutCollector:
         self._on_rollout_start()
 
         for i in tqdm(range(training_steps)):
-            state = T.from_numpy(state).to(self.trainer.device)
-            action, log_probs, critic_value = self.trainer.act(state, done)
-            next_state, reward, terminated, truncated, info = self.env.step(action.cpu().numpy())
-
-            terminated = T.from_numpy(terminated).to(self.trainer.device)
-            truncated = T.from_numpy(truncated).to(self.trainer.device)
-            done = T.logical_or(terminated, truncated)
+            (next_state, state, action, log_probs, critic_value, reward, terminated, truncated, done, info) = self.trainer.step_env(self.env, state, done)
             self.buffer.add(RolloutStep(
                 observation=state,
                 action=action,

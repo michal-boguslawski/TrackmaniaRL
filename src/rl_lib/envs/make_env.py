@@ -3,7 +3,7 @@ from gymnasium import make_vec, VectorizeMode
 from gymnasium.vector import VectorEnv
 from functools import partial
 
-from src.rl_lib.envs.wrappers import WRAPPERS
+from rl_lib.envs.wrappers import WRAPPERS
 
 def make_env(
     env_id: str,

@@ -1,8 +1,8 @@
 from logging import getLogger
 from pathlib import Path
 
-from src.rl_lib.training.callbacks.base import TrainingCallback
-from src.rl_lib.agent import Agent
+from rl_lib.training.callbacks.base import TrainingCallback
+from rl_lib.agent import Agent
 
 
 logger = getLogger(__name__)

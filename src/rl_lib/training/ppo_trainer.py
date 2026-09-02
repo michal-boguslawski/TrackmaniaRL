@@ -1,5 +1,7 @@
 import numpy as np
+from numpy.typing import NDArray
 from logging import getLogger
+from gymnasium import Env
 import torch as T
 from torch import nn
 from torch.optim import AdamW
@@ -83,6 +85,9 @@ class PPOTrainer:
         loss.backward()
 
         metrics = self._get_train_step_metrics(loss)
+        if metrics["metrics/grad_norm/max"] > 100:
+            print(metrics)
+            raise "dupa"
         grad_norm = self._agent.clip_grad_norm(0.5)
 
         self._optimizer.step()
@@ -250,6 +255,9 @@ class PPOTrainer:
         explained_variance = 1 - (batch["returns"] - batch["critic_value"]).var() / (batch["returns"].var() + 1e-8)
         metrics["rollout/explained_variance"] = explained_variance
         return metrics
+
+    def step_env(self, env: Env, state: NDArray, done: T.Tensor, temperature: float = 1.) -> tuple:
+        return self._agent.step_env(env, state, done, temperature)
 
     def train(
         self,
