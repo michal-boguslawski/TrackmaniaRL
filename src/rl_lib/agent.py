@@ -41,10 +41,7 @@ class Agent:
     def _preprocess_observation(self, observation: T.Tensor) -> T.Tensor:
         """Input shape (batch, height, width, channel)"""
         assert observation.dtype == T.uint8
-        assert (
-            observation.min() < 10 and observation.max() > 245,
-            f"Observation values should be in [0, 255], got [{observation.min()}, {observation.max()}]"
-        )
+        # assert (observation.min() < 50 and observation.max() > 200), f"Observation values should be in [0, 255], got [{observation.min()}, {observation.max()}]"
         observation_tensor = observation.to(self._device, T.float32) / (255. / 2.) - 1.
         return observation_tensor.permute(0, 3, 1, 2)
 
@@ -127,6 +124,9 @@ class Agent:
         log_probs = action_dist.log_prob(action)
         return log_probs, values, action_dist
 
+    def action_transform(self, action: T.Tensor) -> T.Tensor:
+        return self._network.action_transform(action)
+
     @property
     def stack_size(self) -> int:
         return self._stack_size
@@ -151,10 +151,10 @@ class Agent:
                 (head_no_decay if "bias" in name or "_log_std" in name else head_decay).append(p)
 
         return [
-            {"params": decay, "lr": 1e-5, "weight_decay": 1e-5},
-            {"params": no_decay, "lr": 1e-5, "weight_decay": 0.0},
-            {"params": head_decay, "lr": 3e-5, "weight_decay": 1e-5},
-            {"params": head_no_decay, "lr": 3e-5, "weight_decay": 0.0},
+            {"params": decay, "lr": 1e-4, "weight_decay": 1e-5},
+            {"params": no_decay, "lr": 1e-4, "weight_decay": 0.0},
+            {"params": head_decay, "lr": 3e-4, "weight_decay": 1e-5},
+            {"params": head_no_decay, "lr": 3e-4, "weight_decay": 0.0},
         ]
 
     def clip_grad_norm(self, max_norm: float) -> T.Tensor:
@@ -193,7 +193,10 @@ class Agent:
         state_t = T.from_numpy(state).to(self._device)
         action, log_probs, value = self.act(state_t, done, temperature)
 
-        next_state, reward, terminated, truncated, info = env.step(action.cpu().numpy())
+        transformed_action = self.action_transform(action)
+        next_state, reward, terminated, truncated, info = env.step(
+            transformed_action.cpu().numpy()
+        )
 
         terminated_t = T.from_numpy(terminated).to(self._device)
         truncated_t = T.from_numpy(truncated).to(self._device)

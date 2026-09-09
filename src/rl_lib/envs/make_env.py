@@ -1,6 +1,7 @@
 from copy import copy
 from gymnasium import make_vec, VectorizeMode
 from gymnasium.vector import VectorEnv
+from gymnasium.wrappers.vector import NormalizeReward
 from functools import partial
 
 from rl_lib.envs.wrappers import WRAPPERS
@@ -12,6 +13,7 @@ def make_env(
     video_folder: str = "./logs/videos",
     record: bool = False,
     continuous: bool = True,
+    normalize_rewards: bool = False,
     vectorization_mode: str = "async",
     wrappers: list[str] | None = None
 ) -> VectorEnv:
@@ -35,4 +37,7 @@ def make_env(
         continuous=continuous,
         wrappers=wrappers_fn,
     )
+
+    if normalize_rewards:
+        env = NormalizeReward(env)
     return env

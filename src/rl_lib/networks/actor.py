@@ -39,22 +39,21 @@ class Actor(nn.Module):
             logger.error(f"std is not finite {std}")
             raise ValueError(f"Std is not finite")
         
+        return Normal(mean, std)
+
+    def action_transform(self, action: T.Tensor) -> T.Tensor:
         transforms = ComposeTransform([
             TanhTransform(),
             AffineTransform(loc=self._affine_loc, scale=self._affine_scale),
         ])
+        return transforms(action)
 
-        return TransformedDistribution(
-            Normal(mean, std),
-            transforms=transforms
-        )
-
-    def act_deterministic(self, x: T.Tensor) -> T.Tensor:
-        mean = self._network(x)
+    # def act_deterministic(self, x: T.Tensor) -> T.Tensor:
+    #     mean = self._network(x)
         
-        transforms = ComposeTransform([
-            TanhTransform(),
-            AffineTransform(loc=self._affine_loc, scale=self._affine_scale),
-        ])
-        action = transforms(mean)
-        return action
+    #     transforms = ComposeTransform([
+    #         TanhTransform(),
+    #         AffineTransform(loc=self._affine_loc, scale=self._affine_scale),
+    #     ])
+    #     action = transforms(mean)
+    #     return action

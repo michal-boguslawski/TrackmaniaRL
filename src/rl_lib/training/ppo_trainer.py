@@ -85,9 +85,9 @@ class PPOTrainer:
         loss.backward()
 
         metrics = self._get_train_step_metrics(loss)
-        if metrics["metrics/grad_norm/max"] > 100:
-            print(metrics)
-            raise "dupa"
+        # if metrics["metrics/grad_norm/max"] > 100:
+        #     print(metrics)
+        #     raise "dupa"
         grad_norm = self._agent.clip_grad_norm(0.5)
 
         self._optimizer.step()
@@ -165,7 +165,8 @@ class PPOTrainer:
 
     def _entropy_loss(self, dist: Distribution) -> tuple[T.Tensor, dict[str, float]]:
         # entropy of the base Normal; TanhTransform doesn't have closed-form entropy
-        entropy: T.Tensor = dist.base_dist.entropy()
+        # entropy: T.Tensor = dist.base_dist.entropy()
+        entropy = dist.entropy()
         entropy_loss = entropy.sum(dim=-1).mean()
 
         mean_entropy = entropy.mean(0).detach()
@@ -175,7 +176,7 @@ class PPOTrainer:
         metrics["loss/entropy"] = entropy_loss.detach().item()
 
         with T.no_grad():
-            log_std = dist.base_dist.scale.log().mean(0)
+            log_std = dist.scale.log().mean(0)
         metrics.update({f"metrics/log_std_{i}": v.item() for i, v in enumerate(log_std)})
 
         return entropy_loss, metrics
