@@ -30,6 +30,7 @@ def main():
         num_envs=NUM_ENVS,
         skip=SKIP,
         record=False,
+        normalize_rewards=True,
         wrappers=[
             "record_episode_stats",
             "grayscale",
