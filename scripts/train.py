@@ -1,3 +1,4 @@
+from logging import getLogger
 import torch as T
 
 from src.rl_lib.logger_setup import setup_logging, shutdown_logging
@@ -11,20 +12,27 @@ from src.rl_lib.training.callbacks.metrics_logger import MetricsLoggingCallback
 from src.rl_lib.training.callbacks.record_statistics import RecordStatisticLoggerCallback
 from src.rl_lib.training.callbacks.record_video import RecordVideoCallback
 from src.rl_lib.training.callbacks.checkpoints_save import CheckpointsSaveCallback
+from src.rl_lib.training.callbacks.params_logger import ParamsLoggingCallback
 from src.rl_lib.agent import Agent
 
 
-BATCH_SIZE = 2048
+BATCH_SIZE = 1024
 NUM_ENVS = 8
 STACK_SIZE = 4
 SKIP = 2
 MINIBATCH_SIZE = 256
-EPOCHS = 4
+EPOCHS = 6
 DEVICE = T.device("cuda" if T.cuda.is_available() else "cpu")
 
 setup_logging()
 
+
+logger = getLogger(__name__)
+
+
 def main():
+    console_metrics_logger = ConsoleMetricsLogger()
+
     env = make_env(
         "CarRacing-v3",
         num_envs=NUM_ENVS,
@@ -34,6 +42,7 @@ def main():
         wrappers=[
             "record_episode_stats",
             "grayscale",
+            "reward_on_done",
             "max_and_skip",
         ]
     )
@@ -45,12 +54,14 @@ def main():
         # observation_space=env.observation_space.shape[-3:],
         # action_space=env.action_space.shape[-1:]
     )
+    logger.debug("%s", buffer)
     
     network = Network(
         env.observation_space.shape[-1],
         env.action_space.shape[-1],
         STACK_SIZE
     ).to(DEVICE)
+    logger.debug("%s", network)
     
     agent = Agent(
         network=network,
@@ -67,19 +78,20 @@ def main():
         device=DEVICE
     )
 
-    console_metrics_logger = ConsoleMetricsLogger()
     trainer = PPOTrainer(
         agent=agent,
-        entropy_coef=1e-2,
-        entropy_decay=0.999,
+        ppo_epsilon=0.2,
+        entropy_coef=1e-3,
+        entropy_decay=0.995,
         advantage_normalization_strategy="global",
         callbacks=[
             CheckpointsSaveCallback("./logs/checkpoints", agent, intervals=200),
             MetricsLoggingCallback(console_metrics_logger, granularity="batch"),
         ]
     )
+    training_steps = 1_000_000
+    trainer.setup_train(training_steps, BATCH_SIZE)
 
-    training_steps = 3_000_000
     rollout_collector = RolloutCollector(
         env,
         buffer,
@@ -87,6 +99,7 @@ def main():
         EPOCHS,
         MINIBATCH_SIZE,
         callbacks=[
+            ParamsLoggingCallback(console_metrics_logger),
             RecordStatisticLoggerCallback(console_metrics_logger, mode="mean"),
             RecordVideoCallback(
                 "CarRacing-v3",
@@ -103,6 +116,7 @@ def main():
             ),
         ]
     )
+    logger.debug("%s", rollout_collector)
 
     rollout_collector.run(training_steps)
 

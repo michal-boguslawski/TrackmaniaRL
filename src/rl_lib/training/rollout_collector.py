@@ -41,7 +41,7 @@ class RolloutCollector:
         state, _ = self.env.reset()
         done = T.zeros(self.env.num_envs, dtype=T.bool).to(self.trainer.device)
         self.buffer.reset()
-        self._on_rollout_start()
+        self._on_rollout_start(config=self.config(training_steps))
 
         for i in tqdm(range(training_steps)):
             (next_state, state, action, log_probs, critic_value, reward, terminated, truncated, done, info) = self.trainer.step_env(self.env, state, done)
@@ -64,3 +64,28 @@ class RolloutCollector:
                 self._callback_flush()
 
         self._on_rollout_end()
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"epochs={self.epochs}, "
+            f"minibatch_size={self.minibatch_size}, "
+            f"num_envs={self.env.num_envs}, "
+            f"buffer={self.buffer!r}, "
+            f"trainer={self.trainer!r})"
+        )
+
+    def config(self, training_steps: int | None = None) -> dict[str, int | float | str]:
+        """Flat, MLflow-loggable config for the whole training run, merging
+        this collector's own params with buffer/trainer/network configs."""
+        merged: dict[str, int | float | str] = {
+            "epochs": self.epochs,
+            "minibatch_size": self.minibatch_size,
+            "num_envs": self.env.num_envs,
+        }
+        if training_steps is not None:
+            merged["training_steps"] = training_steps
+        merged.update({f"buffer.{k}": v for k, v in self.buffer.config().items()})
+        merged.update({f"trainer.{k}": v for k, v in self.trainer.config().items()})
+        merged.update({f"network.{k}": v for k, v in self.trainer.network_config().items()})
+        return merged
