@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import mlflow
 import mlflow.pytorch
 import torch
+from typing import Self
 
 from src.rl_lib.tracking.base import MetricsLogger
 
@@ -38,10 +39,10 @@ class MLflowLogger(MetricsLogger):
         short_id = uuid.uuid4().hex[:6]
         return f"{host}-{ts}-{short_id}"
 
-    def log_metrics(self, metrics: dict[str, float], step: int):
+    def log_metrics(self, metrics: dict[str, float], step: int) -> None:
         mlflow.log_metrics(metrics, step=step)
 
-    def log_parameters(self, parameters: dict[str, float]):
+    def log_parameters(self, parameters: dict[str, float]) -> None:
         mlflow.log_params({k: str(v) for k, v in parameters.items()})
 
     def log_model(
@@ -49,21 +50,21 @@ class MLflowLogger(MetricsLogger):
         model: torch.nn.Module,
         artifact_path: str = "model",
         registered_model_name: str | None = None,
-    ):
+    ) -> None:
         mlflow.pytorch.log_model(
             model,
             artifact_path=artifact_path,
             registered_model_name=registered_model_name or self._registered_model_name,
         )
 
-    def log_state_dict(self, state_dict: dict, artifact_path: str = "checkpoints"):
+    def log_state_dict(self, state_dict: dict, artifact_path: str = "checkpoints") -> None:
         mlflow.pytorch.log_state_dict(state_dict, artifact_path=artifact_path)
 
-    def close(self):
+    def close(self) -> None:
         mlflow.end_run()
 
-    def __enter__(self):
+    def __enter__(self) -> "Self":
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()

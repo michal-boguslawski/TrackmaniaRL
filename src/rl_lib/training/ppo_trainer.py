@@ -6,7 +6,7 @@ import torch as T
 from torch import nn
 from torch.optim import AdamW
 from torch.distributions import Distribution
-from torch.optim.lr_scheduler import LinearLR
+from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR
 from typing import Iterator, Literal
 
 from rl_lib.agent import Agent
@@ -26,29 +26,55 @@ class PPOTrainer:
         advantage_normalization_strategy: Literal["batch", "global"] | None = None,
         entropy_decay: float = 0.995,
         callbacks: list[TrainingCallback] | None = None,
+        target_kl: float = 0.03,
+        kl_warmup_steps: int = 100_000,
+        backbone_lr: float = 1e-4,
+        head_lr: float = 3e-4,
+        weight_decay: float = 1e-5,
+        optimizer_eps: float = 1e-5,
     ):
         self._agent = agent
-        self._optimizer = AdamW(
-            agent.network_parameters(),
-            # lr=3e-4,
-            eps=1e-5,
-        )
-        self._scheduler = LinearLR(
-            self._optimizer,
-            start_factor=1,
-            end_factor=0.01,
-            total_iters=1_000
-        )
+        self.backbone_lr = backbone_lr
+        self.head_lr = head_lr
+        self.weight_decay = weight_decay
+
+        self._optimizer = self._build_optimizer(optimizer_eps)
+
+        self._scheduler = None
         self.ppo_epsilon = ppo_epsilon
         self.critic_beta = critic_beta
         self.entropy_coef = entropy_coef
         self.advantage_normalization_strategy = advantage_normalization_strategy
         self.entropy_decay = entropy_decay
         self._critic_loss_fn = nn.HuberLoss(reduction="none")
-        self._callbacks = CallbackList(callbacks)
+
+        self._target_kl = target_kl
+        self._kl_warmup_steps = kl_warmup_steps
+
         self._step = 0
-        self.target_kl = 0.03
+
+        self._callbacks = CallbackList(callbacks)
         self._agent.train()
+
+    def _build_optimizer(self, optimizer_eps: float) -> AdamW:
+        param_groups = self._agent.network_parameter_groups()
+        return AdamW(
+            [
+                {"params": param_groups["backbone_decay"], "lr": self.backbone_lr, "weight_decay": self.weight_decay},
+                {"params": param_groups["backbone_no_decay"], "lr": self.backbone_lr, "weight_decay": 0.0},
+                {"params": param_groups["head_decay"], "lr": self.head_lr, "weight_decay": self.weight_decay},
+                {"params": param_groups["head_no_decay"], "lr": self.head_lr, "weight_decay": 0.0},
+            ],
+            eps=optimizer_eps,
+        )
+
+    def setup_train(self, training_steps: int, batch_size: int) -> None:
+        total_iters = training_steps // batch_size + 1
+        self._scheduler = CosineAnnealingLR(
+            self._optimizer,
+            eta_min=1e-8,
+            T_max=total_iters
+        )
 
     @property
     def stack_size(self) -> int:
@@ -289,7 +315,7 @@ class PPOTrainer:
                 self._on_minibatch(metrics=minibatch_metrics, step=self._step)
             mean_epoch_kl = float(np.mean(epoch_kls))
             self._on_epoch()
-            if mean_epoch_kl > self.target_kl:
+            if mean_epoch_kl > self._target_kl and training_step > self._kl_warmup_steps:
                 logger.warning(f"Early stop epoch {epoch}: KL {mean_epoch_kl:.4f} > {self.target_kl}")
                 break
 
@@ -303,3 +329,40 @@ class PPOTrainer:
         for i, pg in enumerate(self._optimizer.param_groups):
             metrics[f"training/lr_{i}"] = pg["lr"]
         self._on_end(metrics=metrics, step=training_step)
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"ppo_epsilon={self.ppo_epsilon}, "
+            f"critic_beta={self.critic_beta}, "
+            f"entropy_coef={self.entropy_coef}, "
+            f"entropy_decay={self.entropy_decay}, "
+            f"target_kl={self._target_kl}, "
+            f"kl_warmup_steps={self._kl_warmup_steps}, "
+            f"backbone_lr={self.backbone_lr}, "
+            f"head_lr={self.head_lr}, "
+            f"weight_decay={self.weight_decay}, "
+            f"advantage_normalization_strategy={self.advantage_normalization_strategy!r}, "
+            f"scheduler={self._scheduler.__class__.__name__ if self._scheduler else None})"
+        )
+
+    def config(self) -> dict[str, int | float | str]:
+        """Hyperparameters, suitable for mlflow.log_params (with a prefix)."""
+        return {
+            "ppo_epsilon": self.ppo_epsilon,
+            "critic_beta": self.critic_beta,
+            "entropy_coef_init": self.entropy_coef,
+            "entropy_decay": self.entropy_decay,
+            "target_kl": self._target_kl,
+            "kl_warmup_steps": self._kl_warmup_steps,
+            "backbone_lr": self.backbone_lr,
+            "head_lr": self.head_lr,
+            "weight_decay": self.weight_decay,
+            "advantage_normalization_strategy": self.advantage_normalization_strategy or "none",
+            "optimizer": self._optimizer.__class__.__name__,
+            "optimizer_eps": self._optimizer.defaults.get("eps"),
+            "scheduler": self._scheduler.__class__.__name__ if self._scheduler else "none",
+        }
+
+    def network_config(self) -> dict[str, int | float | str]:
+        return self._agent.network_config()

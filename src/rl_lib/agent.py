@@ -31,8 +31,6 @@ class Agent:
         self._obs_window: deque[T.Tensor] = deque(maxlen=stack_size)
         self._done_window: deque[T.Tensor] = deque(maxlen=stack_size)
         self._network = network
-        self._clamp_min = T.Tensor([-1., 0., 0.]).to(self._device)
-        self._clamp_max = T.Tensor([1., 1., 1.]).to(self._device)
 
     @property
     def device(self) -> T.device:
@@ -93,9 +91,12 @@ class Agent:
 
             action_dist, value = self.heads(temporal, temperature)
 
-            action = action_dist.sample()
+            if temperature == 0:
+                action = action_dist.mean
+            else:
+                action = action_dist.sample()
             # action = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
-            log_probs = action_dist.log_prob(action)
+            log_probs = action_dist.log_prob(action).clamp(-2., 0.)
 
             if not T.isfinite(log_probs).all():
                 logger.error(f"log_probs are not finite {tuple(action, action_dist.base_dist.mean, action_dist.base_dist.stddev)}")
@@ -121,7 +122,7 @@ class Agent:
         action_dist, values = self.heads(temporal_encoding)
 
         # action_tensor = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
-        log_probs = action_dist.log_prob(action)
+        log_probs = action_dist.log_prob(action).clamp(-2., 0.)
         return log_probs, values, action_dist
 
     def action_transform(self, action: T.Tensor) -> T.Tensor:
@@ -137,9 +138,9 @@ class Agent:
     def train(self) -> None:
         self._network.train()
 
-    # def network_parameters(self) -> Iterator[Parameter]:
-    #     return self._network.parameters()
-    def network_parameters(self) -> list[dict]:
+    def network_parameter_groups(self) -> dict[str, list[Parameter]]:
+        """Groups params by their role, without any lr/weight_decay attached.
+        PPOTrainer decides the actual hyperparameters per group."""
         decay, no_decay = [], []
         for module in [self._network.cnn, self._network.sequence_encoder]:
             for name, p in module.named_parameters():
@@ -150,12 +151,12 @@ class Agent:
             for name, p in module.named_parameters():
                 (head_no_decay if "bias" in name or "_log_std" in name else head_decay).append(p)
 
-        return [
-            {"params": decay, "lr": 1e-4, "weight_decay": 1e-5},
-            {"params": no_decay, "lr": 1e-4, "weight_decay": 0.0},
-            {"params": head_decay, "lr": 3e-4, "weight_decay": 1e-5},
-            {"params": head_no_decay, "lr": 3e-4, "weight_decay": 0.0},
-        ]
+        return {
+            "backbone_decay": decay,
+            "backbone_no_decay": no_decay,
+            "head_decay": head_decay,
+            "head_no_decay": head_no_decay,
+        }
 
     def clip_grad_norm(self, max_norm: float) -> T.Tensor:
         # add per group grad norm
@@ -203,3 +204,6 @@ class Agent:
         done_t = T.logical_or(terminated_t, truncated_t)
 
         return next_state, state_t, action, log_probs, value, reward, terminated_t, truncated_t, done_t, info
+
+    def network_config(self) -> dict[str, int | float | str]:
+        return self._network.config()

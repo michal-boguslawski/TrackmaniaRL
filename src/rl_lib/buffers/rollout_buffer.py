@@ -1,8 +1,6 @@
 from collections import deque
 from dataclasses import dataclass
-import numpy as np
 import torch as T
-from math import ceil
 
 
 @dataclass(slots=True, frozen=True)
@@ -21,22 +19,12 @@ class RolloutBuffer:
     def __init__(
         self,
         size: int,
-        # num_envs: int,
         stack_size: int,
-        # observation_space: tuple[int, ...],
-        # action_space: tuple[int, ...],
-        # obs_dtype: T.dtype = T.uint8,
-        # device: str = "cpu",
         *args,
         **kwargs
     ):
         self.size = size
-        # self._num_envs = num_envs
-        # self._observation_space = observation_space
-        # self._action_space = action_space
-        # self._obs_dtype = obs_dtype
         self._stack_size = stack_size
-        # self._device = T.device(device)
         self._buffer: dict[str, deque[T.Tensor]] = {}
         self._counter: int = 0
         self.reset()
@@ -77,11 +65,14 @@ class RolloutBuffer:
         critic_value shape is (batch, length)
         terminated shape is (batch, length - 1)
         """
-        
-        delta = reward + gamma * critic_value[:, 1:] * T.logical_not(terminated) - critic_value[:, :-1]
+        dones = T.logical_or(terminated, truncated)
+        delta = (
+            reward
+            + gamma * critic_value[:, 1:] * T.logical_not(terminated)
+            - critic_value[:, :-1]
+        )
         advantages = T.zeros_like(reward)
         last_gae_lam = 0.
-        dones = T.logical_or(terminated, truncated)
         for i in reversed(range(reward.shape[1])):
             last_gae_lam = delta[:, i] + gamma * gae_lambda * last_gae_lam * T.logical_not(dones[:, i])
             advantages[:, i] = last_gae_lam
@@ -130,34 +121,18 @@ class RolloutBuffer:
 
         self.reset_counter()
 
-
-if __name__ == "__main__":
-    buffer = RolloutBuffer(32, 4)
-    for i in range(1, 37):
-        step = RolloutStep(
-            T.tensor([[i],[i+1]]).to(T.float32),
-            T.tensor([i, i+1]).to(T.float32),
-            T.tensor([i, i+1]).to(T.float32),
-            T.tensor([i, i+1]).to(T.float32),
-            T.tensor([i, i+1]).to(T.float32),
-            T.tensor([False, False]),
-            T.tensor([False, False]),
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"size={self.size}, "
+            f"stack_size={self._stack_size}, "
+            f"counter={self._counter}/{self.size}, "
+            f"is_full={self.is_full()})"
         )
-        buffer.add(step)
-    batch = buffer.get()
-    print({key: value.shape for key, value in batch.items()})
-    actions = batch["action"]
-    num_envs, batch_size = actions.shape
-    indices = np.random.permutation(ceil(batch_size * num_envs / 8))
-    print(indices * 8)
-    for ind in indices:
-        i, k = ind % num_envs, ind // num_envs
-        print(i, k)
-    print(indices[0])
-    # print(
-    #     batch["observation"][i, k:(k+32)]
-    # )
-    # print(buffer.is_full())
-    # buffer.reset()
-    # print(buffer._buffer)
 
+    def config(self) -> dict[str, int | str]:
+        """Hyperparameters, suitable for mlflow.log_params (with a prefix)."""
+        return {
+            "size": self.size,
+            "stack_size": self._stack_size,
+        }

@@ -4,7 +4,7 @@ from gymnasium.vector import VectorEnv
 from gymnasium.wrappers.vector import NormalizeReward
 from functools import partial
 
-from rl_lib.envs.wrappers import WRAPPERS
+from rl_lib.envs.wrappers.registry import WRAPPERS
 
 def make_env(
     env_id: str,
