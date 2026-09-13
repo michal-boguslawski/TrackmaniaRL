@@ -16,7 +16,7 @@ logger = getLogger(__name__)
 
 
 class Actor(nn.Module):
-    def __init__(self, action_dim: int, in_dim: int = 256, hidden_dim: int = 256):
+    def __init__(self, action_dim: int, in_dim: int, hidden_dim: int = 128):
         super().__init__()
         self.action_dim = action_dim
         self.in_dim = in_dim
@@ -38,7 +38,7 @@ class Actor(nn.Module):
         return self.cfg.out_dim
 
     def forward(self, x: T.Tensor, temperature: float = 1.) -> Distribution:
-        mean = self._network(x).clamp(-6, 6)
+        mean = self._network(x).clamp(-3., 3.)
         std = self._log_std.clamp(-2.0, 0.5).exp() * temperature
 
         if not T.isfinite(mean).all():
@@ -48,25 +48,16 @@ class Actor(nn.Module):
         if not T.isfinite(std).all():
             logger.error(f"std is not finite {std}")
             raise ValueError(f"Std is not finite")
-        
-        return Normal(mean, std)
 
-    def action_transform(self, action: T.Tensor) -> T.Tensor:
-        transforms = ComposeTransform([
-            TanhTransform(),
-            AffineTransform(loc=self._affine_loc, scale=self._affine_scale),
-        ])
-        return transforms(action)
+        dist = TransformedDistribution(
+            Normal(mean, std),
+            ComposeTransform([
+                TanhTransform(),
+                AffineTransform(loc=self._affine_loc, scale=self._affine_scale),
+            ])
+        )
 
-    # def act_deterministic(self, x: T.Tensor) -> T.Tensor:
-    #     mean = self._network(x)
-        
-    #     transforms = ComposeTransform([
-    #         TanhTransform(),
-    #         AffineTransform(loc=self._affine_loc, scale=self._affine_scale),
-    #     ])
-    #     action = transforms(mean)
-    #     return action
+        return dist
 
     def __repr__(self) -> str:
         n_params = sum(p.numel() for p in super().parameters())

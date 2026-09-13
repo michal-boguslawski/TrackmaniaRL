@@ -6,7 +6,7 @@ from rl_lib.networks.config import CriticConfig
 
 
 class Critic(nn.Module):
-    def __init__(self, in_dim: int = 256, hidden_dim: int = 256):
+    def __init__(self, in_dim: int, hidden_dim: int = 128):
         super().__init__()
         self.in_dim = in_dim
 

@@ -5,7 +5,7 @@ from rl_lib.networks.config import TemporalConfig
 
 
 class TemporalCNN1D(nn.Module):
-    def __init__(self, stack_size: int, in_dim: int, out_dim: int = 256):
+    def __init__(self, stack_size: int, in_dim: int, out_dim: int = 128):
         super().__init__()
         self.stack_size = stack_size
         self.in_dim = in_dim

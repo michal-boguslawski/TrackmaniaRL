@@ -29,7 +29,7 @@ class PPOTrainer:
         target_kl: float = 0.03,
         kl_warmup_steps: int = 100_000,
         backbone_lr: float = 1e-4,
-        head_lr: float = 3e-4,
+        head_lr: float = 1e-4,
         weight_decay: float = 1e-5,
         optimizer_eps: float = 1e-5,
     ):
@@ -191,8 +191,7 @@ class PPOTrainer:
 
     def _entropy_loss(self, dist: Distribution) -> tuple[T.Tensor, dict[str, float]]:
         # entropy of the base Normal; TanhTransform doesn't have closed-form entropy
-        # entropy: T.Tensor = dist.base_dist.entropy()
-        entropy = dist.entropy()
+        entropy: T.Tensor = dist.base_dist.entropy()
         entropy_loss = entropy.sum(dim=-1).mean()
 
         mean_entropy = entropy.mean(0).detach()
@@ -202,7 +201,7 @@ class PPOTrainer:
         metrics["loss/entropy"] = entropy_loss.detach().item()
 
         with T.no_grad():
-            log_std = dist.scale.log().mean(0)
+            log_std = dist.base_dist.scale.log().mean(0)
         metrics.update({f"metrics/log_std_{i}": v.item() for i, v in enumerate(log_std)})
 
         return entropy_loss, metrics
@@ -316,7 +315,7 @@ class PPOTrainer:
             mean_epoch_kl = float(np.mean(epoch_kls))
             self._on_epoch()
             if mean_epoch_kl > self._target_kl and training_step > self._kl_warmup_steps:
-                logger.warning(f"Early stop epoch {epoch}: KL {mean_epoch_kl:.4f} > {self.target_kl}")
+                logger.warning(f"Early stop epoch {epoch}: KL {mean_epoch_kl:.4f} > {self._target_kl}")
                 break
 
         if self._scheduler:

@@ -1,3 +1,4 @@
+import gc
 from logging import getLogger
 import torch as T
 
@@ -21,7 +22,7 @@ NUM_ENVS = 8
 STACK_SIZE = 4
 SKIP = 2
 MINIBATCH_SIZE = 256
-EPOCHS = 6
+EPOCHS = 3
 DEVICE = T.device("cuda" if T.cuda.is_available() else "cpu")
 
 setup_logging()
@@ -31,6 +32,9 @@ logger = getLogger(__name__)
 
 
 def main():
+    gc.collect()
+    T.cuda.empty_cache()      # returns cached (unused) memory to the OS/driver
+    T.cuda.reset_peak_memory_stats()
     console_metrics_logger = ConsoleMetricsLogger()
 
     env = make_env(
@@ -80,8 +84,8 @@ def main():
 
     trainer = PPOTrainer(
         agent=agent,
-        ppo_epsilon=0.2,
-        entropy_coef=1e-3,
+        ppo_epsilon=0.15,
+        entropy_coef=1e-2,
         entropy_decay=0.995,
         advantage_normalization_strategy="global",
         callbacks=[
@@ -118,7 +122,11 @@ def main():
     )
     logger.debug("%s", rollout_collector)
 
-    rollout_collector.run(training_steps)
+    try:
+        rollout_collector.run(training_steps)
+    except Exception as e:
+        logger.exception("rollout_collector.run failed")
+        raise e
 
 
 if __name__ == "__main__":
