@@ -91,15 +91,13 @@ class Agent:
 
             action_dist, value = self.heads(temporal, temperature)
 
-            if temperature == 0:
-                action = action_dist.mean
-            else:
-                action = action_dist.sample()
+            action = action_dist.sample()
             # action = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
             log_probs = action_dist.log_prob(action).clamp(-2., 0.)
+            # log_probs = T.nan_to_num(log_probs, nan=-20.0, posinf=0.0, neginf=-20.0)
 
             if not T.isfinite(log_probs).all():
-                logger.error(f"log_probs are not finite {tuple(action, action_dist.base_dist.mean, action_dist.base_dist.stddev)}")
+                logger.error(f"log_probs are not finite: action={action}, mean={action_dist.base_dist.mean}, stddev={action_dist.base_dist.stddev}")
                 raise ValueError("log_probs are not finite")
 
         return (
@@ -194,9 +192,8 @@ class Agent:
         state_t = T.from_numpy(state).to(self._device)
         action, log_probs, value = self.act(state_t, done, temperature)
 
-        transformed_action = self.action_transform(action)
         next_state, reward, terminated, truncated, info = env.step(
-            transformed_action.cpu().numpy()
+            action.cpu().numpy()
         )
 
         terminated_t = T.from_numpy(terminated).to(self._device)
