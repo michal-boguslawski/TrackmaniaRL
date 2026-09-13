@@ -22,7 +22,7 @@ NUM_ENVS = 8
 STACK_SIZE = 4
 SKIP = 2
 MINIBATCH_SIZE = 256
-EPOCHS = 3
+EPOCHS = 4
 DEVICE = T.device("cuda" if T.cuda.is_available() else "cpu")
 
 setup_logging()
@@ -84,7 +84,7 @@ def main():
 
     trainer = PPOTrainer(
         agent=agent,
-        ppo_epsilon=0.15,
+        ppo_epsilon=0.2,
         entropy_coef=1e-2,
         entropy_decay=0.995,
         advantage_normalization_strategy="global",

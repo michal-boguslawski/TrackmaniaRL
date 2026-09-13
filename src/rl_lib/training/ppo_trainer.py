@@ -27,7 +27,7 @@ class PPOTrainer:
         entropy_decay: float = 0.995,
         callbacks: list[TrainingCallback] | None = None,
         target_kl: float = 0.03,
-        kl_warmup_steps: int = 100_000,
+        kl_warmup_steps: int = 20_000,
         backbone_lr: float = 1e-4,
         head_lr: float = 1e-4,
         weight_decay: float = 1e-5,
@@ -44,6 +44,7 @@ class PPOTrainer:
         self.ppo_epsilon = ppo_epsilon
         self.critic_beta = critic_beta
         self.entropy_coef = entropy_coef
+        self.mean_reg_coef = 1e-6
         self.advantage_normalization_strategy = advantage_normalization_strategy
         self.entropy_decay = entropy_decay
         self._critic_loss_fn = nn.HuberLoss(reduction="none")
@@ -129,7 +130,7 @@ class PPOTrainer:
             }
         return metrics
 
-    def _actor_loss(self, advantages: T.Tensor, log_probs: T.Tensor, old_log_probs: T.Tensor) -> tuple[T.Tensor, dict[str, float]]:
+    def _actor_loss(self, advantages: T.Tensor, log_probs: T.Tensor, old_log_probs: T.Tensor, action_mean: T.Tensor) -> tuple[T.Tensor, dict[str, float]]:
         if self.advantage_normalization_strategy and self.advantage_normalization_strategy == "batch":
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-4)
 
@@ -147,15 +148,17 @@ class PPOTrainer:
         surrogate_loss = -T.minimum(
             ratio * advantages,
             clipped_ratio * advantages
-        )
-        actor_loss = surrogate_loss.mean()
+        ).mean()
+        
+        mean_reg = action_mean.pow(2).mean()
+        actor_loss = surrogate_loss + self.mean_reg_coef * mean_reg
 
-        metrics = self._actor_loss_metrics(log_ratio)
+        metrics = self._actor_loss_metrics(log_ratio, surrogate_loss, mean_reg)
         metrics["metrics/actor_loss"] = actor_loss.detach().item()
 
         return actor_loss, metrics
 
-    def _actor_loss_metrics(self, log_ratio: T.Tensor) -> dict[str, float]:
+    def _actor_loss_metrics(self, log_ratio: T.Tensor, surrogate_loss: T.Tensor, mean_reg: T.Tensor) -> dict[str, float]:
         with T.no_grad():
             log_ratio_total = log_ratio.sum(-1)
             ratio_total = log_ratio_total.exp()
@@ -169,6 +172,8 @@ class PPOTrainer:
             "metrics/approx_kl": approx_kl.item(),
             "metrics/ratio_max": ratio_max.item(),
             "metrics/clip_fraction": clip_fraction.item(),
+            "metrics/surrogate_loss": surrogate_loss.detach().item(),
+            "metrics/mean_reg": mean_reg.detach().item(),
         }
         
         for i, value in enumerate(approx_kl_per_action):
@@ -218,7 +223,7 @@ class PPOTrainer:
         dones: T.Tensor | None = None
     ) -> tuple[tuple[T.Tensor, T.Tensor, T.Tensor], dict[str, float]]:
         log_probs, values, dist = self._agent.evaluate_actions(observation, action, dones)
-        actor_loss, actor_metrics = self._actor_loss(advantages, log_probs, old_log_probs)
+        actor_loss, actor_metrics = self._actor_loss(advantages, log_probs, old_log_probs, dist.base_dist.mean)
         critic_loss, critic_metrics = self._critic_loss(returns, values, old_values)
         entropy_loss, entropy_metrics = self._entropy_loss(dist)
         metrics = {**actor_metrics, **critic_metrics, **entropy_metrics}
@@ -320,7 +325,7 @@ class PPOTrainer:
 
         if self._scheduler:
             self._scheduler.step()
-        self.entropy_coef *= self.entropy_decay
+        self.entropy_coef = max(self.entropy_decay * self.entropy_coef, 1e-3)
         metrics = {
             "training/entropy_coef": self.entropy_coef,
             # "training/lr": self._optimizer.param_groups[0]["lr"]

@@ -15,6 +15,17 @@ from rl_lib.networks.config import ActorConfig
 logger = getLogger(__name__)
 
 
+class StableTanhTransform(TanhTransform):
+    def log_abs_det_jacobian(self, x, y):
+        # y = tanh(x); clamp away from ±1 so log(1 - y^2) can't blow up
+        y_clamped = y.clamp(-1 + 1e-6, 1 - 1e-6)
+        return T.log(1 - y_clamped.pow(2) + 1e-6)
+
+    def _inverse(self, y):
+        y_clamped = y.clamp(-1 + 1e-6, 1 - 1e-6)
+        return 0.5 * (T.log1p(y_clamped) - T.log1p(-y_clamped))
+
+
 class Actor(nn.Module):
     def __init__(self, action_dim: int, in_dim: int, hidden_dim: int = 128):
         super().__init__()
@@ -38,7 +49,7 @@ class Actor(nn.Module):
         return self.cfg.out_dim
 
     def forward(self, x: T.Tensor, temperature: float = 1.) -> Distribution:
-        mean = self._network(x).clamp(-3., 3.)
+        mean = self._network(x)
         std = self._log_std.clamp(-2.0, 0.5).exp() * temperature
 
         if not T.isfinite(mean).all():
@@ -52,7 +63,7 @@ class Actor(nn.Module):
         dist = TransformedDistribution(
             Normal(mean, std),
             ComposeTransform([
-                TanhTransform(),
+                StableTanhTransform(),
                 AffineTransform(loc=self._affine_loc, scale=self._affine_scale),
             ])
         )

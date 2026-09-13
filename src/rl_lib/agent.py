@@ -93,7 +93,7 @@ class Agent:
 
             action = action_dist.sample()
             # action = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
-            log_probs = action_dist.log_prob(action).clamp(-2., 0.)
+            log_probs = action_dist.log_prob(action)  # .clamp(-2., 0.)
             # log_probs = T.nan_to_num(log_probs, nan=-20.0, posinf=0.0, neginf=-20.0)
 
             if not T.isfinite(log_probs).all():
@@ -120,7 +120,7 @@ class Agent:
         action_dist, values = self.heads(temporal_encoding)
 
         # action_tensor = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
-        log_probs = action_dist.log_prob(action).clamp(-2., 0.)
+        log_probs = action_dist.log_prob(action)  # .clamp(-2., 0.)
         return log_probs, values, action_dist
 
     def action_transform(self, action: T.Tensor) -> T.Tensor:

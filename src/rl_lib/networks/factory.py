@@ -52,9 +52,6 @@ class Network(nn.Module):
     def load_state_dict(self, path: str) -> None:
         super().load_state_dict(T.load(path, weights_only=True))
 
-    def action_transform(self, action: T.Tensor) -> T.Tensor:
-        return self.actor.action_transform(action)
-
     def _submodules(self) -> list[tuple[str, nn.Module]]:
         return [
             ("cnn", self.cnn),
