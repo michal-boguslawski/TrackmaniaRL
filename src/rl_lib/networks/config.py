@@ -9,7 +9,7 @@ class CNNConfig(BaseModel):
 
 
 class TemporalConfig(BaseModel):
-    out_dim: PositiveInt = 128
+    out_dim: PositiveInt = 256
 
 
 class ActorConfig(BaseModel):

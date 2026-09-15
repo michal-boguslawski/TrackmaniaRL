@@ -13,7 +13,8 @@ class TemporalCNN1D(nn.Module):
         self.cfg = TemporalConfig(out_dim=out_dim)
 
         self._encoder = nn.Conv1d(in_dim, self.cfg.out_dim, kernel_size=stack_size)
-        self._norm = nn.LayerNorm(self.cfg.out_dim)
+        self._norm = nn.LayerNorm(in_dim)
+        self._out_norm = nn.LayerNorm(self.cfg.out_dim)
 
     @property
     def out_dim(self) -> int:
@@ -25,6 +26,7 @@ class TemporalCNN1D(nn.Module):
         x = self._encoder(x)
         x = x.permute(0, 2, 1)
         x.squeeze_(1)
+        x = self._out_norm(x)
         return x
 
     def __repr__(self) -> str:
