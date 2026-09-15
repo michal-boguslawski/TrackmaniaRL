@@ -13,7 +13,7 @@ class TemporalConfig(BaseModel):
 
 
 class ActorConfig(BaseModel):
-    hidden_dim: PositiveInt = 128
+    hidden_dim: PositiveInt = 256
 
 
 class CriticConfig(BaseModel):

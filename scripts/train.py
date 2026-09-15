@@ -9,6 +9,7 @@ from src.rl_lib.buffers.rollout_buffer import RolloutBuffer
 from src.rl_lib.networks.factory import Network
 from src.rl_lib.training.ppo_trainer import PPOTrainer
 from src.rl_lib.tracking.console_logger import ConsoleMetricsLogger
+from src.rl_lib.tracking.mlflow_logger import MLflowLogger
 from src.rl_lib.training.callbacks.metrics_logger import MetricsLoggingCallback
 from src.rl_lib.training.callbacks.record_statistics import RecordStatisticLoggerCallback
 from src.rl_lib.training.callbacks.record_video import RecordVideoCallback
@@ -22,10 +23,11 @@ NUM_ENVS = 8
 STACK_SIZE = 4
 SKIP = 2
 MINIBATCH_SIZE = 256
-EPOCHS = 4
+EPOCHS = 3
 DEVICE = T.device("cuda" if T.cuda.is_available() else "cpu")
 
-setup_logging()
+
+session_id = setup_logging()
 
 
 logger = getLogger(__name__)
@@ -35,7 +37,12 @@ def main():
     gc.collect()
     T.cuda.empty_cache()      # returns cached (unused) memory to the OS/driver
     T.cuda.reset_peak_memory_stats()
+    env_name = "CarRacing-v3"
     console_metrics_logger = ConsoleMetricsLogger()
+    mlflow_logger = MLflowLogger(f"{env_name}/PPO", run_name=session_id)
+
+    video_folder = f"./logs/videos/{session_id}"
+    checkpoints_folder = f"./logs/checkpoints/{session_id}"
 
     env = make_env(
         "CarRacing-v3",
@@ -84,16 +91,18 @@ def main():
 
     trainer = PPOTrainer(
         agent=agent,
-        ppo_epsilon=0.2,
+        ppo_epsilon=0.15,
         entropy_coef=1e-2,
-        entropy_decay=0.995,
+        entropy_decay=0.9975,
+        head_lr=3e-5,
         advantage_normalization_strategy="global",
         callbacks=[
-            CheckpointsSaveCallback("./logs/checkpoints", agent, intervals=200),
+            CheckpointsSaveCallback(checkpoints_folder, agent, intervals=200),
             MetricsLoggingCallback(console_metrics_logger, granularity="batch"),
+            MetricsLoggingCallback(mlflow_logger, granularity="batch"),
         ]
     )
-    training_steps = 1_000_000
+    training_steps = 3_000_000
     trainer.setup_train(training_steps, BATCH_SIZE)
 
     rollout_collector = RolloutCollector(
@@ -104,12 +113,17 @@ def main():
         MINIBATCH_SIZE,
         callbacks=[
             ParamsLoggingCallback(console_metrics_logger),
+            ParamsLoggingCallback(mlflow_logger),
             RecordStatisticLoggerCallback(console_metrics_logger, mode="mean"),
+            RecordStatisticLoggerCallback(mlflow_logger),
             RecordVideoCallback(
                 "CarRacing-v3",
                 agent=record_agent,
-                video_folder="./logs/videos",
-                metrics_logger=console_metrics_logger,
+                video_folder=video_folder,
+                metrics_loggers=[
+                    console_metrics_logger,
+                    mlflow_logger,
+                ],
                 skip=SKIP,
                 wrappers=[
                     "record_episode_stats",

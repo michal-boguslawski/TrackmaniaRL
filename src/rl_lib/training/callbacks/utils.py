@@ -5,7 +5,7 @@ from logging import getLogger
 logger = getLogger(__name__)
 
 
-def stop_video_recording(env: gym.Env) -> bool:
+def stop_video_recording(env: gym.Env) -> str | None:
     """
     Walk down the wrapper chain and stop/finalize video recording on
     whichever wrapper is the RecordVideo instance. Returns True if a
@@ -18,10 +18,13 @@ def stop_video_recording(env: gym.Env) -> bool:
             # only call if defined on THIS level, not inherited via delegation,
             # so we don't accidentally trigger it twice while walking down
             if method_name in vars(type(current)) or method_name in vars(current):
+                video_folder = getattr(current, "video_folder", None)
+                video_name = getattr(current, "_video_name", None)
+                video_path = f"{video_folder}/{video_name}.mp4"
                 stop_fn()
-                return True
+                return video_path
         if not isinstance(current, gym.Wrapper):
             break
         current = current.env
     logger.warning("No RecordVideo wrapper found in env chain; nothing to stop.")
-    return False
+    return None

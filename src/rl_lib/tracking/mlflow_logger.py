@@ -60,6 +60,9 @@ class MLflowLogger(MetricsLogger):
     def log_state_dict(self, state_dict: dict, artifact_path: str = "checkpoints") -> None:
         mlflow.pytorch.log_state_dict(state_dict, artifact_path=artifact_path)
 
+    def log_artifact(self, local_path: str, artifact_path: str | None = None) -> None:
+        mlflow.log_artifact(local_path, artifact_path=artifact_path)
+
     def close(self) -> None:
         mlflow.end_run()
 

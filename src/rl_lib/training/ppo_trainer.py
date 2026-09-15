@@ -44,7 +44,7 @@ class PPOTrainer:
         self.ppo_epsilon = ppo_epsilon
         self.critic_beta = critic_beta
         self.entropy_coef = entropy_coef
-        self.mean_reg_coef = 1e-6
+        self.mean_reg_coef = 1e-3
         self.advantage_normalization_strategy = advantage_normalization_strategy
         self.entropy_decay = entropy_decay
         self._critic_loss_fn = nn.HuberLoss(reduction="none")
@@ -137,7 +137,7 @@ class PPOTrainer:
         assert log_probs.shape == old_log_probs.shape
         log_ratio = log_probs - old_log_probs
 
-        ratio = log_ratio.sum(-1).clamp(-20, 20).exp()
+        ratio = log_ratio.sum(-1).clamp(-5, 5).exp()
 
         clipped_ratio = ratio.clamp(
             min=1 - self.ppo_epsilon,
@@ -274,7 +274,7 @@ class PPOTrainer:
             "rollout/advantages_mean": batch["advantages"].mean().item(),
             "rollout/advantages_std": batch["advantages"].std().item(),
             "rollout/critic_values": batch["critic_value"].mean().item(),
-            "rollout/old_log_probs" : batch["old_log_probs"].mean().item(),
+            "rollout/old_log_probs" : batch["old_log_probs"].sum(-1).mean().item(),
         }
         action_means = batch["action"].mean((0, 1))
         for i, mean in enumerate(action_means):
@@ -325,7 +325,7 @@ class PPOTrainer:
 
         if self._scheduler:
             self._scheduler.step()
-        self.entropy_coef = max(self.entropy_decay * self.entropy_coef, 1e-3)
+        self.entropy_coef = max(self.entropy_decay * self.entropy_coef, 1e-4)
         metrics = {
             "training/entropy_coef": self.entropy_coef,
             # "training/lr": self._optimizer.param_groups[0]["lr"]
