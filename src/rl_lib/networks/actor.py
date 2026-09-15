@@ -49,7 +49,7 @@ class Actor(nn.Module):
         return self.cfg.out_dim
 
     def forward(self, x: T.Tensor, temperature: float = 1.) -> Distribution:
-        mean = self._network(x)
+        mean = self._network(x).clamp(-3., 3.)
         std = self._log_std.clamp(-2.0, 0.5).exp() * temperature
 
         if not T.isfinite(mean).all():
