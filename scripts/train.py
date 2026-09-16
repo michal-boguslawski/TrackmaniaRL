@@ -19,10 +19,10 @@ from src.rl_lib.agent import Agent
 
 
 BATCH_SIZE = 1024
-NUM_ENVS = 8
+NUM_ENVS = 16
 STACK_SIZE = 4
 SKIP = 2
-MINIBATCH_SIZE = 256
+MINIBATCH_SIZE = 512
 EPOCHS = 3
 DEVICE = T.device("cuda" if T.cuda.is_available() else "cpu")
 
@@ -39,7 +39,7 @@ def main():
     T.cuda.reset_peak_memory_stats()
     env_name = "CarRacing-v3"
     console_metrics_logger = ConsoleMetricsLogger()
-    mlflow_logger = MLflowLogger(f"{env_name}/PPO", run_name=session_id)
+    mlflow_logger = MLflowLogger(env_name, run_name=f"PPO/{session_id}")
 
     video_folder = f"./logs/videos/{session_id}"
     checkpoints_folder = f"./logs/checkpoints/{session_id}"

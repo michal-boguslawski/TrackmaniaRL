@@ -17,7 +17,7 @@ class ActorConfig(BaseModel):
 
 
 class CriticConfig(BaseModel):
-    hidden_dim: PositiveInt = 128
+    hidden_dim: PositiveInt = 256
 
 
 class NetworkConfig(BaseModel):

@@ -30,7 +30,7 @@ class PPOTrainer:
         kl_warmup_steps: int = 20_000,
         backbone_lr: float = 1e-4,
         head_lr: float = 1e-4,
-        weight_decay: float = 1e-5,
+        weight_decay: float = 1e-4,
         optimizer_eps: float = 1e-5,
     ):
         self._agent = agent
@@ -153,12 +153,12 @@ class PPOTrainer:
         mean_reg = action_mean.pow(2).mean()
         actor_loss = surrogate_loss + self.mean_reg_coef * mean_reg
 
-        metrics = self._actor_loss_metrics(log_ratio, surrogate_loss, mean_reg)
+        metrics = self._actor_loss_metrics(log_ratio, surrogate_loss, mean_reg, action_mean)
         metrics["metrics/actor_loss"] = actor_loss.detach().item()
 
         return actor_loss, metrics
 
-    def _actor_loss_metrics(self, log_ratio: T.Tensor, surrogate_loss: T.Tensor, mean_reg: T.Tensor) -> dict[str, float]:
+    def _actor_loss_metrics(self, log_ratio: T.Tensor, surrogate_loss: T.Tensor, mean_reg: T.Tensor, action_mean: T.Tensor) -> dict[str, float]:
         with T.no_grad():
             log_ratio_total = log_ratio.sum(-1)
             ratio_total = log_ratio_total.exp()
@@ -175,6 +175,13 @@ class PPOTrainer:
             "metrics/surrogate_loss": surrogate_loss.detach().item(),
             "metrics/mean_reg": mean_reg.detach().item(),
         }
+
+        with T.no_grad():
+            metrics["metrics/mean_abs_max"] = action_mean.abs().max().item()
+            for i in range(action_mean.shape[-1]):
+                metrics[f"metrics/mean_abs_max_{i}"] = action_mean[:, i].abs().max().item()
+            # fraction of samples within 1e-3 of tanh saturation (y = tanh(x), |y|>1-1e-3 <=> |x|>~4.0)
+            metrics["metrics/tanh_saturation_frac"] = (action_mean.abs() > 3.5).float().mean().item()
         
         for i, value in enumerate(approx_kl_per_action):
             metrics[f"metrics/approx_kl_{i}"] = value.item()
@@ -316,6 +323,11 @@ class PPOTrainer:
                     logger.error(f"Error at training step {training_step}, epoch {epoch}: {e}")
                     raise e
                 epoch_kls.append(minibatch_metrics["metrics/approx_kl"])
+
+                if minibatch_metrics["metrics/approx_kl"] > self._target_kl * 3 and training_step > self._kl_warmup_steps:
+                    logger.warning(f"Hard stop mid-epoch: KL {minibatch_metrics['metrics/approx_kl']:.4f}")
+                    break
+
                 self._on_minibatch(metrics=minibatch_metrics, step=self._step)
             mean_epoch_kl = float(np.mean(epoch_kls))
             self._on_epoch()
