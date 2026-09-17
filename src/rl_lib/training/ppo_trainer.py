@@ -89,6 +89,21 @@ class PPOTrainer:
         action, log_probs, critic_value = self._agent.act(observation, done)
         return action, log_probs, critic_value
 
+    def clip_grad_norm(self, backbone_max_norm: float, actor_max_norm: float, critic_max_norm: float) -> dict[str, float]:
+        backbone_params = list(self._agent._network.cnn.parameters()) + list(self._agent._network.sequence_encoder.parameters())
+        actor_params = list(self._agent._network.actor.parameters())
+        critic_params = list(self._agent._network.critic.parameters())
+
+        backbone_norm = nn.utils.clip_grad_norm_(backbone_params, backbone_max_norm)
+        actor_norm = nn.utils.clip_grad_norm_(actor_params, actor_max_norm)
+        critic_norm = nn.utils.clip_grad_norm_(critic_params, critic_max_norm)
+
+        return {
+            "grad_norm/backbone_total": backbone_norm.item(),
+            "grad_norm/actor_total": actor_norm.item(),
+            "grad_norm/critic_total": critic_norm.item(),
+        }
+
     def train_step(
         self,
         observation: T.Tensor,
@@ -115,7 +130,7 @@ class PPOTrainer:
         # if metrics["metrics/grad_norm/max"] > 100:
         #     print(metrics)
         #     raise "dupa"
-        grad_norm = self._agent.clip_grad_norm(0.5)
+        self.clip_grad_norm(0.5, 0.5, 0.5)
 
         self._optimizer.step()
         self._step += 1

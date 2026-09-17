@@ -1,2 +1,6 @@
-videos
 __pycache__
+
+logs
+mlruns
+
+nohup.out

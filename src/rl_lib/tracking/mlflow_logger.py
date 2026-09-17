@@ -23,7 +23,7 @@ class MLflowLogger(MetricsLogger):
             run_name = self._deduce_run_name()
 
         self._registered_model_name = registered_model_name
-        self._run = mlflow.start_run(run_name=run_name)
+        self._run = mlflow.start_run(run_name=run_name, log_system_metrics=True)
 
     @staticmethod
     def _deduce_run_name() -> str:

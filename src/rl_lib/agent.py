@@ -166,7 +166,7 @@ class Agent:
             "grad_norm/sequence_encoder": nn.utils.clip_grad_norm_(self._network.sequence_encoder.parameters(), float("inf")).item(),
             "grad_norm/actor": nn.utils.clip_grad_norm_(self._network.actor.parameters(), float("inf")).item(),
             "grad_norm/critic": nn.utils.clip_grad_norm_(self._network.critic.parameters(), float("inf")).item(),
-            "metrics/grad_norm/max": nn.utils.clip_grad_norm_(self._network.parameters(), float("inf")).item(),
+            "grad_norm/max": nn.utils.clip_grad_norm_(self._network.parameters(), float("inf")).item(),
         }
 
     def save_state_dict(self, path: str) -> None:
