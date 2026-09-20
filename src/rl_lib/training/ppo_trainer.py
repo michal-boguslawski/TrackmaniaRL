@@ -32,6 +32,7 @@ class PPOTrainer:
         head_lr: float = 1e-4,
         weight_decay: float = 1e-4,
         optimizer_eps: float = 1e-5,
+        mean_reg_coef: float = 1e-2,
     ):
         self._agent = agent
         self.backbone_lr = backbone_lr
@@ -44,7 +45,7 @@ class PPOTrainer:
         self.ppo_epsilon = ppo_epsilon
         self.critic_beta = critic_beta
         self.entropy_coef = entropy_coef
-        self.mean_reg_coef = 1e-3
+        self.mean_reg_coef = mean_reg_coef
         self.advantage_normalization_strategy = advantage_normalization_strategy
         self.entropy_decay = entropy_decay
         self._critic_loss_fn = nn.HuberLoss(reduction="none")
@@ -228,7 +229,7 @@ class PPOTrainer:
         metrics["loss/entropy"] = entropy_loss.detach().item()
 
         with T.no_grad():
-            log_std = dist.base_dist.scale.log().mean(0)
+            log_std = dist.base_dist.variance.pow(1/2).log().mean(0)
         metrics.update({f"metrics/log_std_{i}": v.item() for i, v in enumerate(log_std)})
 
         return entropy_loss, metrics
@@ -244,8 +245,8 @@ class PPOTrainer:
         action: T.Tensor,
         dones: T.Tensor | None = None
     ) -> tuple[tuple[T.Tensor, T.Tensor, T.Tensor], dict[str, float]]:
-        log_probs, values, dist = self._agent.evaluate_actions(observation, action, dones)
-        actor_loss, actor_metrics = self._actor_loss(advantages, log_probs, old_log_probs, dist.base_dist.mean)
+        log_probs, values, dist, action_mean = self._agent.evaluate_actions(observation, action, dones)
+        actor_loss, actor_metrics = self._actor_loss(advantages, log_probs, old_log_probs, action_mean)
         critic_loss, critic_metrics = self._critic_loss(returns, values, old_values)
         entropy_loss, entropy_metrics = self._entropy_loss(dist)
         metrics = {**actor_metrics, **critic_metrics, **entropy_metrics}
@@ -374,7 +375,8 @@ class PPOTrainer:
             f"head_lr={self.head_lr}, "
             f"weight_decay={self.weight_decay}, "
             f"advantage_normalization_strategy={self.advantage_normalization_strategy!r}, "
-            f"scheduler={self._scheduler.__class__.__name__ if self._scheduler else None})"
+            f"scheduler={self._scheduler.__class__.__name__ if self._scheduler else None} "
+            f"mean_reg_coef={self.mean_reg_coef})"
         )
 
     def config(self) -> dict[str, int | float | str]:
@@ -393,6 +395,7 @@ class PPOTrainer:
             "optimizer": self._optimizer.__class__.__name__,
             "optimizer_eps": self._optimizer.defaults.get("eps"),
             "scheduler": self._scheduler.__class__.__name__ if self._scheduler else "none",
+            "mean_reg_coef": self.mean_reg_coef,
         }
 
     def network_config(self) -> dict[str, int | float | str]:

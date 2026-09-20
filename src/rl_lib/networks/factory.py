@@ -39,12 +39,15 @@ class Network(nn.Module):
         """Expects input of shape (batch, seq, feature)"""
         return self.sequence_encoder(x)
 
-    def heads(self, x: T.Tensor, temperature: float) -> tuple[Distribution, T.Tensor]:
+    def heads(self, x: T.Tensor, temperature: float) -> tuple[Distribution, T.Tensor, T.Tensor]:
         """Expects input of shape (batch, feature)"""
-        action_dist = self.actor(x, temperature)
+        if temperature == 0.:
+            action_dist, action_mean = self.actor.forward_deterministic(x)
+        else:
+            action_dist, action_mean = self.actor(x, temperature)
         value = self.critic(x)
 
-        return action_dist, value
+        return action_dist, action_mean, value
 
     def save_state_dict(self, path: str) -> None:
         T.save(self.state_dict(), path)

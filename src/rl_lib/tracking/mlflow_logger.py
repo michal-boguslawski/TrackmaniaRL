@@ -63,11 +63,11 @@ class MLflowLogger(MetricsLogger):
     def log_artifact(self, local_path: str, artifact_path: str | None = None) -> None:
         mlflow.log_artifact(local_path, artifact_path=artifact_path)
 
-    def close(self) -> None:
-        mlflow.end_run()
+    def close(self, status: str = "FINISHED") -> None:
+        mlflow.end_run(status=status)
 
     def __enter__(self) -> "Self":
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        self.close()
+        self.close(status="FINISHED" if exc_type is None else "FAILED")

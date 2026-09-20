@@ -44,7 +44,7 @@ class RecordVideoCallback(CollectorCallback):
         state, _ = self.env.reset()
         done = T.zeros(self.env.num_envs, dtype=T.bool).to(self.agent.device)
         while not done.any():
-            state, _, _, _, _, _, _, _, done, info = self.agent.step_env(self.env, state, done, temperature=1e-4)
+            state, _, _, _, _, _, _, _, done, info = self.agent.step_env(self.env, state, done, temperature=0.)
 
         video_path = stop_video_recording(self.env.envs[0])
         

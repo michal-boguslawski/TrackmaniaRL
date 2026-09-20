@@ -1,7 +1,8 @@
 from logging import getLogger
 import torch as T
+import torch.nn.functional as F
 from torch import nn
-from torch.distributions import Distribution, Normal, TransformedDistribution
+from torch.distributions import Distribution, Beta, TransformedDistribution
 from torch.distributions.transforms import (
     AffineTransform,
     ComposeTransform,
@@ -35,40 +36,47 @@ class Actor(nn.Module):
         self.cfg = ActorConfig(hidden_dim=hidden_dim)
 
         self._network = nn.Sequential(
-            init_layer(nn.Linear(in_dim, self.cfg.hidden_dim)),
+            nn.Linear(in_dim, self.cfg.hidden_dim),
             nn.GELU(),
-            init_layer(nn.Linear(self.cfg.hidden_dim, action_dim), gain=0.01),
+            init_layer(nn.Linear(self.cfg.hidden_dim, 2 * action_dim), 0.01, -2.0),
         )
-        self._log_std = nn.Parameter(T.full((action_dim,), -0.5))
+
         # register as buffers instead of plain tensors
-        self.register_buffer("_affine_loc", T.tensor([0., 0.5, 0.5]))
-        self.register_buffer("_affine_scale", T.tensor([1., 0.5, 0.5]))
+        self.register_buffer("_affine_loc", T.tensor([-1., 0., 0.]))
+        self.register_buffer("_affine_scale", T.tensor([2., 1., 1.]))
 
     @property
     def out_dim(self) -> int:
         return self.cfg.out_dim
 
-    def forward(self, x: T.Tensor, temperature: float = 1.) -> Distribution:
-        mean = self._network(x).clamp(-3., 3.)
-        std = self._log_std.clamp(-2.0, 0.5).exp() * temperature
+    def forward(self, x: T.Tensor, temperature: float = 1.) -> tuple[Distribution, T.Tensor]:
+        raw = self._network(x)
+        alpha_raw, beta_raw = raw.chunk(2, dim=-1)  # each (batch, action_dim)
 
-        if not T.isfinite(mean).all():
-            logger.error(f"mean is not finite {mean}")
-            raise ValueError(f"Mean is not finite")
+        alpha = F.softplus(alpha_raw) / temperature + 1.0
+        beta = F.softplus(beta_raw) / temperature + 1.0
 
-        if not T.isfinite(std).all():
-            logger.error(f"std is not finite {std}")
-            raise ValueError(f"Std is not finite")
-
+        base_dist = Beta(alpha, beta)
         dist = TransformedDistribution(
-            Normal(mean, std),
-            ComposeTransform([
-                StableTanhTransform(),
-                AffineTransform(loc=self._affine_loc, scale=self._affine_scale),
-            ])
+            base_dist,
+            AffineTransform(loc=self._affine_loc, scale=self._affine_scale),
         )
+        return dist, base_dist.mean
 
-        return dist
+    def forward_deterministic(self, x: T.Tensor) -> tuple[Distribution, T.Tensor]:
+        raw = self._network(x)
+        alpha_raw, beta_raw = raw.chunk(2, dim=-1)  # each (batch, action_dim)
+
+        alpha = F.softplus(alpha_raw) + 1.0
+        beta = F.softplus(beta_raw) + 1.0
+
+        base_dist = Beta(alpha, beta)
+        affine_transform = AffineTransform(loc=self._affine_loc, scale=self._affine_scale)
+        dist = TransformedDistribution(
+            base_dist,
+            affine_transform,
+        )
+        return dist, affine_transform(base_dist.mean)
 
     def __repr__(self) -> str:
         n_params = sum(p.numel() for p in super().parameters())

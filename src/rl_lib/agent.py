@@ -89,15 +89,20 @@ class Agent:
                 self._get_mask_window(done),
             )
 
-            action_dist, value = self.heads(temporal, temperature)
+            action_dist, action, value = self.heads(temporal, temperature)
+            
+            if temperature != 0.:
+                action = action_dist.sample()
 
-            action = action_dist.sample()
-            # action = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
-            log_probs = action_dist.log_prob(action)  # .clamp(-2., 0.)
-            # log_probs = T.nan_to_num(log_probs, nan=-20.0, posinf=0.0, neginf=-20.0)
+            log_probs = action_dist.log_prob(action)
 
             if not T.isfinite(log_probs).all():
-                logger.error(f"log_probs are not finite: action={action}, mean={action_dist.base_dist.mean}, stddev={action_dist.base_dist.stddev}")
+                logger.error(
+                    "log_probs are not finite: action=%s, alpha=%s, beta=%s",
+                    action,
+                    action_dist.base_dist.concentration1,
+                    action_dist.base_dist.concentration0,
+                )
                 raise ValueError("log_probs are not finite")
 
         return (
@@ -108,7 +113,7 @@ class Agent:
 
     def evaluate_actions(
         self, observation: T.Tensor | T.Tensor, action: T.Tensor, dones: T.Tensor | None = None
-    ) -> tuple[T.Tensor, T.Tensor, Distribution]:
+    ) -> tuple[T.Tensor, T.Tensor, T.Tensor, Distribution]:
 
         extracted_features = self.feature_extract(observation)
         windowed_features = extracted_features.unfold(0, self._stack_size, self._stack_size).permute(0, 2, 1)
@@ -117,11 +122,11 @@ class Agent:
         mask = windowed_dones.logical_not() & (windowed_dones.flip(1).cumsum(1).flip(1) > 0)
 
         temporal_encoding = self.temporal_encode(windowed_features, mask)
-        action_dist, values = self.heads(temporal_encoding)
+        action_dist, action_mean, values = self.heads(temporal_encoding)
 
         # action_tensor = T.clamp(action, self._clamp_min + 1e-6, self._clamp_max - 1e-6)
         log_probs = action_dist.log_prob(action)  # .clamp(-2., 0.)
-        return log_probs, values, action_dist
+        return log_probs, values, action_dist, action_mean
 
     def action_transform(self, action: T.Tensor) -> T.Tensor:
         return self._network.action_transform(action)

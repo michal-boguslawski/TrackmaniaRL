@@ -1,5 +1,7 @@
+from contextlib import closing
 import gc
 from logging import getLogger
+import signal
 import torch as T
 
 from src.rl_lib.logger_setup import setup_logging, shutdown_logging
@@ -19,15 +21,22 @@ from src.rl_lib.agent import Agent
 
 
 BATCH_SIZE = 1024
-NUM_ENVS = 16
+NUM_ENVS = 8
 STACK_SIZE = 4
 SKIP = 2
-MINIBATCH_SIZE = 512
-EPOCHS = 3
+MINIBATCH_SIZE = 256
+EPOCHS = 4
 DEVICE = T.device("cuda" if T.cuda.is_available() else "cpu")
 
 
 session_id = setup_logging()
+
+
+def _handle_termination(signum, frame):
+    raise KeyboardInterrupt(f"received signal {signum}")
+
+for sig in (signal.SIGTERM, signal.SIGINT):
+    signal.signal(sig, _handle_termination)
 
 
 logger = getLogger(__name__)
@@ -39,108 +48,109 @@ def main():
     T.cuda.reset_peak_memory_stats()
     env_name = "CarRacing-v3"
     console_metrics_logger = ConsoleMetricsLogger()
-    mlflow_logger = MLflowLogger(env_name, run_name=f"PPO/{session_id}")
 
     video_folder = f"./logs/videos/{session_id}"
     checkpoints_folder = f"./logs/checkpoints/{session_id}"
 
-    env = make_env(
-        "CarRacing-v3",
-        num_envs=NUM_ENVS,
-        skip=SKIP,
-        record=False,
-        normalize_rewards=True,
-        wrappers=[
-            "record_episode_stats",
-            "grayscale",
-            "reward_on_done",
-            "max_and_skip",
-        ]
-    )
-    
-    buffer = RolloutBuffer(
-        size=BATCH_SIZE,
-        stack_size=STACK_SIZE,
-        # num_envs=NUM_ENVS,
-        # observation_space=env.observation_space.shape[-3:],
-        # action_space=env.action_space.shape[-1:]
-    )
-    logger.debug("%s", buffer)
-    
-    network = Network(
-        env.observation_space.shape[-1],
-        env.action_space.shape[-1],
-        STACK_SIZE
-    ).to(DEVICE)
-    logger.debug("%s", network)
-    
-    agent = Agent(
-        network=network,
-        observation_dim=env.observation_space.shape[-1],
-        action_dim=env.action_space.shape[-1],
-        stack_size=STACK_SIZE,
-        device=DEVICE
-    )
-    record_agent = Agent(
-        network=network,
-        observation_dim=env.observation_space.shape[-1],
-        action_dim=env.action_space.shape[-1],
-        stack_size=STACK_SIZE,
-        device=DEVICE
-    )
+    with (
+        MLflowLogger(env_name, run_name=f"PPO/{session_id}") as mlflow_logger,
+        closing(make_env(
+            "CarRacing-v3",
+            num_envs=NUM_ENVS,
+            skip=SKIP,
+            record=False,
+            normalize_rewards=True,
+            wrappers=[
+                "record_episode_stats",
+                "grayscale",
+                "reward_on_done",
+                "max_and_skip",
+            ]
+        )) as env,
+    ):
+        
+        buffer = RolloutBuffer(
+            size=BATCH_SIZE,
+            stack_size=STACK_SIZE,
+            # num_envs=NUM_ENVS,
+            # observation_space=env.observation_space.shape[-3:],
+            # action_space=env.action_space.shape[-1:]
+        )
+        logger.debug("%s", buffer)
+        
+        network = Network(
+            env.observation_space.shape[-1],
+            env.action_space.shape[-1],
+            STACK_SIZE
+        ).to(DEVICE)
+        logger.debug("%s", network)
+        
+        agent = Agent(
+            network=network,
+            observation_dim=env.observation_space.shape[-1],
+            action_dim=env.action_space.shape[-1],
+            stack_size=STACK_SIZE,
+            device=DEVICE
+        )
+        record_agent = Agent(
+            network=network,
+            observation_dim=env.observation_space.shape[-1],
+            action_dim=env.action_space.shape[-1],
+            stack_size=STACK_SIZE,
+            device=DEVICE
+        )
 
-    trainer = PPOTrainer(
-        agent=agent,
-        ppo_epsilon=0.15,
-        entropy_coef=1e-2,
-        entropy_decay=0.9975,
-        head_lr=3e-5,
-        advantage_normalization_strategy="global",
-        callbacks=[
-            CheckpointsSaveCallback(checkpoints_folder, agent, intervals=200),
-            MetricsLoggingCallback(console_metrics_logger, granularity="batch"),
-            MetricsLoggingCallback(mlflow_logger, granularity="batch"),
-        ]
-    )
-    training_steps = 3_000_000
-    trainer.setup_train(training_steps, BATCH_SIZE)
+        trainer = PPOTrainer(
+            agent=agent,
+            ppo_epsilon=0.1,
+            entropy_coef=1e-2,
+            entropy_decay=0.999,
+            # head_lr=3e-5,
+            advantage_normalization_strategy="global",
+            callbacks=[
+                CheckpointsSaveCallback(checkpoints_folder, agent, intervals=200),
+                MetricsLoggingCallback(console_metrics_logger, granularity="batch"),
+                MetricsLoggingCallback(mlflow_logger, granularity="batch"),
+            ]
+        )
+        training_steps = 3_000_000
+        trainer.setup_train(training_steps, BATCH_SIZE)
 
-    rollout_collector = RolloutCollector(
-        env,
-        buffer,
-        trainer,
-        EPOCHS,
-        MINIBATCH_SIZE,
-        callbacks=[
-            ParamsLoggingCallback(console_metrics_logger),
-            ParamsLoggingCallback(mlflow_logger),
-            RecordStatisticLoggerCallback(console_metrics_logger, mode="mean"),
-            RecordStatisticLoggerCallback(mlflow_logger),
-            RecordVideoCallback(
-                "CarRacing-v3",
-                agent=record_agent,
-                video_folder=video_folder,
-                metrics_loggers=[
-                    console_metrics_logger,
-                    mlflow_logger,
-                ],
-                skip=SKIP,
-                wrappers=[
-                    "record_episode_stats",
-                    "grayscale",
-                    "max_and_skip",
-                ],
-                interval=50_000,
-            ),
-        ]
-    )
-    logger.debug("%s", rollout_collector)
+        rollout_collector = RolloutCollector(
+            env,
+            buffer,
+            trainer,
+            EPOCHS,
+            MINIBATCH_SIZE,
+            callbacks=[
+                ParamsLoggingCallback(console_metrics_logger),
+                ParamsLoggingCallback(mlflow_logger),
+                RecordStatisticLoggerCallback(console_metrics_logger, mode="mean"),
+                RecordStatisticLoggerCallback(mlflow_logger),
+                RecordVideoCallback(
+                    "CarRacing-v3",
+                    agent=record_agent,
+                    video_folder=video_folder,
+                    metrics_loggers=[
+                        console_metrics_logger,
+                        mlflow_logger,
+                    ],
+                    skip=SKIP,
+                    wrappers=[
+                        "record_episode_stats",
+                        "grayscale",
+                        "max_and_skip",
+                    ],
+                    interval=50_000,
+                ),
+            ]
+        )
+        logger.debug("%s", rollout_collector)
 
-    try:
-        rollout_collector.run(training_steps)
-    except Exception as e:
-        logger.exception("rollout_collector.run failed")
-        raise e
+        try:
+            rollout_collector.run(training_steps)
+        except BaseException:
+            logger.exception("rollout_collector.run failed")
 
 
 if __name__ == "__main__":
