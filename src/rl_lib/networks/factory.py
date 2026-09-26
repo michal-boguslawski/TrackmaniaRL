@@ -1,4 +1,5 @@
 import torch as T
+import json
 from torch import nn
 from torch.distributions import Distribution
 
@@ -14,21 +15,28 @@ class Network(nn.Module):
         self,
         observation_dim: int,
         action_dim: int,
-        stack_size: int, 
+        stack_size: int,
         config: NetworkConfig | None = None,
+        action_low: list[float] | None = None,
+        action_high: list[float] | None = None,
     ):
         super().__init__()
         self.cfg = config or NetworkConfig()
 
-        self.cnn = CNN(observation_dim, **self.cfg.cnn.model_dump())
+        self.cnn = CNN(observation_dim, config=self.cfg.cnn)
         self.sequence_encoder = TemporalCNN1D(
-            stack_size, in_dim=self.cnn.out_dim, **self.cfg.temporal.model_dump()
+            stack_size, in_dim=self.cnn.out_dim, config=self.cfg.temporal
         )
+        actor_config = self.cfg.actor
+        if action_low is not None or action_high is not None:
+            if action_low is None or action_high is None:
+                raise ValueError("action_low and action_high must be provided together")
+            actor_config = actor_config.model_copy(update={"action_low": action_low, "action_high": action_high})
         self.actor = Actor(
-            action_dim, in_dim=self.sequence_encoder.out_dim, **self.cfg.actor.model_dump()
+            action_dim, in_dim=self.sequence_encoder.out_dim, config=actor_config
         )
         self.critic = Critic(
-            in_dim=self.sequence_encoder.out_dim, **self.cfg.critic.model_dump()
+            in_dim=self.sequence_encoder.out_dim, config=self.cfg.critic
         )
 
     def feature_extract(self, x: T.Tensor) -> T.Tensor:
@@ -48,6 +56,9 @@ class Network(nn.Module):
         value = self.critic(x)
 
         return action_dist, action_mean, value
+
+    def action_transform(self, action: T.Tensor) -> T.Tensor:
+        return self.actor.action_transform(action)
 
     def save_state_dict(self, path: str) -> None:
         T.save(self.state_dict(), path)
@@ -75,7 +86,7 @@ class Network(nn.Module):
         """Flat, MLflow-loggable hyperparameters. Structural (env-derived) dims 
         and param counts are reported separately from the pydantic config."""
         merged = {
-            f"{prefix}.{k}": v
+            f"{prefix}.{k}": (v if isinstance(v, (int, float, str, bool)) or v is None else json.dumps(v, sort_keys=True))
             for prefix, sub in self.cfg.model_dump().items()
             for k, v in sub.items()
         }

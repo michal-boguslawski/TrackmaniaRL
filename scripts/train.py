@@ -1,162 +1,202 @@
-from contextlib import closing
+from __future__ import annotations
+
+import argparse
+from contextlib import ExitStack, closing, nullcontext
 import gc
-from logging import getLogger
+import logging
+import random
 import signal
+from pathlib import Path
+
+import numpy as np
 import torch as T
 
-from src.rl_lib.logger_setup import setup_logging, shutdown_logging
-from src.rl_lib.envs.make_env import make_env
-from src.rl_lib.training.rollout_collector import RolloutCollector
-from src.rl_lib.buffers.rollout_buffer import RolloutBuffer
-from src.rl_lib.networks.factory import Network
-from src.rl_lib.training.ppo_trainer import PPOTrainer
-from src.rl_lib.tracking.console_logger import ConsoleMetricsLogger
-from src.rl_lib.tracking.mlflow_logger import MLflowLogger
-from src.rl_lib.training.callbacks.metrics_logger import MetricsLoggingCallback
-from src.rl_lib.training.callbacks.record_statistics import RecordStatisticLoggerCallback
-from src.rl_lib.training.callbacks.record_video import RecordVideoCallback
-from src.rl_lib.training.callbacks.checkpoints_save import CheckpointsSaveCallback
-from src.rl_lib.training.callbacks.params_logger import ParamsLoggingCallback
-from src.rl_lib.agent import Agent
-
-
-BATCH_SIZE = 1024
-NUM_ENVS = 16
-STACK_SIZE = 4
-SKIP = 2
-MINIBATCH_SIZE = 512
-EPOCHS = 3
-DEVICE = T.device("cuda" if T.cuda.is_available() else "cpu")
-
-
-session_id = setup_logging()
+from rl_lib.agent import Agent
+from rl_lib.buffers.rollout_buffer import RolloutBuffer
+from rl_lib.envs.make_env import make_env
+from rl_lib.logger_setup import setup_logging, shutdown_logging
+from rl_lib.networks.factory import Network
+from rl_lib.run_config import RunConfig, load_config
+from rl_lib.tracking.console_logger import ConsoleMetricsLogger
+from rl_lib.tracking.mlflow_logger import MLflowLogger
+from rl_lib.training.callbacks.checkpoints_save import CheckpointsSaveCallback
+from rl_lib.training.callbacks.metrics_logger import MetricsLoggingCallback
+from rl_lib.training.callbacks.params_logger import ParamsLoggingCallback
+from rl_lib.training.callbacks.record_statistics import RecordStatisticLoggerCallback
+from rl_lib.training.callbacks.record_video import RecordVideoCallback
+from rl_lib.training.ppo_trainer import PPOTrainer
+from rl_lib.training.rollout_collector import RolloutCollector
 
 
 def _handle_termination(signum, frame):
     raise KeyboardInterrupt(f"received signal {signum}")
 
-for sig in (signal.SIGTERM, signal.SIGINT):
-    signal.signal(sig, _handle_termination)
+
+for _signal in (signal.SIGTERM, signal.SIGINT):
+    signal.signal(_signal, _handle_termination)
 
 
-logger = getLogger(__name__)
+def _seed_everything(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    T.manual_seed(seed)
+    if T.cuda.is_available():
+        T.cuda.manual_seed_all(seed)
 
 
-def main():
+def _resolve_device(config: RunConfig) -> T.device:
+    if config.run.device == "auto":
+        return T.device("cuda" if T.cuda.is_available() else "cpu")
+    device = T.device(config.run.device)
+    if device.type == "cuda" and not T.cuda.is_available():
+        raise RuntimeError(f"Configured device {device} is unavailable")
+    return device
+
+
+def run_training(config: RunConfig, config_path: str | Path | None = None) -> None:
+    level = getattr(logging, config.run.log_level)
+    session_id = setup_logging(config.run.log_config, default_level=level) if config.run.log_config else setup_logging(default_level=level)
+    logger = logging.getLogger(__name__)
+    device = _resolve_device(config)
+    _seed_everything(config.run.seed)
     gc.collect()
-    if DEVICE.type == "cuda":
-        T.cuda.empty_cache()      # returns cached (unused) memory to the OS/driver
-        T.cuda.reset_peak_memory_stats()
-    env_name = "CarRacing-v3"
-    console_metrics_logger = ConsoleMetricsLogger()
+    if device.type == "cuda" and config.run.clear_cuda_cache:
+        T.cuda.empty_cache()
+        T.cuda.reset_peak_memory_stats(device)
 
-    video_folder = f"./logs/videos/{session_id}"
-    checkpoints_folder = f"./logs/checkpoints/{session_id}"
+    checkpoint_folder = str(Path(config.callbacks.checkpoint_folder) / session_id)
+    video_folder = str(Path(config.callbacks.video_folder) / session_id)
+    env_name = config.environment.id
+    experiment_name = config.tracking.experiment_name or env_name
+    run_name = config.tracking.run_name or f"{config.run.name}/{session_id}"
 
-    with (
-        MLflowLogger(env_name, run_name=f"PPO/{session_id}") as mlflow_logger,
-        closing(make_env(
-            "CarRacing-v3",
-            num_envs=NUM_ENVS,
-            skip=SKIP,
-            record=False,
-            normalize_rewards=True,
-            wrappers=[
-                "record_episode_stats",
-                "grayscale",
-                "reward_on_done",
-                "max_and_skip",
-            ]
-        )) as env,
-    ):
-        
-        buffer = RolloutBuffer(
-            size=BATCH_SIZE,
-            stack_size=STACK_SIZE,
-            # num_envs=NUM_ENVS,
-            # observation_space=env.observation_space.shape[-3:],
-            # action_space=env.action_space.shape[-1:]
+    console_logger = ConsoleMetricsLogger() if config.tracking.console else None
+    with ExitStack() as stack:
+        mlflow_logger = stack.enter_context(
+            MLflowLogger(
+                experiment_name,
+                run_name=run_name,
+                log_system_metrics=config.tracking.log_system_metrics,
+            )
+            if config.tracking.mlflow
+            else nullcontext(None)
         )
-        logger.debug("%s", buffer)
-        
+        metrics_loggers = [item for item in (console_logger, mlflow_logger) if item is not None]
+        env = stack.enter_context(closing(make_env(
+            env_name,
+            num_envs=config.environment.num_envs,
+            skip=config.environment.skip,
+            continuous=config.environment.continuous,
+            normalize_rewards=config.environment.normalize_rewards,
+            vectorization_mode=config.environment.vectorization_mode,
+            wrappers=config.environment.wrappers,
+            autoreset_mode=config.environment.autoreset_mode,
+            reward_normalization_gamma=config.environment.reward_normalization_gamma,
+            reward_normalization_epsilon=config.environment.reward_normalization_epsilon,
+        )))
+
         network = Network(
-            env.observation_space.shape[-1],
-            env.action_space.shape[-1],
-            STACK_SIZE
-        ).to(DEVICE)
-        logger.debug("%s", network)
-        
+            observation_dim=env.observation_space.shape[-1],
+            action_dim=env.action_space.shape[-1],
+            stack_size=config.agent.stack_size,
+            config=config.network,
+        ).to(device)
         agent = Agent(
             network=network,
             observation_dim=env.observation_space.shape[-1],
             action_dim=env.action_space.shape[-1],
-            stack_size=STACK_SIZE,
-            device=DEVICE
+            stack_size=config.agent.stack_size,
+            device=device,
+            config=config.agent,
         )
-        record_agent = Agent(
+        video_agent = Agent(
             network=network,
             observation_dim=env.observation_space.shape[-1],
             action_dim=env.action_space.shape[-1],
-            stack_size=STACK_SIZE,
-            device=DEVICE
+            stack_size=config.agent.stack_size,
+            device=device,
+            config=config.agent,
+        )
+        buffer = RolloutBuffer(
+            size=config.rollout.buffer_size,
+            stack_size=config.agent.stack_size,
+            gamma=config.rollout.gamma,
+            gae_lambda=config.rollout.gae_lambda,
         )
 
-        trainer = PPOTrainer(
-            agent=agent,
-            ppo_epsilon=0.1,
-            critic_beta=0.8,
-            entropy_coef=1e-2,
-            entropy_decay=0.999,
-            mean_reg_coef=0.001,
-            weight_decay=1e-5,
-            backbone_lr=3e-5,
-            advantage_normalization_strategy="global",
-            hard_stop_kl=True,
-            callbacks=[
-                CheckpointsSaveCallback(checkpoints_folder, agent, intervals=200),
-                MetricsLoggingCallback(console_metrics_logger, granularity="batch"),
-                MetricsLoggingCallback(mlflow_logger, granularity="batch"),
-            ]
-        )
-        training_steps = 3_000_000
-        trainer.setup_train(training_steps, BATCH_SIZE)
+        trainer_callbacks = []
+        if config.callbacks.checkpoints:
+            trainer_callbacks.append(CheckpointsSaveCallback(checkpoint_folder, agent, intervals=config.callbacks.checkpoint_interval))
+        for metric_logger in metrics_loggers:
+            if config.callbacks.metrics:
+                trainer_callbacks.append(MetricsLoggingCallback(
+                    metric_logger,
+                    granularity=config.callbacks.metrics_granularity,
+                ))
+        trainer = PPOTrainer(agent=agent, callbacks=trainer_callbacks, config=config.trainer)
+        trainer.setup_train(config.run.total_steps, config.rollout.buffer_size)
 
-        rollout_collector = RolloutCollector(
+        collector_callbacks = []
+        run_config_dump = config.model_dump(mode="json")
+        run_config_dump["resolved_runtime"] = {
+            "config_path": str(config_path) if config_path is not None else None,
+            "session_id": session_id,
+            "device": str(device),
+            "environment_observation_shape": list(env.observation_space.shape),
+            "environment_action_shape": list(env.action_space.shape),
+            "checkpoint_folder": checkpoint_folder,
+            "video_folder": video_folder,
+            "mlflow_experiment_name": experiment_name if config.tracking.mlflow else None,
+            "mlflow_run_name": run_name if config.tracking.mlflow else None,
+            "total_steps_unit": "vector-environment steps",
+        }
+        for metric_logger in metrics_loggers:
+            collector_callbacks.append(ParamsLoggingCallback(metric_logger, run_config=run_config_dump))
+            if config.callbacks.episode_statistics:
+                collector_callbacks.append(RecordStatisticLoggerCallback(
+                    metric_logger,
+                    mode=config.callbacks.episode_statistics_mode,
+                    stats_key=config.callbacks.episode_statistics_key,
+                ))
+        if config.callbacks.record_video:
+            video_stats_key = next(
+                wrapper.stats_key
+                for wrapper in config.callbacks.video_wrappers
+                if wrapper.name == "record_episode_stats"
+            )
+            collector_callbacks.append(RecordVideoCallback(
+                env_name,
+                agent=video_agent,
+                video_folder=video_folder,
+                metrics_loggers=metrics_loggers,
+                skip=config.callbacks.video_skip or config.environment.skip,
+                wrappers=config.callbacks.video_wrappers,
+                interval=config.callbacks.video_interval,
+                seed=config.run.seed,
+                autoreset_mode=config.environment.autoreset_mode,
+                normalize_rewards=config.callbacks.video_normalize_rewards,
+                reward_normalization_gamma=config.environment.reward_normalization_gamma,
+                reward_normalization_epsilon=config.environment.reward_normalization_epsilon,
+                video_recording=config.callbacks.video_recording,
+                stats_key=video_stats_key,
+            ))
+
+        collector = RolloutCollector(
             env,
             buffer,
             trainer,
-            EPOCHS,
-            MINIBATCH_SIZE,
-            callbacks=[
-                ParamsLoggingCallback(console_metrics_logger),
-                ParamsLoggingCallback(mlflow_logger),
-                RecordStatisticLoggerCallback(console_metrics_logger, mode="mean"),
-                RecordStatisticLoggerCallback(mlflow_logger),
-                RecordVideoCallback(
-                    "CarRacing-v3",
-                    agent=record_agent,
-                    video_folder=video_folder,
-                    metrics_loggers=[
-                        console_metrics_logger,
-                        mlflow_logger,
-                    ],
-                    skip=SKIP,
-                    wrappers=[
-                        "record_episode_stats",
-                        "grayscale",
-                        "max_and_skip",
-                    ],
-                    interval=50_000,
-                ),
-            ]
+            epochs=config.rollout.epochs,
+            minibatch_size=config.rollout.minibatch_size,
+            callbacks=collector_callbacks,
+            gamma=config.rollout.gamma,
+            gae_lambda=config.rollout.gae_lambda,
+            seed=config.run.seed,
+            run_config=run_config_dump,
         )
-        logger.debug("%s", rollout_collector)
-
+        logger.info("Starting training with device=%s config=%s", device, config_path or "<object>")
         try:
-            rollout_collector.run(training_steps)
+            collector.run(config.run.total_steps)
         except KeyboardInterrupt:
-            # SIGINT/SIGTERM arrive as KeyboardInterrupt via _handle_termination.
-            # MLflowLogger maps this to KILLED, distinct from a crash.
             logger.warning("Rollout interrupted; stopping training")
             raise
         except Exception:
@@ -164,8 +204,15 @@ def main():
             raise
 
 
-if __name__ == "__main__":
+def main(config_path: str | Path) -> None:
+    config = load_config(str(config_path))
     try:
-        main()
+        run_training(config, config_path=config_path)
     finally:
         shutdown_logging()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train the PPO agent using a YAML configuration")
+    parser.add_argument("--config", default="configs/ppo_carracing.yaml", help="YAML run configuration")
+    main(parser.parse_args().config)

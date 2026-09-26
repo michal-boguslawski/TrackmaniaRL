@@ -2,12 +2,19 @@ from typing import Any, Literal
 
 from rl_lib.tracking.base import MetricsLogger
 from rl_lib.training.callbacks.base import CollectorCallback
+from rl_lib.run_config import CallbackSettings
 
 
 class RecordStatisticLoggerCallback(CollectorCallback):
-    def __init__(self, logger: MetricsLogger, mode: Literal["step", "mean"] = "step"):
+    def __init__(
+        self,
+        logger: MetricsLogger,
+        mode: Literal["step", "mean"] = "step",
+        stats_key: str | None = None,
+    ):
         self._logger = logger
         self.mode = mode
+        self.stats_key = stats_key or CallbackSettings().episode_statistics_key
         self._returns_sum = 0.0
         self._lengths_sum = 0.0
         self._n = 0
@@ -17,10 +24,10 @@ class RecordStatisticLoggerCallback(CollectorCallback):
         pass
 
     def on_env_step(self, step: int, info: dict[str, Any], *args, **kwargs):
-        if "episode" in info:
-            dones = info["_episode"]
-            returns = info["episode"]["r"][dones]
-            lengths = info["episode"]["l"][dones]
+        if self.stats_key in info:
+            dones = info[f"_{self.stats_key}"]
+            returns = info[self.stats_key]["r"][dones]
+            lengths = info[self.stats_key]["l"][dones]
             n = int(dones.sum())
 
             if self.mode == "step":

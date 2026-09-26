@@ -31,6 +31,7 @@ class MLflowLogger(MetricsLogger):
         experiment_name: str = "MLflow Quickstart",
         run_name: str | None = None,
         registered_model_name: str | None = None,
+        log_system_metrics: bool = True,
     ):
         mlflow.set_experiment(experiment_name)
 
@@ -38,7 +39,7 @@ class MLflowLogger(MetricsLogger):
             run_name = self._deduce_run_name()
 
         self._registered_model_name = registered_model_name
-        self._run = mlflow.start_run(run_name=run_name, log_system_metrics=True)
+        self._run = mlflow.start_run(run_name=run_name, log_system_metrics=log_system_metrics)
 
     @staticmethod
     def _deduce_run_name() -> str:
@@ -59,6 +60,9 @@ class MLflowLogger(MetricsLogger):
 
     def log_parameters(self, parameters: dict[str, float]) -> None:
         mlflow.log_params({k: str(v) for k, v in parameters.items()})
+
+    def log_config(self, config: dict, artifact_file: str = "config/run_config.yaml") -> None:
+        mlflow.log_dict(config, artifact_file)
 
     def log_model(
         self,

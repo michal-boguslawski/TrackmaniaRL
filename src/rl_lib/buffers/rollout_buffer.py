@@ -1,6 +1,7 @@
 from collections import deque
 from dataclasses import dataclass
 import torch as T
+from rl_lib.run_config import RolloutSettings
 
 
 @dataclass(slots=True, frozen=True)
@@ -21,11 +22,16 @@ class RolloutBuffer:
         self,
         size: int,
         stack_size: int,
+        gamma: float | None = None,
+        gae_lambda: float | None = None,
         *args,
         **kwargs
     ):
         self.size = size
         self._stack_size = stack_size
+        defaults = RolloutSettings()
+        self.gamma = defaults.gamma if gamma is None else gamma
+        self.gae_lambda = defaults.gae_lambda if gae_lambda is None else gae_lambda
         self._buffer: dict[str, deque[T.Tensor]] = {}
         self._counter: int = 0
         self.reset()
@@ -87,7 +93,9 @@ class RolloutBuffer:
         returns = advantages + critic_value[:, :-1]
         return returns, advantages
 
-    def get(self, gamma: float = 0.99, gae_lambda: float = 0.95) -> dict[str, T.Tensor]:
+    def get(self, gamma: float | None = None, gae_lambda: float | None = None) -> dict[str, T.Tensor]:
+        gamma = self.gamma if gamma is None else gamma
+        gae_lambda = self.gae_lambda if gae_lambda is None else gae_lambda
         buffer = {key: T.stack(list(value), dim=1) for key, value in self._buffer.items()}
         returns, advantages = self.compute_returns_and_advantages(
             buffer["reward"][:, :-1],
@@ -145,4 +153,6 @@ class RolloutBuffer:
         return {
             "size": self.size,
             "stack_size": self._stack_size,
+            "gamma": self.gamma,
+            "gae_lambda": self.gae_lambda,
         }

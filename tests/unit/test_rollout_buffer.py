@@ -1,186 +1,408 @@
-"""Unit tests for rollout storage and advantage calculation."""
+"""Unit tests for rollout storage and advantage calculation.
+
+The buffer keeps one deque of per-step tensors per field. The observation and
+episode-boundary deques are `stack_size - 1` longer than the rest because the
+PPO update rebuilds a temporal window per transition; `get` therefore returns
+`size` observation columns against `size - 1` transitions.
+
+GAE keeps Gymnasium's distinction: a truncation bootstraps from the value of the
+final observation, a termination does not, and the recursion stops at either.
+"""
+
+import dataclasses
 
 import pytest
 import torch as T
-from typing import Callable
 
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
 
 
-@pytest.fixture
-def rollout_buffer() -> RolloutBuffer:
-    return RolloutBuffer(8, 2, (96, 96, 1), (3, ))
+SIZE = 4
+STACK_SIZE = 2
+NUM_ENVS = 2
+OBSERVATION_SHAPE = (96, 96, 1)
+ACTION_DIM = 3
+
+GAMMA = 0.9
+LAMBDA = 0.5
 
 
 @pytest.fixture
-def rollout_step_factory() -> Callable[[], RolloutStep]:
-    def create() -> RolloutStep:
+def buffer() -> RolloutBuffer:
+    return RolloutBuffer(size=SIZE, stack_size=STACK_SIZE)
+
+
+@pytest.fixture
+def step_factory():
+    """Builds a `RolloutStep` for a whole vectorised batch of environments."""
+
+    def make(
+        index: int = 0,
+        reward: float = 1.0,
+        terminated: T.Tensor | None = None,
+        truncated: T.Tensor | None = None,
+        truncated_value: T.Tensor | None = None,
+        observation_value: int = 0,
+        critic_value: float = 0.0,
+    ) -> RolloutStep:
         return RolloutStep(
-            observation=T.randint(
-                0, 255, (2, 96, 96, 1)
-            ).to(T.uint8),
-            action=T.randn(2, 3).to(T.float32),
-            critic_value=T.randn(2).to(T.float32),
-            old_log_probs=T.rand(2).to(T.float32),
-            reward=T.rand(2).to(T.float32),
-            terminated=T.Tensor([False, True]).to(T.bool),
-            truncated=T.Tensor([True, False]).to(T.bool),
+            observation=T.full((NUM_ENVS, *OBSERVATION_SHAPE), observation_value, dtype=T.uint8),
+            action=T.full((NUM_ENVS, ACTION_DIM), float(index)),
+            critic_value=T.full((NUM_ENVS,), critic_value),
+            old_log_probs=T.full((NUM_ENVS, ACTION_DIM), float(index)),
+            reward=T.full((NUM_ENVS,), reward),
+            terminated=terminated if terminated is not None else T.zeros(NUM_ENVS, dtype=T.bool),
+            truncated=truncated if truncated is not None else T.zeros(NUM_ENVS, dtype=T.bool),
+            truncated_value=truncated_value,
         )
 
-    return create
+    return make
 
 
-def test_rollout_buffer_shapes(rollout_buffer: RolloutBuffer):
-    assert rollout_buffer._buffer["observation"].shape == (2, 8, 96, 96, 1)
-    assert rollout_buffer._buffer["action"].shape == (2, 8, 3)
-    assert rollout_buffer._buffer["critic_value"].shape == (2, 8)
-    assert rollout_buffer._buffer["old_log_probs"].shape == (2, 8)
-    assert rollout_buffer._buffer["reward"].shape == (2, 8)
-    assert rollout_buffer._buffer["terminated"].shape == (2, 8)
-    assert rollout_buffer._buffer["truncated"].shape == (2, 8)
+def fill_buffer(buffer: RolloutBuffer, step_factory) -> None:
+    for index in range(SIZE):
+        buffer.add(
+            step_factory(
+                index=index,
+                reward=float(index),
+                observation_value=index,
+                critic_value=float(index),
+            )
+        )
 
 
-def test_rollout_buffer_add(rollout_buffer: RolloutBuffer, rollout_step_factory: Callable[[], RolloutStep]):
-    rollout_step = rollout_step_factory()
-    rollout_buffer.add(rollout_step)
+def test_buffer_starts_empty(buffer: RolloutBuffer):
+    assert buffer.size == SIZE
+    assert buffer._counter == 0
+    assert buffer.is_full() is False
+    assert all(len(entries) == 0 for entries in buffer._buffer.values())
+    assert f"counter=0/{SIZE}" in repr(buffer)
 
-    assert rollout_buffer._counter == 1
-    assert rollout_buffer.is_full() == False
-    T.testing.assert_close(
-        rollout_buffer._buffer["observation"][:, 0],
-        rollout_step.observation,
+
+def test_add_stores_every_field_and_counts_the_step(buffer: RolloutBuffer, step_factory):
+    step = step_factory(index=3, terminated=T.tensor([True, False]), truncated=T.tensor([False, True]))
+
+    buffer.add(step)
+
+    assert buffer._counter == 1
+    assert buffer.is_full() is False
+    for key, expected in (
+        ("action", step.action),
+        ("critic_value", step.critic_value),
+        ("old_log_probs", step.old_log_probs),
+        ("reward", step.reward),
+    ):
+        T.testing.assert_close(buffer._buffer[key][-1], expected)
+
+    assert buffer._buffer["terminated"][-1] is not None
+    T.testing.assert_close(buffer._buffer["terminated"][-1], step.terminated)
+    T.testing.assert_close(buffer._buffer["truncated"][-1], step.truncated)
+
+
+def test_add_stores_copies_and_never_aliases_the_step(buffer: RolloutBuffer, step_factory):
+    step = step_factory()
+    buffer.add(step)
+
+    step.reward.fill_(99.0)
+
+    assert buffer._buffer["reward"][-1][0].item() == 1.0, "the buffer must not alias the caller's tensor"
+
+
+def test_add_pads_the_window_buffers_with_the_first_step(buffer: RolloutBuffer, step_factory):
+    """`stack_size - 1` copies of the first step let the update slice a full
+    observation window out of a single stored state."""
+
+    first = step_factory(observation_value=7, terminated=T.tensor([True, False]), truncated=T.tensor([False, True]))
+    buffer.add(first)
+
+    assert len(buffer._buffer["observation"]) == STACK_SIZE
+    assert len(buffer._buffer["terminated"]) == STACK_SIZE
+    assert len(buffer._buffer["truncated"]) == STACK_SIZE
+    for entry in buffer._buffer["observation"]:
+        T.testing.assert_close(entry, first.observation)
+    for entry in buffer._buffer["terminated"]:
+        T.testing.assert_close(entry, first.terminated)
+
+    # the non-windowed fields are stored exactly once per step
+    for key in ("action", "critic_value", "old_log_probs", "reward", "truncated_value"):
+        assert len(buffer._buffer[key]) == 1
+
+
+def test_padding_only_happens_at_the_start_of_a_buffer(buffer: RolloutBuffer, step_factory):
+    buffer.add(step_factory(observation_value=1))
+    buffer.add(step_factory(observation_value=2))
+
+    assert len(buffer._buffer["observation"]) == STACK_SIZE + 1
+    T.testing.assert_close(buffer._buffer["observation"][0][0, 0, 0, 0], T.tensor(1, dtype=T.uint8))
+    T.testing.assert_close(buffer._buffer["observation"][-1][0, 0, 0, 0], T.tensor(2, dtype=T.uint8))
+
+
+def test_is_full_after_exactly_size_steps(buffer: RolloutBuffer, step_factory):
+    for index in range(SIZE):
+        assert buffer.is_full() is (index == SIZE)
+        buffer.add(step_factory(index=index))
+
+    assert buffer.is_full() is True
+
+
+def test_add_past_capacity_keeps_the_newest_transitions(buffer: RolloutBuffer, step_factory):
+    for index in range(SIZE + 2):
+        buffer.add(step_factory(index=index, observation_value=index))
+
+    assert len(buffer._buffer["action"]) == SIZE
+    T.testing.assert_close(buffer._buffer["action"][-1][:, 0], T.full((NUM_ENVS,), float(SIZE + 1)))
+    assert len(buffer._buffer["observation"]) == SIZE + STACK_SIZE - 1
+
+
+def test_reset_counter_keeps_the_stored_transitions(buffer: RolloutBuffer, step_factory):
+    fill_buffer(buffer, step_factory)
+
+    buffer.reset_counter()
+
+    assert buffer._counter == 0
+    assert buffer.is_full() is False
+    assert len(buffer._buffer["action"]) == SIZE
+
+
+def test_reset_clears_every_field(buffer: RolloutBuffer, step_factory):
+    fill_buffer(buffer, step_factory)
+
+    buffer.reset()
+
+    assert buffer._counter == 0
+    assert all(len(entries) == 0 for entries in buffer._buffer.values())
+
+
+def test_add_defaults_a_missing_truncated_value_to_zeros(buffer: RolloutBuffer, step_factory):
+    buffer.add(step_factory(reward=2.0))
+
+    T.testing.assert_close(buffer._buffer["truncated_value"][-1], T.zeros(NUM_ENVS))
+
+
+def test_rollout_step_is_an_immutable_record(step_factory):
+    step = step_factory()
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        step.reward = T.zeros(NUM_ENVS)
+
+
+def test_config_reports_size_and_stack_size(buffer: RolloutBuffer):
+    assert buffer.config() == {
+        "size": SIZE,
+        "stack_size": STACK_SIZE,
+        "gamma": 0.99,
+        "gae_lambda": 0.95,
+    }
+
+
+def test_get_returns_one_column_less_for_transitions_than_for_observations(buffer: RolloutBuffer, step_factory):
+    fill_buffer(buffer, step_factory)
+
+    batch = buffer.get()
+
+    assert batch["observation"].shape == (NUM_ENVS, SIZE, *OBSERVATION_SHAPE)
+    assert batch["dones"].shape == (NUM_ENVS, SIZE)
+    assert batch["action"].shape == (NUM_ENVS, SIZE - 1, ACTION_DIM)
+    assert batch["old_log_probs"].shape == (NUM_ENVS, SIZE - 1, ACTION_DIM)
+    assert batch["critic_value"].shape == (NUM_ENVS, SIZE - 1)
+    assert batch["returns"].shape == (NUM_ENVS, SIZE - 1)
+    assert batch["advantages"].shape == (NUM_ENVS, SIZE - 1)
+
+
+def test_get_keeps_the_transition_order(buffer: RolloutBuffer, step_factory):
+    fill_buffer(buffer, step_factory)
+
+    batch = buffer.get()
+
+    for index in range(SIZE - 1):
+        T.testing.assert_close(batch["action"][:, index, 0], T.full((NUM_ENVS,), float(index)))
+        T.testing.assert_close(batch["old_log_probs"][:, index, 0], T.full((NUM_ENVS,), float(index)))
+        T.testing.assert_close(batch["critic_value"][:, index], T.full((NUM_ENVS,), float(index)))
+
+
+def test_get_returns_a_window_of_observations_per_transition(buffer: RolloutBuffer, step_factory):
+    """Transition `k` is paired with the states of steps `k - stack_size + 1..k`,
+    and step 0 is duplicated so the first transition still has a full window."""
+
+    for index in range(SIZE):
+        buffer.add(step_factory(index=index, observation_value=index))
+
+    batch = buffer.get(gamma=0.0, gae_lambda=0.0)
+
+    for transition in range(SIZE - 1):
+        window = batch["observation"][0, transition : transition + STACK_SIZE, 0, 0, 0]
+        # the very first transition sees step 0 twice, later ones see the two
+        # most recent states
+        expected = [0, 0] if transition == 0 else [transition - 1, transition]
+        assert window.tolist() == expected, f"window for transition {transition}"
+
+
+def test_get_aligns_the_done_flags_with_the_observation_windows(buffer: RolloutBuffer, step_factory):
+    for index in range(SIZE):
+        buffer.add(
+            step_factory(
+                index=index,
+                terminated=T.tensor([index == 1, False]),
+                truncated=T.tensor([False, index == 2]),
+            )
+        )
+
+    batch = buffer.get()
+
+    # column 0 is the duplicated first step, column `index + 1` is step `index`
+    assert not batch["dones"][0, 0] and not batch["dones"][0, 1]
+    assert batch["dones"][0, 2], "step 1 terminated env 0"
+    assert not batch["dones"][0, 3]
+    assert not batch["dones"][1, 2]
+    assert batch["dones"][1, 3], "step 2 truncated env 1"
+
+
+def test_get_uses_the_gamma_and_lambda_it_is_given(buffer: RolloutBuffer, step_factory):
+    for index in range(SIZE):
+        buffer.add(step_factory(index=index, reward=1.0, critic_value=0.5))
+
+    discounted = buffer.get(gamma=0.9, gae_lambda=0.5)
+    undiscounted = buffer.get(gamma=0.0, gae_lambda=1.0)
+
+    # with gamma = 0 the advantage is the TD(0) residual
+    T.testing.assert_close(undiscounted["advantages"], T.full((NUM_ENVS, SIZE - 1), 0.5))
+    assert (discounted["advantages"] > 0).all(), "positive rewards with a positive value give positive advantages"
+    T.testing.assert_close(discounted["returns"], discounted["advantages"] + discounted["critic_value"])
+
+
+def test_get_bootstraps_a_truncated_step_from_its_final_observation_value(buffer: RolloutBuffer, step_factory):
+    for index in range(SIZE):
+        truncated = T.tensor([index == 1, False])
+        buffer.add(
+            step_factory(
+                index=index,
+                reward=1.0,
+                critic_value=0.5,
+                truncated=truncated,
+                truncated_value=T.where(truncated, T.full((NUM_ENVS,), 7.0), T.zeros(NUM_ENVS)),
+            )
+        )
+
+    batch = buffer.get(gamma=0.9, gae_lambda=0.5)
+
+    # the last step is not truncated, so the bootstrap value cannot leak into it
+    T.testing.assert_close(batch["advantages"][0, SIZE - 2], T.tensor(1.0 + 0.9 * 0.5 - 0.5))
+    assert batch["advantages"][0, 0] > batch["advantages"][0, SIZE - 2]
+
+
+def test_get_ignores_the_truncated_value_of_a_terminated_step(buffer: RolloutBuffer, step_factory):
+    for index in range(SIZE):
+        terminated = T.tensor([index == 0, False])
+        buffer.add(
+            step_factory(
+                index=index,
+                reward=1.0,
+                critic_value=0.5,
+                terminated=terminated,
+                truncated=T.tensor([index == 0, False]),
+                truncated_value=T.full((NUM_ENVS,), 100.0),
+            )
+        )
+
+    batch = buffer.get(gamma=0.9, gae_lambda=0.5)
+
+    # termination removes the bootstrap entirely, the 100.0 must not show up
+    T.testing.assert_close(batch["advantages"][0, 0], T.tensor(1.0 - 0.5))
+
+    # env 1 never ends an episode: the advantage keeps accumulating the constant
+    # TD(0) residual 1 + 0.9 * 0.5 - 0.5 = 0.95
+    residual = 1.0 + 0.9 * 0.5 - 0.5
+    expected = residual * (1.0 + 0.9 * 0.5 + (0.9 * 0.5) ** 2)
+    T.testing.assert_close(batch["advantages"][1, 0], T.tensor(expected))
+
+
+def _gae_reference(
+    reward: T.Tensor,
+    critic_value: T.Tensor,
+    terminated: T.Tensor,
+    truncated: T.Tensor,
+    gamma: float,
+    gae_lambda: float,
+    truncated_value: T.Tensor | None = None,
+) -> tuple[T.Tensor, T.Tensor]:
+    """Straightforward per-step reference implementation of the estimator."""
+
+    length = reward.shape[1]
+    advantages = T.zeros_like(reward)
+    running = T.zeros(reward.shape[0])
+    for step in reversed(range(length)):
+        next_value = critic_value[:, step + 1]
+        if truncated_value is not None:
+            next_value = T.where(truncated[:, step], truncated_value[:, step], next_value)
+        bootstrap = T.logical_not(terminated[:, step]).to(reward.dtype)
+        delta = reward[:, step] + gamma * next_value * bootstrap - critic_value[:, step]
+        keep = T.logical_not(T.logical_or(terminated[:, step], truncated[:, step])).to(reward.dtype)
+        running = delta + gamma * gae_lambda * running * keep
+        advantages[:, step] = running
+    return advantages + critic_value[:, :length], advantages
+
+
+@pytest.mark.parametrize("gamma,gae_lambda", [(0.9, 0.5), (0.99, 0.95), (0.0, 1.0)])
+def test_returns_and_advantages_match_the_reference_implementation(gamma: float, gae_lambda: float):
+    reward = T.rand(3, 5)
+    critic_value = T.rand(3, 6)
+    terminated = T.zeros(3, 5, dtype=T.bool)
+    truncated = T.zeros(3, 5, dtype=T.bool)
+    terminated[0, 2] = True
+    truncated[1, 3] = True
+    truncated[2, 0] = True
+    truncated_value = T.rand(3, 5)
+
+    returns, advantages = RolloutBuffer.compute_returns_and_advantages(
+        reward, critic_value, terminated, truncated, gamma, gae_lambda, truncated_value
     )
-    T.testing.assert_close(
-        rollout_buffer._buffer["action"][:, 0],
-        rollout_step.action,
-    )
-    T.testing.assert_close(
-        rollout_buffer._buffer["critic_value"][:, 0],
-        rollout_step.critic_value,
-    )
-    T.testing.assert_close(
-        rollout_buffer._buffer["old_log_probs"][:, 0],
-        rollout_step.old_log_probs,
-    )
-    T.testing.assert_close(
-        rollout_buffer._buffer["reward"][:, 0],
-        rollout_step.reward,
-    )
-    T.testing.assert_close(
-        rollout_buffer._buffer["terminated"][:, 0],
-        rollout_step.terminated,
-    )
-    T.testing.assert_close(
-        rollout_buffer._buffer["truncated"][:, 0],
-        rollout_step.truncated,
+    expected_returns, expected_advantages = _gae_reference(
+        reward, critic_value, terminated, truncated, gamma, gae_lambda, truncated_value
     )
 
-
-def test_rollout_buffer_is_full(rollout_buffer: RolloutBuffer, rollout_step_factory: Callable[[], RolloutStep]):
-    for _ in range(8):
-        rollout_buffer.add(rollout_step_factory())
-
-    assert rollout_buffer.is_full() == True
-
-    with pytest.raises(IndexError):
-        rollout_buffer.add(rollout_step_factory())
+    T.testing.assert_close(advantages, expected_advantages)
+    T.testing.assert_close(returns, expected_returns)
+    assert T.allclose(returns, advantages + critic_value[:, :-1])
 
 
-def test_rollout_buffer_get(rollout_buffer: RolloutBuffer, rollout_step_factory: Callable[[], RolloutStep]):
-    rollout_steps = [rollout_step_factory() for _ in range(8)]
+def test_returns_and_advantages_without_any_episode_boundary():
+    reward = T.tensor([[1.0, 2.0, 3.0]])
+    critic_value = T.tensor([[0.5, -0.5, 0.25, 2.0]])
+    no_dones = T.zeros(1, 3, dtype=T.bool)
 
-    for rollout_step in rollout_steps:
-        rollout_buffer.add(rollout_step)
-
-    batch = rollout_buffer.get()
-    # assert shapes
-    assert batch["observation"].shape == (2, 8, 96, 96, 1)
-    assert batch["action"].shape == (2, 8, 3)
-    assert batch["old_log_probs"].shape == (2, 8)
-    assert batch["critic_value"].shape == (2, 8)
-    assert batch["returns"].shape == (2, 8)
-    assert batch["advantages"].shape == (2, 8)
-
-
-def test_rollout_buffer_compute_returns_and_advantages_wo_terminated(rollout_buffer: RolloutBuffer):
-    reward = T.Tensor([
-        [1, 2, 3], [4, 5, 6]
-    ]).to(T.float32)
-    critic_value = T.Tensor([
-        [0.5, -0.5, -0.7], [1., -0.3, 22.]
-    ]).to(T.float32)
-    terminated = T.Tensor([
-        [False, False, False],
-        [False, False, False],
-    ])
-    gamma, gae_lambda = 0.99, 0.95
-    returns, advantages = rollout_buffer.compute_returns_and_advantages(reward, critic_value, terminated, gamma, gae_lambda)
-
-    delta = T.Tensor([
-        [1 + gamma * (-0.5) - 0.5, 2 + gamma * (-0.7) - (-0.5)],
-        [4 + gamma * (-0.3) - 1., 5 + gamma * 22. - (-0.3)],
-    ])
-
-    expected_advantages = T.Tensor([
-        [0, (delta[0, 0] + gamma * gae_lambda * delta[0, 1]), delta[0, 1]],
-        [0, (delta[1, 0] + gamma * gae_lambda * delta[1, 1]), delta[1, 1]],
-    ])
-    T.testing.assert_close(
-        advantages, expected_advantages
+    returns, advantages = RolloutBuffer.compute_returns_and_advantages(
+        reward, critic_value, no_dones, no_dones, gamma=GAMMA, gae_lambda=LAMBDA
     )
 
-    expected_returns = T.zeros_like(expected_advantages)
-    expected_returns[:, 1:] = expected_advantages[:, 1:] + critic_value[:, :-1]
     T.testing.assert_close(
-        returns, expected_returns
+        advantages,
+        T.tensor([[0.05 + 0.45 * (2.725 + 0.45 * 4.55), 2.725 + 0.45 * 4.55, 4.55]]),
+    )
+    T.testing.assert_close(returns, advantages + critic_value[:, :-1])
+
+
+def test_termination_stops_the_bootstrap_and_the_recursion():
+    reward = T.tensor([[1.0, 2.0, 3.0]])
+    critic_value = T.tensor([[0.5, -0.5, 0.25, 2.0]])
+    terminated = T.tensor([[False, True, False]])
+    truncated = T.zeros(1, 3, dtype=T.bool)
+
+    _, advantages = RolloutBuffer.compute_returns_and_advantages(
+        reward, critic_value, terminated, truncated, gamma=GAMMA, gae_lambda=LAMBDA
     )
 
-    assert returns.shape == (2, 3)
-    assert advantages.shape == (2, 3)
+    # no bootstrap through critic_value[:, 2] and no recursion into the future
+    T.testing.assert_close(advantages, T.tensor([[0.05 + 0.45 * 2.5, 2.5, 4.55]]))
 
 
-def test_rollout_buffer_compute_returns_and_advantages_w_terminated(rollout_buffer: RolloutBuffer):
-    reward = T.Tensor([
-        [1, 2, 3], [4, 5, 6]
-    ]).to(T.float32)
-    critic_value = T.Tensor([
-        [0.5, -0.5, -0.7], [1., -0.3, 22.]
-    ]).to(T.float32)
-    terminated = T.Tensor([
-        [False, True, False],
-        [True, False, False],
-    ])
-    gamma, gae_lambda = 0.99, 0.95
-    returns, advantages = rollout_buffer.compute_returns_and_advantages(reward, critic_value, terminated, gamma, gae_lambda)
-
-    delta = T.Tensor([
-        [1 + gamma * (-0.5) - 0.5, 2 - (-0.5)],
-        [4 - 1., 5 + gamma * 22. - (-0.3)],
-    ])
-
-    expected_advantages = T.Tensor([
-        [0, (delta[0, 0] + gamma * gae_lambda * delta[0, 1]), delta[0, 1]],
-        [0, delta[1, 0], delta[1, 1]],
-    ])
-    T.testing.assert_close(
-        advantages, expected_advantages
-    )
-
-    expected_returns = T.zeros_like(expected_advantages)
-    expected_returns[:, 1:] = expected_advantages[:, 1:] + critic_value[:, :-1]
-    T.testing.assert_close(
-        returns, expected_returns
-    )
-
-
-def test_truncation_bootstraps_from_final_observation_value(rollout_buffer: RolloutBuffer):
+def test_truncation_bootstraps_from_the_final_observation_value():
     reward = T.tensor([[1.0]])
-    critic_value = T.tensor([[0.5, 100.0]])  # second value belongs to autoreset observation
+    critic_value = T.tensor([[0.5, 100.0]])  # the 100.0 belongs to the autoreset observation
     terminated = T.tensor([[False]])
     truncated = T.tensor([[True]])
     final_observation_value = T.tensor([[3.0]])
 
-    returns, advantages = rollout_buffer.compute_returns_and_advantages(
+    returns, advantages = RolloutBuffer.compute_returns_and_advantages(
         reward,
         critic_value,
         terminated,
@@ -193,3 +415,38 @@ def test_truncation_bootstraps_from_final_observation_value(rollout_buffer: Roll
     expected_return = T.tensor([[1.0 + 0.9 * 3.0]])
     T.testing.assert_close(returns, expected_return)
     T.testing.assert_close(advantages, expected_return - critic_value[:, :-1])
+
+
+def test_termination_wins_over_a_truncated_value():
+    reward = T.tensor([[1.0, 2.0]])
+    critic_value = T.tensor([[0.5, -0.5, 0.25]])
+    terminated = T.tensor([[True, False]])
+    truncated = T.tensor([[True, False]])
+
+    _, advantages = RolloutBuffer.compute_returns_and_advantages(
+        reward,
+        critic_value,
+        terminated,
+        truncated,
+        gamma=GAMMA,
+        gae_lambda=LAMBDA,
+        truncated_value=T.tensor([[100.0, 100.0]]),
+    )
+
+    T.testing.assert_close(advantages, T.tensor([[0.5, 2.0 + 0.9 * 0.25 + 0.5]]))
+
+
+def test_truncation_without_a_value_falls_back_to_the_stored_critic():
+    reward = T.tensor([[1.0]])
+    critic_value = T.tensor([[0.5, 4.0]])
+
+    _, advantages = RolloutBuffer.compute_returns_and_advantages(
+        reward,
+        critic_value,
+        T.tensor([[False]]),
+        T.tensor([[True]]),
+        gamma=0.9,
+        gae_lambda=0.95,
+    )
+
+    T.testing.assert_close(advantages, T.tensor([[1.0 + 0.9 * 4.0 - 0.5]]))

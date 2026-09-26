@@ -1,26 +1,46 @@
 import torch as T
 from torch import nn
 
-from rl_lib.networks.utils import init_layer
 from rl_lib.networks.config import CriticConfig
+from rl_lib.networks.utils import init_layer, make_activation
 
 
 class Critic(nn.Module):
-    def __init__(self, in_dim: int, hidden_dim: int = 128):
+    def __init__(self, in_dim: int, hidden_dim: int | None = None, config: CriticConfig | None = None):
         super().__init__()
         self.in_dim = in_dim
 
-        self.cfg = CriticConfig(hidden_dim=hidden_dim)
+        if config is not None:
+            self.cfg = config
+        elif hidden_dim is not None:
+            default_layer = CriticConfig().hidden_layers[0]
+            self.cfg = CriticConfig(hidden_layers=[default_layer.model_copy(update={"out_dim": hidden_dim})])
+        else:
+            self.cfg = CriticConfig()
 
-        self._network = nn.Sequential(
-            init_layer(nn.Linear(in_dim, self.cfg.hidden_dim)),
-            nn.GELU(),
-            init_layer(nn.Linear(self.cfg.hidden_dim, 1)),  # standard, not sqrt(2), for value head
-        )
+        hidden_layers = self.cfg.hidden_layers
+        modules: list[nn.Module] = []
+        current_dim = in_dim
+        for layer_cfg in hidden_layers:
+            modules.extend((
+                init_layer(
+                    nn.Linear(current_dim, layer_cfg.out_dim, bias=layer_cfg.bias),
+                    layer_cfg.init_gain,
+                    layer_cfg.init_bias,
+                ),
+                make_activation(layer_cfg.activation),
+            ))
+            current_dim = layer_cfg.out_dim
+        modules.append(init_layer(
+            nn.Linear(current_dim, 1, bias=self.cfg.output_bias),
+            self.cfg.output_init_gain,
+            self.cfg.output_init_bias,
+        ))
+        self._network = nn.Sequential(*modules)
 
     @property
     def out_dim(self) -> int:
-        return self.cfg.out_dim
+        return 1
 
     def forward(self, x: T.Tensor) -> T.Tensor:
         return self._network(x).squeeze_(-1)

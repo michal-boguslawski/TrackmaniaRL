@@ -4,13 +4,14 @@ from logging import getLogger
 from gymnasium import Env
 import torch as T
 from torch import nn
-from torch.optim import AdamW
+from torch.optim import Adam, AdamW
 from torch.distributions import Distribution
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR
 from typing import Iterator, Literal
 
 from rl_lib.agent import Agent
 from rl_lib.training.callbacks.base import TrainingCallback, CallbackList
+from rl_lib.run_config import TrainerSettings
 
 
 logger = getLogger(__name__)
@@ -20,65 +21,97 @@ class PPOTrainer:
     def __init__(
         self,
         agent: Agent,
-        ppo_epsilon: float = 0.2,
-        critic_beta: float = 0.5,
-        entropy_coef: float = 0.001,
+        ppo_epsilon: float | None = None,
+        critic_beta: float | None = None,
+        entropy_coef: float | None = None,
         advantage_normalization_strategy: Literal["batch", "global"] | None = None,
-        entropy_decay: float = 0.995,
+        entropy_decay: float | None = None,
         callbacks: list[TrainingCallback] | None = None,
-        target_kl: float = 0.03,
-        kl_warmup_steps: int = 20_000,
-        backbone_lr: float = 1e-4,
-        head_lr: float = 1e-4,
-        weight_decay: float = 1e-4,
-        optimizer_eps: float = 1e-5,
-        mean_reg_coef: float = 1e-2,
-        hard_stop_kl: bool = True,
+        target_kl: float | None = None,
+        kl_warmup_steps: int | None = None,
+        backbone_lr: float | None = None,
+        head_lr: float | None = None,
+        weight_decay: float | None = None,
+        optimizer_eps: float | None = None,
+        mean_reg_coef: float | None = None,
+        hard_stop_kl: bool | None = None,
+        config: TrainerSettings | None = None,
     ):
+        base = config or TrainerSettings()
+        overrides = {
+            "ppo_epsilon": ppo_epsilon,
+            "critic_beta": critic_beta,
+            "entropy_coef": entropy_coef,
+            "advantage_normalization_strategy": advantage_normalization_strategy,
+            "entropy_decay": entropy_decay,
+            "target_kl": target_kl,
+            "kl_warmup_steps": kl_warmup_steps,
+            "backbone_lr": backbone_lr,
+            "head_lr": head_lr,
+            "weight_decay": weight_decay,
+            "optimizer_eps": optimizer_eps,
+            "mean_reg_coef": mean_reg_coef,
+            "hard_stop_kl": hard_stop_kl,
+        }
+        self.cfg = base.model_copy(update={key: value for key, value in overrides.items() if value is not None})
         self._agent = agent
-        self.backbone_lr = backbone_lr
-        self.head_lr = head_lr
-        self.weight_decay = weight_decay
+        self.backbone_lr = self.cfg.backbone_lr
+        self.head_lr = self.cfg.head_lr
+        self.weight_decay = self.cfg.weight_decay
 
-        self._optimizer = self._build_optimizer(optimizer_eps)
+        self._optimizer = self._build_optimizer()
 
         self._scheduler = None
-        self.ppo_epsilon = ppo_epsilon
-        self.critic_beta = critic_beta
-        self.entropy_coef = entropy_coef
-        self.mean_reg_coef = mean_reg_coef
-        self.advantage_normalization_strategy = advantage_normalization_strategy
-        self.entropy_decay = entropy_decay
-        self._critic_loss_fn = nn.HuberLoss(reduction="none")
+        self.ppo_epsilon = self.cfg.ppo_epsilon
+        self.critic_beta = self.cfg.critic_beta
+        self.entropy_coef = self.cfg.entropy_coef
+        self.mean_reg_coef = self.cfg.mean_reg_coef
+        self.advantage_normalization_strategy = self.cfg.advantage_normalization_strategy
+        self.entropy_decay = self.cfg.entropy_decay
+        self._critic_loss_fn = nn.HuberLoss(reduction="none", delta=self._agent._network.cfg.critic.huber_delta)
 
-        self._target_kl = target_kl
-        self._kl_warmup_steps = kl_warmup_steps
-        self._hard_stop_kl = hard_stop_kl
+        self._target_kl = self.cfg.target_kl
+        self._kl_warmup_steps = self.cfg.kl_warmup_steps
+        self._hard_stop_kl = self.cfg.hard_stop_kl
 
         self._step = 0
 
         self._callbacks = CallbackList(callbacks)
         self._agent.train()
 
-    def _build_optimizer(self, optimizer_eps: float) -> AdamW:
+    def _build_optimizer(self) -> Adam | AdamW:
         param_groups = self._agent.network_parameter_groups()
-        return AdamW(
+        optimizer_type = {"Adam": Adam, "AdamW": AdamW}[self.cfg.optimizer]
+        return optimizer_type(
             [
                 {"params": param_groups["backbone_decay"], "lr": self.backbone_lr, "weight_decay": self.weight_decay},
-                {"params": param_groups["backbone_no_decay"], "lr": self.backbone_lr, "weight_decay": 0.0},
+                {"params": param_groups["backbone_no_decay"], "lr": self.backbone_lr, "weight_decay": self.cfg.no_decay_weight_decay},
                 {"params": param_groups["head_decay"], "lr": self.head_lr, "weight_decay": self.weight_decay},
-                {"params": param_groups["head_no_decay"], "lr": self.head_lr, "weight_decay": 0.0},
+                {"params": param_groups["head_no_decay"], "lr": self.head_lr, "weight_decay": self.cfg.no_decay_weight_decay},
             ],
-            eps=optimizer_eps,
+            eps=self.cfg.optimizer_eps,
+            betas=(self.cfg.optimizer_beta1, self.cfg.optimizer_beta2),
+            amsgrad=self.cfg.optimizer_amsgrad,
         )
 
     def setup_train(self, training_steps: int, batch_size: int) -> None:
-        total_iters = training_steps // batch_size + 1
-        self._scheduler = CosineAnnealingLR(
-            self._optimizer,
-            eta_min=1e-8,
-            T_max=total_iters
-        )
+        total_iters = training_steps // batch_size + self.cfg.scheduler_extra_iters
+        if self.cfg.scheduler == "cosine":
+            self._scheduler = CosineAnnealingLR(
+                self._optimizer,
+                eta_min=self.cfg.scheduler_min_lr,
+                T_max=total_iters,
+            )
+        elif self.cfg.scheduler == "linear":
+            max_lr = max(self.backbone_lr, self.head_lr)
+            self._scheduler = LinearLR(
+                self._optimizer,
+                start_factor=self.cfg.scheduler_start_factor,
+                end_factor=self.cfg.scheduler_min_lr / max_lr,
+                total_iters=total_iters,
+            )
+        else:
+            self._scheduler = None
 
     @property
     def stack_size(self) -> int:
@@ -92,7 +125,15 @@ class PPOTrainer:
         action, log_probs, critic_value = self._agent.act(observation, done)
         return action, log_probs, critic_value
 
-    def clip_grad_norm(self, backbone_max_norm: float, actor_max_norm: float, critic_max_norm: float) -> dict[str, float]:
+    def clip_grad_norm(
+        self,
+        backbone_max_norm: float | None = None,
+        actor_max_norm: float | None = None,
+        critic_max_norm: float | None = None,
+    ) -> dict[str, float]:
+        backbone_max_norm = self.cfg.backbone_max_grad_norm if backbone_max_norm is None else backbone_max_norm
+        actor_max_norm = self.cfg.actor_max_grad_norm if actor_max_norm is None else actor_max_norm
+        critic_max_norm = self.cfg.critic_max_grad_norm if critic_max_norm is None else critic_max_norm
         backbone_params = list(self._agent._network.cnn.parameters()) + list(self._agent._network.sequence_encoder.parameters())
         actor_params = list(self._agent._network.actor.parameters())
         critic_params = list(self._agent._network.critic.parameters())
@@ -123,7 +164,7 @@ class PPOTrainer:
 
         self._optimizer.zero_grad()
 
-        if not T.isfinite(loss):
+        if self.cfg.skip_nonfinite_updates and not T.isfinite(loss):
             logger.error(f"Non-finite loss, skipping update")
             return {}
 
@@ -133,7 +174,7 @@ class PPOTrainer:
         # if metrics["metrics/grad_norm/max"] > 100:
         #     print(metrics)
         #     raise "dupa"
-        self.clip_grad_norm(0.5, 0.5, 0.5)
+        self.clip_grad_norm()
 
         self._optimizer.step()
         self._step += 1
@@ -150,10 +191,10 @@ class PPOTrainer:
 
     def _actor_loss(self, advantages: T.Tensor, log_probs: T.Tensor, old_log_probs: T.Tensor, action_mean: T.Tensor) -> tuple[T.Tensor, dict[str, float]]:
         if self.advantage_normalization_strategy and self.advantage_normalization_strategy == "batch":
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-4)
+            advantages = (advantages - advantages.mean()) / (advantages.std() + self.cfg.advantage_epsilon)
 
         assert log_probs.shape == old_log_probs.shape
-        log_ratio = log_probs - old_log_probs
+        log_ratio = (log_probs - old_log_probs).clamp(self.cfg.log_ratio_min, self.cfg.log_ratio_max)
 
         ratio = log_ratio.sum(-1).clamp(-5, 5).exp()
 
@@ -199,7 +240,9 @@ class PPOTrainer:
             for i in range(action_mean.shape[-1]):
                 metrics[f"metrics/mean_abs_max_{i}"] = action_mean[:, i].abs().max().item()
             # fraction of samples within 1e-3 of tanh saturation (y = tanh(x), |y|>1-1e-3 <=> |x|>~4.0)
-            metrics["metrics/tanh_saturation_frac"] = (action_mean.abs() > 3.5).float().mean().item()
+            metrics["metrics/tanh_saturation_frac"] = (
+                action_mean.abs() > self.cfg.tanh_saturation_threshold
+            ).float().mean().item()
         
         for i, value in enumerate(approx_kl_per_action):
             metrics[f"metrics/approx_kl_{i}"] = value.item()
@@ -208,7 +251,8 @@ class PPOTrainer:
 
     def _critic_loss(self, returns: T.Tensor, values: T.Tensor, old_values: T.Tensor) -> tuple[T.Tensor, dict[str, float]]:
         assert values.shape == old_values.shape == returns.shape
-        clipped_values = old_values + (values - old_values).clamp(-self.ppo_epsilon, self.ppo_epsilon)
+        value_clip_epsilon = self.cfg.value_clip_epsilon or self.ppo_epsilon
+        clipped_values = old_values + (values - old_values).clamp(-value_clip_epsilon, value_clip_epsilon)
         loss_unclipped = self._critic_loss_fn(values, returns)
         loss_clipped = self._critic_loss_fn(clipped_values, returns)
         
@@ -267,11 +311,22 @@ class PPOTrainer:
         self._callbacks.on_epoch(*args, **kwargs)
 
     @staticmethod
-    def _get_iid_minibatches(batch: dict[str, T.Tensor], minibatch_size: int, stack_size: int) -> Iterator[dict[str, T.Tensor]]:
+    def _get_iid_minibatches(
+        batch: dict[str, T.Tensor],
+        minibatch_size: int,
+        stack_size: int,
+        shuffle: bool | None = None,
+    ) -> Iterator[dict[str, T.Tensor]]:
         """Iterate over IID minibatches from a batch of sequences."""
 
         num_envs, batch_size, _ = batch["action"].shape
-        indices = np.random.permutation(batch_size * num_envs)
+        if shuffle is None:
+            shuffle = TrainerSettings().minibatch_indexing_mode == "iid"
+        indices = (
+            np.random.permutation(batch_size * num_envs)
+            if shuffle
+            else np.arange(batch_size * num_envs)
+        )
         for index in range(0, batch_size * num_envs, minibatch_size):
             subindices = [(ind % num_envs, ind // num_envs) for ind in indices[index:(index+minibatch_size)]]
             
@@ -292,8 +347,7 @@ class PPOTrainer:
                 ),
             }
 
-    @staticmethod
-    def _get_metrics_from_batch(batch: T.Tensor):
+    def _get_metrics_from_batch(self, batch: T.Tensor):
         metrics = {
             "rollout/returns": batch["returns"].mean().item(),
             "rollout/advantages_mean": batch["advantages"].mean().item(),
@@ -308,11 +362,11 @@ class PPOTrainer:
         for i, std in enumerate(action_stds):
             metrics[f"rollout/action_std_{i}"] = std.item()
 
-        explained_variance = 1 - (batch["returns"] - batch["critic_value"]).var() / (batch["returns"].var() + 1e-8)
+        explained_variance = 1 - (batch["returns"] - batch["critic_value"]).var() / (batch["returns"].var() + self.cfg.explained_variance_epsilon)
         metrics["rollout/explained_variance"] = explained_variance
         return metrics
 
-    def step_env(self, env: Env, state: NDArray, done: T.Tensor, temperature: float = 1.) -> tuple:
+    def step_env(self, env: Env, state: NDArray, done: T.Tensor, temperature: float | None = None) -> tuple:
         return self._agent.step_env(env, state, done, temperature)
 
     def bootstrap_value(self, observation: T.Tensor) -> T.Tensor:
@@ -333,20 +387,27 @@ class PPOTrainer:
         )
 
         if self.advantage_normalization_strategy and self.advantage_normalization_strategy == "global":
-            batch["advantages"] = (batch["advantages"] - batch["advantages"].mean()) / (batch["advantages"].std() + 1e-4)
+            batch["advantages"] = (batch["advantages"] - batch["advantages"].mean()) / (batch["advantages"].std() + self.cfg.advantage_epsilon)
 
         for epoch in range(epochs):
             epoch_kls = []
-            for minibatch in self._get_iid_minibatches(batch, minibatch_size, self.stack_size):
+            for minibatch in self._get_iid_minibatches(
+                batch,
+                minibatch_size,
+                self.stack_size,
+                shuffle=self.cfg.minibatch_indexing_mode == "iid",
+            ):
                 try:
                     minibatch_metrics = self.train_step(**minibatch)
                 except Exception as e:
                     logger.error(f"Error at training step {training_step}, epoch {epoch}: {e}")
                     raise e
+                if not minibatch_metrics:
+                    continue
                 epoch_kls.append(minibatch_metrics["metrics/approx_kl"])
 
                 if (
-                    minibatch_metrics["metrics/approx_kl"] > self._target_kl * 3 and
+                    minibatch_metrics["metrics/approx_kl"] > self._target_kl * self.cfg.kl_stop_multiplier and
                     training_step > self._kl_warmup_steps and
                     self._hard_stop_kl
                 ):
@@ -354,15 +415,20 @@ class PPOTrainer:
                     break
 
                 self._on_minibatch(metrics=minibatch_metrics, step=self._step)
-            mean_epoch_kl = float(np.mean(epoch_kls))
+            mean_epoch_kl = float(np.mean(epoch_kls)) if epoch_kls else None
             self._on_epoch()
-            if mean_epoch_kl > self._target_kl and training_step > self._kl_warmup_steps and self._hard_stop_kl:
+            if (
+                mean_epoch_kl is not None
+                and mean_epoch_kl > self._target_kl
+                and training_step > self._kl_warmup_steps
+                and self._hard_stop_kl
+            ):
                 logger.warning(f"Early stop epoch {epoch}: KL {mean_epoch_kl:.4f} > {self._target_kl}")
                 break
 
         if self._scheduler:
             self._scheduler.step()
-        self.entropy_coef = max(self.entropy_decay * self.entropy_coef, 1e-4)
+        self.entropy_coef = max(self.entropy_decay * self.entropy_coef, self.cfg.entropy_coef_min)
         metrics = {
             "training/entropy_coef": self.entropy_coef,
             # "training/lr": self._optimizer.param_groups[0]["lr"]
@@ -391,23 +457,19 @@ class PPOTrainer:
 
     def config(self) -> dict[str, int | float | str]:
         """Hyperparameters, suitable for mlflow.log_params (with a prefix)."""
-        return {
-            "ppo_epsilon": self.ppo_epsilon,
-            "critic_beta": self.critic_beta,
-            "entropy_coef_init": self.entropy_coef,
-            "entropy_decay": self.entropy_decay,
-            "target_kl": self._target_kl,
-            "kl_warmup_steps": self._kl_warmup_steps,
-            "backbone_lr": self.backbone_lr,
-            "head_lr": self.head_lr,
-            "weight_decay": self.weight_decay,
-            "advantage_normalization_strategy": self.advantage_normalization_strategy or "none",
+        config = {
+            **{
+                f"{key}": ("none" if value is None else value)
+                for key, value in self.cfg.model_dump().items()
+                if isinstance(value, (int, float, str, bool)) or value is None
+            },
+            "entropy_coef_init": self.cfg.entropy_coef,
+            "entropy_coef_current": self.entropy_coef,
             "optimizer": self._optimizer.__class__.__name__,
-            "optimizer_eps": self._optimizer.defaults.get("eps"),
+            "scheduler_config": self.cfg.scheduler,
             "scheduler": self._scheduler.__class__.__name__ if self._scheduler else "none",
-            "mean_reg_coef": self.mean_reg_coef,
-            "hard_stop_kl": self._hard_stop_kl,
         }
+        return config
 
     def network_config(self) -> dict[str, int | float | str]:
         return self._agent.network_config()

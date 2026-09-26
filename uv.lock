@@ -2592,7 +2592,9 @@ dependencies = [
     { name = "moviepy" },
     { name = "nvidia-ml-py" },
     { name = "pyaml" },
+    { name = "pydantic" },
     { name = "pytest" },
+    { name = "pyyaml" },
     { name = "tqdm" },
 ]
 
@@ -2614,7 +2616,9 @@ requires-dist = [
     { name = "moviepy", specifier = ">=2.2.1" },
     { name = "nvidia-ml-py", specifier = ">=13.610.43" },
     { name = "pyaml", specifier = ">=26.7.0" },
+    { name = "pydantic", specifier = ">=2.11.0" },
     { name = "pytest", specifier = ">=9.1.1" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "torch", marker = "extra == 'cpu'", specifier = ">=2.13.0,<2.14.0", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "rl-lib", extra = "cpu" } },
     { name = "torch", marker = "extra == 'gpu'", specifier = ">=2.13.0,<2.14.0", index = "https://download.pytorch.org/whl/cu130", conflict = { package = "rl-lib", extra = "gpu" } },
     { name = "tqdm", specifier = ">=4.70.0" },

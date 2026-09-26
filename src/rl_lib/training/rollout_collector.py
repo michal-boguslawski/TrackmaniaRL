@@ -1,4 +1,5 @@
 from gymnasium.vector import VectorEnv
+import json
 import numpy as np
 import torch as T
 from tqdm import tqdm
@@ -17,12 +18,20 @@ class RolloutCollector:
         epochs: int,
         minibatch_size: int,
         callbacks: list[CollectorCallback] | None = None,
+        gamma: float | None = None,
+        gae_lambda: float | None = None,
+        seed: int | None = None,
+        run_config: dict | None = None,
     ):
         self.env = env
         self.buffer = buffer
         self.trainer = trainer
         self.epochs = epochs
         self.minibatch_size = minibatch_size
+        self.gamma = buffer.gamma if gamma is None else gamma
+        self.gae_lambda = buffer.gae_lambda if gae_lambda is None else gae_lambda
+        self.seed = seed
+        self.run_config = run_config or {}
         self._callbacks = CallbackList(callbacks)
 
     def _on_rollout_start(self, *args, **kwargs):
@@ -38,7 +47,7 @@ class RolloutCollector:
         self._callbacks.flush(*args, **kwargs)
 
     def run(self, training_steps: int):
-        state, _ = self.env.reset()
+        state, _ = self.env.reset(seed=self.seed)
         done = T.zeros(self.env.num_envs, dtype=T.bool).to(self.trainer.device)
         self.buffer.reset()
         self._on_rollout_start(config=self.config(training_steps))
@@ -89,7 +98,12 @@ class RolloutCollector:
             self._on_env_step(step=i, info=info)
 
             if self.buffer.is_full():
-                self.trainer.train(self.buffer.get(), epochs=self.epochs, minibatch_size=self.minibatch_size, training_step=i)
+                self.trainer.train(
+                    self.buffer.get(gamma=self.gamma, gae_lambda=self.gae_lambda),
+                    epochs=self.epochs,
+                    minibatch_size=self.minibatch_size,
+                    training_step=i,
+                )
                 self.buffer.reset_counter()
                 self._callback_flush()
 
@@ -112,9 +126,20 @@ class RolloutCollector:
             "epochs": self.epochs,
             "minibatch_size": self.minibatch_size,
             "num_envs": self.env.num_envs,
+            "gamma": self.gamma,
+            "gae_lambda": self.gae_lambda,
         }
         if training_steps is not None:
             merged["training_steps"] = training_steps
+        def flatten(prefix: str, value):
+            if isinstance(value, dict):
+                for key, nested in value.items():
+                    flatten(f"{prefix}.{key}" if prefix else key, nested)
+            elif isinstance(value, list):
+                merged[prefix] = json.dumps(value, sort_keys=True)
+            else:
+                merged[prefix] = value
+        flatten("", self.run_config)
         merged.update({f"buffer.{k}": v for k, v in self.buffer.config().items()})
         merged.update({f"trainer.{k}": v for k, v in self.trainer.config().items()})
         merged.update({f"network.{k}": v for k, v in self.trainer.network_config().items()})

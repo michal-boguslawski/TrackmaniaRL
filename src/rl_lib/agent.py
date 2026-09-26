@@ -9,6 +9,7 @@ from torch.nn.parameter import Parameter
 from typing import Iterator
 
 from rl_lib.networks.factory import Network
+from rl_lib.run_config import AgentSettings
 
 
 logger = getLogger(__name__)
@@ -21,15 +22,21 @@ class Agent:
         observation_dim: int,
         action_dim: int,
         stack_size: int,
-        device: T.device | str | None = T.device("cuda" if T.cuda.is_available() else "cpu"),
+        device: T.device | str,
+        config: AgentSettings | None = None,
         **kwargs
     ):
+        self.cfg = config or AgentSettings(stack_size=stack_size)
+        if self.cfg.stack_size != stack_size:
+            raise ValueError(
+                f"agent stack_size ({self.cfg.stack_size}) must match configured network stack_size ({stack_size})"
+            )
         self._observation_dim = observation_dim
         self._action_dim = action_dim
-        self._stack_size = stack_size
-        self._device = device
-        self._obs_window: deque[T.Tensor] = deque(maxlen=stack_size)
-        self._done_window: deque[T.Tensor] = deque(maxlen=stack_size)
+        self._stack_size = self.cfg.stack_size
+        self._device = T.device(device)
+        self._obs_window: deque[T.Tensor] = deque(maxlen=self._stack_size)
+        self._done_window: deque[T.Tensor] = deque(maxlen=self._stack_size)
         self._network = network
 
     @property
@@ -40,7 +47,8 @@ class Agent:
         """Input shape (batch, height, width, channel)"""
         assert observation.dtype == T.uint8
         # assert (observation.min() < 50 and observation.max() > 200), f"Observation values should be in [0, 255], got [{observation.min()}, {observation.max()}]"
-        observation_tensor = observation.to(self._device, T.float32) / (255. / 2.) - 1.
+        observation_tensor = observation.to(self._device, T.float32) / self.cfg.observation_divisor
+        observation_tensor = observation_tensor + self.cfg.observation_offset
         return observation_tensor.permute(0, 3, 1, 2)
 
     def feature_extract(self, observation: T.Tensor) -> T.Tensor:
@@ -71,17 +79,19 @@ class Agent:
             masked_x = x.masked_fill(mask.unsqueeze(-1), 0.)
         return self._network.temporal_encode(masked_x).squeeze(1)
 
-    def heads(self, temporal: T.Tensor, temperature: float = 1.) -> tuple[Distribution, T.Tensor]:
+    def heads(self, temporal: T.Tensor, temperature: float | None = None) -> tuple[Distribution, T.Tensor]:
+        temperature = self.cfg.action_temperature if temperature is None else temperature
         return self._network.heads(temporal, temperature)
 
     def act(
         self,
         observation: T.Tensor,
         done: T.Tensor,
-        temperature: float = 1.
+        temperature: float | None = None
     ) -> tuple[T.Tensor, T.Tensor, T.Tensor]:
         """observation shape is (batch, height, width, channel)"""
         with T.no_grad():
+            temperature = self.cfg.action_temperature if temperature is None else temperature
             features = self.feature_extract(observation)
 
             temporal = self.temporal_encode(
@@ -213,12 +223,13 @@ class Agent:
         env: Env,
         state: NDArray,
         done: T.Tensor,
-        temperature: float = 1.,
+        temperature: float | None = None,
     ) -> tuple:
         """Steps `env` using this agent's policy. Owns all numpy<->tensor
         conversion and terminated/truncated -> done logic so callers don't
         duplicate it."""
         state_t = T.from_numpy(state).to(self._device)
+        temperature = self.cfg.action_temperature if temperature is None else temperature
         action, log_probs, value = self.act(state_t, done, temperature)
 
         next_state, reward, terminated, truncated, info = env.step(
