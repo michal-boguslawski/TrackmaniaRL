@@ -7,7 +7,22 @@ import mlflow.pytorch
 import torch
 from typing import Self
 
-from src.rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.base import MetricsLogger
+
+
+def run_status_for_exception(exc_type: type[BaseException] | None, exc_val: BaseException | None = None) -> str:
+    """Map the exception leaving a run's `with` block onto an MLflow run status.
+
+    A run that ends because it was interrupted is `KILLED` rather than
+    `FAILED`, so the UI distinguishes a stop from a crash. `SystemExit(0)`
+    is a deliberate clean exit, so it still counts as `FINISHED`."""
+    if exc_type is None:
+        return "FINISHED"
+    if issubclass(exc_type, KeyboardInterrupt):
+        return "KILLED"
+    if issubclass(exc_type, SystemExit) and exc_val is not None and getattr(exc_val, "code", None) in (0, None):
+        return "FINISHED"
+    return "FAILED"
 
 
 class MLflowLogger(MetricsLogger):
@@ -70,4 +85,7 @@ class MLflowLogger(MetricsLogger):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        self.close(status="FINISHED" if exc_type is None else "FAILED")
+        # Returns None so the exception keeps propagating: the process exit
+        # status and the run status must agree, and the caller relies on this
+        # `with` block not swallowing a failure.
+        self.close(status=run_status_for_exception(exc_type, exc_val))

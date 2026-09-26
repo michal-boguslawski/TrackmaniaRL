@@ -44,8 +44,9 @@ logger = getLogger(__name__)
 
 def main():
     gc.collect()
-    T.cuda.empty_cache()      # returns cached (unused) memory to the OS/driver
-    T.cuda.reset_peak_memory_stats()
+    if DEVICE.type == "cuda":
+        T.cuda.empty_cache()      # returns cached (unused) memory to the OS/driver
+        T.cuda.reset_peak_memory_stats()
     env_name = "CarRacing-v3"
     console_metrics_logger = ConsoleMetricsLogger()
 
@@ -153,8 +154,14 @@ def main():
 
         try:
             rollout_collector.run(training_steps)
-        except BaseException:
+        except KeyboardInterrupt:
+            # SIGINT/SIGTERM arrive as KeyboardInterrupt via _handle_termination.
+            # MLflowLogger maps this to KILLED, distinct from a crash.
+            logger.warning("Rollout interrupted; stopping training")
+            raise
+        except Exception:
             logger.exception("rollout_collector.run failed")
+            raise
 
 
 if __name__ == "__main__":

@@ -7,8 +7,8 @@
 - [x] Bootstrap truncated episodes from the final observation rather than a reset observation.
 - [ ] Apply the actor mean regularization in transformed action coordinates; neutral steering should not be penalized toward full-left steering.
 - [ ] Fix `RecordVideoCallback.on_rollout_end()` to pass a valid step and guarantee its environment closes if recording fails.
-- [ ] Stop swallowing `BaseException` in the training entrypoint; preserve error and interruption status in the process and MLflow run.
-- [ ] Guard CUDA memory-stat calls so the advertised CPU fallback can start without CUDA.
+- [x] Stop swallowing `BaseException` in the training entrypoint; preserve error and interruption status in the process and MLflow run.
+- [x] Guard CUDA memory-stat calls so the advertised CPU fallback can start without CUDA.
 
 ## Tests and reproducibility
 
