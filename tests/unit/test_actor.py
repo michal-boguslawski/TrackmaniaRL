@@ -23,8 +23,8 @@ HIDDEN_DIM = 8
 # steering, gas, brake
 ACTION_LOW = T.tensor([-1.0, 0.0, 0.0])
 ACTION_HIGH = T.tensor([1.0, 1.0, 1.0])
-# centre of the transformed support == the neutral action
-NEUTRAL_MEAN = T.tensor([0.0, 0.5, 0.5])
+# Centre of the transformed support (not the no-input action for gas/brake).
+SUPPORT_CENTER = T.tensor([0.0, 0.5, 0.5])
 
 
 def actor_config() -> ActorConfig:
@@ -58,9 +58,7 @@ def test_sampled_actions_respect_environment_bounds(actor: Actor):
 
 
 def test_forward_mean_is_in_transformed_action_coordinates():
-    """The regularisation term in the PPO actor loss is applied to the mean the
-    head returns, so it has to live in action space: a neutral policy encodes
-    steering 0, not the left edge of the Beta support."""
+    """The PPO regularizer consumes the mean in environment action coordinates."""
 
     actor = Actor(ACTION_DIM, IN_DIM, config=actor_config())
     with T.no_grad():
@@ -69,7 +67,7 @@ def test_forward_mean_is_in_transformed_action_coordinates():
 
     _, action_mean = actor(T.zeros(1, IN_DIM))
 
-    T.testing.assert_close(action_mean, NEUTRAL_MEAN.view(1, ACTION_DIM), atol=1e-6, rtol=0)
+    T.testing.assert_close(action_mean, SUPPORT_CENTER.view(1, ACTION_DIM), atol=1e-6, rtol=0)
 
 
 def test_deterministic_head_is_the_untempered_policy(actor: Actor):
@@ -77,7 +75,7 @@ def test_deterministic_head_is_the_untempered_policy(actor: Actor):
     to agree with the untempered head instead of some other scaling."""
 
     # asymmetric concentrations, otherwise every temperature sits on the
-    # neutral action and the comparison would be vacuous
+    # support center and the comparison would be vacuous
     with T.no_grad():
         actor._network[-1].weight.zero_()
         actor._network[-1].bias.copy_(T.tensor([1.0, -1.0, 2.0, -1.0, 1.0, -1.0]))
@@ -108,7 +106,7 @@ def test_higher_temperature_pulls_the_mean_to_the_centre_of_the_action_box(actor
     _, low_temperature_mean = actor(x, temperature=1.0)
     _, high_temperature_mean = actor(x, temperature=1e3)
 
-    T.testing.assert_close(high_temperature_mean, NEUTRAL_MEAN.expand(BATCH, ACTION_DIM), atol=1e-3, rtol=0)
+    T.testing.assert_close(high_temperature_mean, SUPPORT_CENTER.expand(BATCH, ACTION_DIM), atol=1e-3, rtol=0)
     assert (low_temperature_mean[:, 1:] - 0.5).abs().sum() > 0.0
 
 

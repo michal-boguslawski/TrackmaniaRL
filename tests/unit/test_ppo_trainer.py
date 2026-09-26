@@ -225,16 +225,17 @@ def test_actor_loss_clips_the_importance_ratio(trainer: PPOTrainer):
     assert metrics["metrics/ratio_max"] == pytest.approx(1.65, rel=1e-3)
 
 
-def test_actor_loss_penalises_the_action_mean(trainer: PPOTrainer):
+def test_actor_loss_regularizes_toward_no_input_not_action_range_midpoint(trainer: PPOTrainer):
     advantages = T.zeros(2)
     log_probs = T.zeros(2, ACTION_DIM)
-    action_mean = T.ones(2, ACTION_DIM)
+    # Zero is no input for all controls; gas/brake at 0.5 would apply both.
+    action_mean = T.tensor([[0.0, 0.0, 0.0], [0.0, 0.5, 0.5]])
     trainer.cfg = trainer.cfg.model_copy(update={"mean_reg_coef": 0.5})
 
     loss, metrics = trainer._actor_loss(advantages, log_probs, log_probs, action_mean)
 
-    assert metrics["metrics/mean_reg"] == pytest.approx(1.0)
-    assert loss.item() == pytest.approx(0.5)
+    assert metrics["metrics/mean_reg"] == pytest.approx(1.0 / 12.0)
+    assert loss.item() == pytest.approx(1.0 / 24.0)
 
 
 def test_actor_loss_metrics_are_reported_per_action_dim(trainer: PPOTrainer):

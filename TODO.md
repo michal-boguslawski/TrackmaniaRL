@@ -11,7 +11,7 @@
 - [x] Guard CUDA memory-stat calls so the advertised CPU fallback can start without CUDA.
 - [ ] Read episode statistics from `info["final_info"]` in `RecordStatisticLoggerCallback`. Under `SAME_STEP` autoreset the stats wrapper runs inside the vector env, so the terminal payload never reaches the top level of `info` and every episode is dropped. This is the suite's only xfail; note that Gymnasium 1.3 reports `final_info` as a dict of batched arrays with an `_episode` mask, not as a list of per-env infos, so the xfail test's fixture has to be rewritten with the fix.
 - [ ] Make `Agent.evaluate_actions`'s `dones` argument required. It is annotated `T.Tensor | None = None` but dereferenced unconditionally, so the annotation promises a call that raises `AttributeError`.
-- [ ] Decide whether `mean_reg` should pull the gas/brake dimensions toward the centre of `[0, 1]`. It is now in action coordinates, which fixes steering, but squaring the mean still penalises gas and brake toward `0.0` (coast) rather than `0.5`.
+- [x] Keep `mean_reg` pointed at the no-input action `[steering=0, gas=0, brake=0]`; the `[0.5, 0.5]` gas/brake support midpoint applies both controls, so it is not neutral.
 
 ## Tests and reproducibility
 

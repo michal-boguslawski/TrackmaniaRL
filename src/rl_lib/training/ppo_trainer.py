@@ -170,6 +170,8 @@ class PPOTrainer:
             clipped_ratio * advantages
         ).mean()
         
+        # Penalize distance from the no-input action [steer=0, gas=0, brake=0].
+        # The midpoint of the gas/brake ranges is not neutral: it applies both.
         mean_reg = action_mean.pow(2).mean()
         actor_loss = surrogate_loss + self.cfg.mean_reg_coef * mean_reg
 
