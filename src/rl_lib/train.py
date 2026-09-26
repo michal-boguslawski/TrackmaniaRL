@@ -13,6 +13,7 @@ import torch as T
 
 from rl_lib.agent import Agent
 from rl_lib.buffers.rollout_buffer import RolloutBuffer
+from rl_lib.device import resolve_device
 from rl_lib.envs.make_env import make_env
 from rl_lib.logger_setup import setup_logging, shutdown_logging
 from rl_lib.networks.factory import Network
@@ -40,20 +41,11 @@ def _seed_everything(seed: int) -> None:
         T.cuda.manual_seed_all(seed)
 
 
-def _resolve_device(config: RunConfig) -> T.device:
-    if config.run.device == "auto":
-        return T.device("cuda" if T.cuda.is_available() else "cpu")
-    device = T.device(config.run.device)
-    if device.type == "cuda" and not T.cuda.is_available():
-        raise RuntimeError(f"Configured device {device} is unavailable")
-    return device
-
-
 def run_training(config: RunConfig, config_path: str | Path | None = None) -> None:
     level = getattr(logging, config.run.log_level)
     session_id = setup_logging(config.run.log_config, default_level=level) if config.run.log_config else setup_logging(default_level=level)
     logger = logging.getLogger(__name__)
-    device = _resolve_device(config)
+    device = resolve_device(config)
     config = config.with_runtime(
         session_id=session_id,
         config_path=str(config_path) if config_path is not None else None,

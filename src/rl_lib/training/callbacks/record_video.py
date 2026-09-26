@@ -3,7 +3,7 @@ from logging import getLogger
 from rl_lib.agent import Agent
 from rl_lib.envs.make_env import make_env
 from rl_lib.training.callbacks.base import CollectorCallback
-from rl_lib.inference import log_evaluation_results, run_inference
+from rl_lib.evaluation.inference import log_evaluation_results, run_inference
 from rl_lib.tracking.base import MetricsLogger
 from rl_lib.training.callbacks.utils import stop_video_recording
 from rl_lib.run_config import VideoCallbackSettings

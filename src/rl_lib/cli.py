@@ -1,9 +1,9 @@
-from pathlib import Path
+from importlib import resources
 import logging
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONFIG = str(Path(__file__).parent / "config" / "ppo_carracing.yaml")
+DEFAULT_CONFIG = str(resources.files("rl_lib.config") / "ppo_carracing.yaml")
 
 
 def _ask(prompt: str, default: str | None = None) -> str:
@@ -20,7 +20,7 @@ def _train() -> None:
 
 
 def _evaluate() -> None:
-    from rl_lib.evaluate import evaluate_checkpoint, evaluate_mlflow
+    from rl_lib.evaluation import evaluate_checkpoint, evaluate_mlflow
     from rl_lib.run_config import load_config
     from rl_lib.tracking.console_logger import ConsoleMetricsLogger
 

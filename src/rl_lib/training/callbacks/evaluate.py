@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from rl_lib.agent import Agent
 from rl_lib.envs.make_env import make_env
-from rl_lib.inference import log_evaluation_results, run_inference
+from rl_lib.evaluation.inference import log_evaluation_results, run_inference
+from rl_lib.evaluation.runtime import _episode_stats_key
 from rl_lib.run_config import EvaluationCallbackSettings
 from rl_lib.tracking.base import MetricsLogger
 from rl_lib.training.callbacks.base import CollectorCallback
@@ -34,14 +35,7 @@ class EvaluationCallback(CollectorCallback):
             episodes=episodes,
             seed=seed,
             temperature=self.agent.cfg.deterministic_temperature,
-            episode_stats_key=next(
-                (
-                    wrapper.stats_key
-                    for wrapper in self.cfg.environment.wrappers
-                    if wrapper.name == "record_episode_stats"
-                ),
-                "episode",
-            ),
+            episode_stats_key=_episode_stats_key(self.cfg.environment),
         )
         log_evaluation_results(results, self._loggers, step=step, scope=scope)
         self._last_evaluation_step = step

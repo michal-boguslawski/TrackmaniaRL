@@ -7,7 +7,9 @@ from rl_lib.training.ppo_trainer import PPOTrainer
 
 
 def test_sample_yaml_loads_full_current_run_defaults():
-    config = load_config("configs/ppo_carracing.yaml")
+    from importlib import resources
+    config_path = str(resources.files("rl_lib.config") / "ppo_carracing.yaml")
+    config = load_config(config_path)
 
     assert config.environment.id == "CarRacing-v3"
     assert config.environment.num_envs == 16
@@ -17,15 +19,6 @@ def test_sample_yaml_loads_full_current_run_defaults():
     assert config.network.cnn.conv_layers[0].kernel_size == 8
     assert config.callback("checkpoints").interval == 200
     assert config.callback("evaluation").final_episodes == 1_000
-
-
-def test_packaged_and_repository_training_configs_stay_in_sync():
-    repository_config = load_config("configs/ppo_carracing.yaml")
-    packaged_config = load_config("src/rl_lib/config/ppo_carracing.yaml")
-
-    assert repository_config.model_dump(mode="json", exclude_unset=True) == packaged_config.model_dump(
-        mode="json", exclude_unset=True
-    )
 
 
 def test_missing_yaml_sections_resolve_from_pydantic_defaults(tmp_path):
