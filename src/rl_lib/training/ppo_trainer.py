@@ -315,6 +315,9 @@ class PPOTrainer:
     def step_env(self, env: Env, state: NDArray, done: T.Tensor, temperature: float = 1.) -> tuple:
         return self._agent.step_env(env, state, done, temperature)
 
+    def bootstrap_value(self, observation: T.Tensor) -> T.Tensor:
+        return self._agent.bootstrap_value(observation)
+
     def train(
         self,
         batch: dict[str, T.Tensor],

@@ -111,6 +111,30 @@ class Agent:
             value
         )
 
+    def bootstrap_value(self, observation: T.Tensor) -> T.Tensor:
+        """Evaluate a successor observation without changing the policy history.
+
+        Same-step vector autoreset returns the reset observation from ``step``;
+        truncated transitions instead bootstrap from Gymnasium's final
+        observation. The history already contains the observation that produced
+        the action, so append the final observation to a temporary window.
+        """
+        with T.no_grad():
+            features = self.feature_extract(observation)
+            history_size = self._stack_size - 1
+            prior_features = list(self._obs_window)[-history_size:] if history_size else []
+            windowed_features = T.stack([*prior_features, features], dim=1)
+
+            prior_dones = list(self._done_window)[-history_size:] if history_size else []
+            final_done = T.zeros(features.shape[0], dtype=T.bool, device=features.device)
+            windowed_dones = T.stack([*prior_dones, final_done], dim=1)
+            mask = windowed_dones.logical_not() & (
+                windowed_dones.flip(1).cumsum(dim=1).flip(1) > 0
+            )
+
+            temporal = self.temporal_encode(windowed_features, mask)
+            return self._network.critic(temporal)
+
     def evaluate_actions(
         self, observation: T.Tensor | T.Tensor, action: T.Tensor, dones: T.Tensor | None = None
     ) -> tuple[T.Tensor, T.Tensor, T.Tensor, Distribution]:

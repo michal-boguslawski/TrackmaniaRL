@@ -171,3 +171,25 @@ def test_rollout_buffer_compute_returns_and_advantages_w_terminated(rollout_buff
     T.testing.assert_close(
         returns, expected_returns
     )
+
+
+def test_truncation_bootstraps_from_final_observation_value(rollout_buffer: RolloutBuffer):
+    reward = T.tensor([[1.0]])
+    critic_value = T.tensor([[0.5, 100.0]])  # second value belongs to autoreset observation
+    terminated = T.tensor([[False]])
+    truncated = T.tensor([[True]])
+    final_observation_value = T.tensor([[3.0]])
+
+    returns, advantages = rollout_buffer.compute_returns_and_advantages(
+        reward,
+        critic_value,
+        terminated,
+        truncated,
+        gamma=0.9,
+        gae_lambda=0.95,
+        truncated_value=final_observation_value,
+    )
+
+    expected_return = T.tensor([[1.0 + 0.9 * 3.0]])
+    T.testing.assert_close(returns, expected_return)
+    T.testing.assert_close(advantages, expected_return - critic_value[:, :-1])

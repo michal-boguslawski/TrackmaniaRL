@@ -36,11 +36,14 @@ def test_same_step_autoreset_does_not_emit_reset_only_steps():
         # Every call executes an action and yields its reward, including the
         # call immediately after a truncation; no reset-only step is emitted.
         for _ in range(2):
-            observation, reward, terminated, truncated, _ = env.step(np.array([0]))
+            observation, reward, terminated, truncated, info = env.step(np.array([0]))
             np.testing.assert_array_equal(observation, np.array([[0]], dtype=np.uint8))
             np.testing.assert_array_equal(reward, np.array([1.0]))
             np.testing.assert_array_equal(terminated, np.array([False]))
             np.testing.assert_array_equal(truncated, np.array([True]))
+            final_observation = info.get("final_obs", info.get("final_observation"))
+            assert final_observation is not None
+            np.testing.assert_array_equal(final_observation[0], np.array([1], dtype=np.uint8))
     finally:
         env.close()
 

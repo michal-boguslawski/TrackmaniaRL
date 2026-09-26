@@ -12,6 +12,7 @@ class RolloutStep:
     reward: T.Tensor
     terminated: T.Tensor
     truncated: T.Tensor
+    truncated_value: T.Tensor | None = None
 
 
 # Rollout Buffer
@@ -47,7 +48,10 @@ class RolloutBuffer:
 
         for key in self._buffer.keys():
             if_append_start = (key in ["observation", "terminated", "truncated"])
-            self._append_to_buffer(key, getattr(step, key), if_append_start)
+            value = getattr(step, key)
+            if value is None:
+                value = T.zeros_like(step.reward)
+            self._append_to_buffer(key, value, if_append_start)
 
         self._counter += 1
 
@@ -59,6 +63,7 @@ class RolloutBuffer:
         truncated: T.Tensor,
         gamma: float,
         gae_lambda: float,
+        truncated_value: T.Tensor | None = None,
     ) -> tuple[T.Tensor, T.Tensor]:
         """
         reward shape is (batch, length - 1)
@@ -66,9 +71,12 @@ class RolloutBuffer:
         terminated shape is (batch, length - 1)
         """
         dones = T.logical_or(terminated, truncated)
+        next_value = critic_value[:, 1:]
+        if truncated_value is not None:
+            next_value = T.where(truncated, truncated_value, next_value)
         delta = (
             reward
-            + gamma * critic_value[:, 1:] * T.logical_not(terminated)
+            + gamma * next_value * T.logical_not(terminated)
             - critic_value[:, :-1]
         )
         advantages = T.zeros_like(reward)
@@ -88,6 +96,7 @@ class RolloutBuffer:
             buffer["truncated"][:, (self._stack_size-1):-1],
             gamma,
             gae_lambda,
+            buffer["truncated_value"][:, :-1],
         )
         dones = T.logical_or(
             buffer["terminated"],
@@ -117,6 +126,7 @@ class RolloutBuffer:
             "reward": deque(maxlen=self.size),
             "truncated": deque(maxlen=self.size + self._stack_size - 1),
             "terminated": deque(maxlen=self.size + self._stack_size - 1),
+            "truncated_value": deque(maxlen=self.size),
         }
 
         self.reset_counter()

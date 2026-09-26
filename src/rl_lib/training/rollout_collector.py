@@ -45,6 +45,35 @@ class RolloutCollector:
 
         for i in tqdm(range(training_steps)):
             (next_state, state, action, log_probs, critic_value, reward, terminated, truncated, done, info) = self.trainer.step_env(self.env, state, done)
+
+            truncated_value = T.zeros_like(
+                truncated,
+                dtype=T.float32,
+                device=self.trainer.device,
+            )
+            if truncated.any():
+                final_observations = info.get("final_obs", info.get("final_observation"))
+                if final_observations is None:
+                    raise RuntimeError(
+                        "Vector environment truncated an episode without providing its final observation"
+                    )
+
+                final_mask = info.get("_final_obs", info.get("_final_observation"))
+                truncated_indices = truncated.nonzero(as_tuple=True)[0].cpu().numpy()
+                if final_mask is not None:
+                    mask = np.asarray(final_mask, dtype=np.bool_)
+                    if not mask[truncated_indices].all():
+                        raise RuntimeError(
+                            "Vector environment did not provide a final observation for every truncated episode"
+                        )
+
+                bootstrap_observations = next_state.copy()
+                for env_index in truncated_indices:
+                    bootstrap_observations[env_index] = final_observations[env_index]
+                bootstrap_tensor = T.from_numpy(bootstrap_observations).to(self.trainer.device)
+                values = self.trainer.bootstrap_value(bootstrap_tensor)
+                truncated_value[truncated] = values[truncated]
+
             self.buffer.add(RolloutStep(
                 observation=state,
                 action=action,
@@ -53,6 +82,7 @@ class RolloutCollector:
                 reward=T.from_numpy(reward).to(T.float32).to(self.trainer.device),
                 terminated=terminated,
                 truncated=truncated,
+                truncated_value=truncated_value,
             ))
 
             state = next_state
