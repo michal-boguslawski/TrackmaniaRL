@@ -58,7 +58,7 @@ class MLflowLogger(MetricsLogger):
     def log_metrics(self, metrics: dict[str, float], step: int) -> None:
         mlflow.log_metrics(metrics, step=step)
 
-    def log_parameters(self, parameters: dict[str, float]) -> None:
+    def log_parameters(self, parameters: dict[str, object]) -> None:
         mlflow.log_params({k: str(v) for k, v in parameters.items()})
 
     def log_config(self, config: dict, artifact_file: str = "config/run_config.yaml") -> None:

@@ -15,7 +15,17 @@ def test_sample_yaml_loads_full_current_run_defaults():
     assert config.rollout.gamma == pytest.approx(0.99)
     assert config.trainer.ppo_epsilon == pytest.approx(0.1)
     assert config.network.cnn.conv_layers[0].kernel_size == 8
-    assert config.callbacks.checkpoint_interval == 200
+    assert config.callback("checkpoints").interval == 200
+    assert config.callback("evaluation").final_episodes == 1_000
+
+
+def test_packaged_and_repository_training_configs_stay_in_sync():
+    repository_config = load_config("configs/ppo_carracing.yaml")
+    packaged_config = load_config("src/rl_lib/config/ppo_carracing.yaml")
+
+    assert repository_config.model_dump(mode="json", exclude_unset=True) == packaged_config.model_dump(
+        mode="json", exclude_unset=True
+    )
 
 
 def test_missing_yaml_sections_resolve_from_pydantic_defaults(tmp_path):
@@ -116,3 +126,31 @@ def test_environment_wrapper_arguments_survive_validation():
 
     assert config.environment.wrappers[0].stack_size == 5
     assert config.environment.wrappers[1].skip == 3
+
+
+def test_evaluation_settings_use_training_env_count_and_disable_reward_normalization():
+    config = RunConfig.model_validate({
+        "environment": {"num_envs": 10, "normalize_rewards": True},
+        "callbacks": [
+            {
+                "name": "evaluation",
+                "interval": 25_000,
+                "episodes": 10,
+                "final_episodes": 1_000,
+            },
+        ],
+    })
+
+    settings = config.evaluation_settings()
+
+    assert settings.environment.num_envs == 10
+    assert settings.environment.normalize_rewards is False
+    assert settings.environment.record_video is False
+    assert all(wrapper.name != "reward_on_done" for wrapper in settings.environment.wrappers)
+    assert settings.environment.wrappers[0].name == "record_episode_stats"
+    assert (settings.interval, settings.episodes, settings.final_episodes) == (
+        25_000,
+        10,
+        1_000,
+    )
+    assert config.callback("record_video") is None

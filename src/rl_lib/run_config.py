@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal, Union
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, NonNegativeInt, PositiveInt, model_validator
@@ -172,22 +172,38 @@ class TrackingSettings(StrictModel):
     log_system_metrics: bool = True
 
 
-class CallbackSettings(StrictModel):
-    checkpoints: bool = True
-    checkpoint_interval: PositiveInt = 200
-    checkpoint_folder: str = "./logs/checkpoints"
-    metrics: bool = True
-    metrics_granularity: Literal["minibatch", "epoch", "batch"] = "batch"
-    episode_statistics: bool = True
-    episode_statistics_mode: Literal["step", "mean"] = "mean"
-    episode_statistics_key: str = Field(default="episode", min_length=1)
-    record_video: bool = True
-    video_interval: PositiveInt = 50_000
-    video_folder: str = "./logs/videos"
-    video_skip: PositiveInt | None = None
-    video_normalize_rewards: bool = False
-    video_recording: WrapperSettings = Field(default_factory=lambda: WrapperSettings(name="record_video"))
-    video_wrappers: list[WrapperSettings] = Field(default_factory=lambda: [
+class CheckpointsCallbackConfig(StrictModel):
+    name: Literal["checkpoints"]
+    interval: PositiveInt = 200
+    folder: str = "./logs/checkpoints"
+
+
+class MetricsCallbackConfig(StrictModel):
+    name: Literal["metrics"]
+    granularity: Literal["minibatch", "epoch", "batch"] = "batch"
+
+
+class EpisodeStatisticsCallbackConfig(StrictModel):
+    name: Literal["episode_statistics"]
+    mode: Literal["step", "mean"] = "mean"
+    stats_key: str = Field(default="episode", min_length=1)
+
+
+class EvaluationCallbackConfig(StrictModel):
+    name: Literal["evaluation"]
+    interval: PositiveInt = 50_000
+    episodes: PositiveInt = 10
+    final_episodes: PositiveInt = 1_000
+
+
+class RecordVideoCallbackConfig(StrictModel):
+    name: Literal["record_video"]
+    interval: PositiveInt = 50_000
+    folder: str = "./logs/videos"
+    skip: PositiveInt | None = None
+    normalize_rewards: bool = False
+    recording: WrapperSettings = Field(default_factory=lambda: WrapperSettings(name="record_video"))
+    wrappers: list[WrapperSettings] = Field(default_factory=lambda: [
         WrapperSettings(name="record_episode_stats"),
         WrapperSettings(name="grayscale"),
         WrapperSettings(name="max_and_skip"),
@@ -195,9 +211,24 @@ class CallbackSettings(StrictModel):
 
     @model_validator(mode="after")
     def validate_video_wrapper(self):
-        if self.video_recording.name != "record_video":
-            raise ValueError("callbacks.video_recording must have name='record_video'")
+        if self.recording.name != "record_video":
+            raise ValueError("record_video callback recording must have name='record_video'")
+        stats_wrappers = [wrapper for wrapper in self.wrappers if wrapper.name == "record_episode_stats"]
+        if len(stats_wrappers) != 1:
+            raise ValueError("record_video callback requires exactly one record_episode_stats wrapper")
         return self
+
+
+CallbackSettings = Annotated[
+    Union[
+        CheckpointsCallbackConfig,
+        MetricsCallbackConfig,
+        EpisodeStatisticsCallbackConfig,
+        EvaluationCallbackConfig,
+        RecordVideoCallbackConfig,
+    ],
+    Field(discriminator="name"),
+]
 
 
 class CheckpointCallbackSettings(StrictModel):
@@ -215,6 +246,16 @@ class MetricsCallbackSettings(StrictModel):
 class EpisodeStatisticsCallbackSettings(StrictModel):
     mode: Literal["step", "mean"]
     stats_key: str = Field(default="episode", min_length=1)
+
+
+class EvaluationCallbackSettings(StrictModel):
+    """Resolved settings for scheduled and final policy evaluation."""
+
+    environment: EnvironmentSettings
+    interval: PositiveInt
+    episodes: PositiveInt
+    final_episodes: PositiveInt
+    seed: int
 
 
 class VideoCallbackSettings(StrictModel):
@@ -247,8 +288,56 @@ class RunConfig(StrictModel):
     network: NetworkConfig = Field(default_factory=NetworkConfig)
     trainer: TrainerSettings = Field(default_factory=TrainerSettings)
     tracking: TrackingSettings = Field(default_factory=TrackingSettings)
-    callbacks: CallbackSettings = Field(default_factory=CallbackSettings)
+    callbacks: list[CallbackSettings] = Field(default_factory=list)
     runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_callback_settings(cls, values):
+        """Accept the former callback mapping while writing the list format."""
+        if not isinstance(values, dict) or not isinstance(values.get("callbacks"), dict):
+            return values
+
+        old = values["callbacks"]
+        migrated = []
+        legacy_callbacks = (
+            (
+                "checkpoints",
+                {"interval": old.get("checkpoint_interval", 200), "folder": old.get("checkpoint_folder", "./logs/checkpoints")},
+            ),
+            ("metrics", {"granularity": old.get("metrics_granularity", "batch")}),
+            (
+                "episode_statistics",
+                {"mode": old.get("episode_statistics_mode", "mean"), "stats_key": old.get("episode_statistics_key", "episode")},
+            ),
+            (
+                "evaluation",
+                {
+                    "interval": old.get("evaluation_interval", 50_000),
+                    "episodes": old.get("evaluation_episodes", 10),
+                    "final_episodes": old.get("final_evaluation_episodes", 1_000),
+                },
+            ),
+            (
+                "record_video",
+                {
+                    "interval": old.get("video_interval", 50_000),
+                    "folder": old.get("video_folder", "./logs/videos"),
+                    "skip": old.get("video_skip"),
+                    "normalize_rewards": old.get("video_normalize_rewards", False),
+                    "recording": old.get("video_recording", {"name": "record_video"}),
+                    "wrappers": old.get("video_wrappers"),
+                },
+            ),
+        )
+        for name, options in legacy_callbacks:
+            if old.get(name, True):
+                migrated.append({"name": name, **{k: v for k, v in options.items() if v is not None}})
+        values["callbacks"] = migrated
+        return values
+
+    def callback(self, name: str):
+        return next((callback for callback in self.callbacks if callback.name == name), None)
 
     def with_runtime(self, **updates) -> RunConfig:
         """Copy this config with resolved runtime facts folded in. Validation is
@@ -258,11 +347,15 @@ class RunConfig(StrictModel):
 
     @property
     def checkpoint_folder(self) -> str:
-        return str(Path(self.callbacks.checkpoint_folder) / self.runtime.session_id)
+        callback = self.callback("checkpoints")
+        folder = callback.folder if isinstance(callback, CheckpointsCallbackConfig) else "./logs/checkpoints"
+        return str(Path(folder) / self.runtime.session_id)
 
     @property
     def video_folder(self) -> str:
-        return str(Path(self.callbacks.video_folder) / self.runtime.session_id)
+        callback = self.callback("record_video")
+        folder = callback.folder if isinstance(callback, RecordVideoCallbackConfig) else "./logs/videos"
+        return str(Path(folder) / self.runtime.session_id)
 
     @property
     def experiment_name(self) -> str:
@@ -275,35 +368,77 @@ class RunConfig(StrictModel):
     def video_environment(self) -> EnvironmentSettings:
         """The single-environment, frame-recording environment used for
         evaluation rollouts."""
+        callback = self.callback("record_video")
+        if not isinstance(callback, RecordVideoCallbackConfig):
+            raise ValueError("record_video callback is not configured")
         return self.environment.model_copy(update={
             "num_envs": 1,
-            "skip": self.callbacks.video_skip or self.environment.skip,
+            "skip": callback.skip or self.environment.skip,
             "vectorization_mode": "sync",
             "record_video": True,
             "video_folder": self.video_folder,
-            "normalize_rewards": self.callbacks.video_normalize_rewards,
-            "wrappers": [self.callbacks.video_recording, *self.callbacks.video_wrappers],
+            "normalize_rewards": callback.normalize_rewards,
+            "wrappers": [callback.recording, *callback.wrappers],
+        })
+
+    def evaluation_environment(self, num_envs: int | None = None) -> EnvironmentSettings:
+        """Build a raw-reward evaluation environment matching training."""
+        wrappers = [wrapper for wrapper in self.environment.wrappers if wrapper.name != "reward_on_done"]
+        stats_wrappers = [wrapper for wrapper in wrappers if wrapper.name == "record_episode_stats"]
+        if stats_wrappers:
+            wrappers = [stats_wrappers[0], *[wrapper for wrapper in wrappers if wrapper is not stats_wrappers[0]]]
+        else:
+            wrappers.insert(0, WrapperSettings(name="record_episode_stats"))
+        return self.environment.model_copy(update={
+            "num_envs": self.environment.num_envs if num_envs is None else num_envs,
+            "normalize_rewards": False,
+            "record_video": False,
+            "wrappers": wrappers,
         })
 
     def checkpoint_settings(self) -> CheckpointCallbackSettings:
+        callback = self.callback("checkpoints")
+        if not isinstance(callback, CheckpointsCallbackConfig):
+            raise ValueError("checkpoints callback is not configured")
         return CheckpointCallbackSettings(
             folder=self.checkpoint_folder,
-            interval=self.callbacks.checkpoint_interval,
+            interval=callback.interval,
         )
 
     def metrics_settings(self) -> MetricsCallbackSettings:
-        return MetricsCallbackSettings(granularity=self.callbacks.metrics_granularity)
+        callback = self.callback("metrics")
+        if not isinstance(callback, MetricsCallbackConfig):
+            raise ValueError("metrics callback is not configured")
+        return MetricsCallbackSettings(granularity=callback.granularity)
 
     def episode_statistics_settings(self) -> EpisodeStatisticsCallbackSettings:
+        callback = self.callback("episode_statistics")
+        if not isinstance(callback, EpisodeStatisticsCallbackConfig):
+            raise ValueError("episode_statistics callback is not configured")
         return EpisodeStatisticsCallbackSettings(
-            mode=self.callbacks.episode_statistics_mode,
-            stats_key=self.callbacks.episode_statistics_key,
+            mode=callback.mode,
+            stats_key=callback.stats_key,
         )
 
     def video_settings(self) -> VideoCallbackSettings:
+        callback = self.callback("record_video")
+        if not isinstance(callback, RecordVideoCallbackConfig):
+            raise ValueError("record_video callback is not configured")
         return VideoCallbackSettings(
             environment=self.video_environment(),
-            interval=self.callbacks.video_interval,
+            interval=callback.interval,
+            seed=self.run.seed,
+        )
+
+    def evaluation_settings(self) -> EvaluationCallbackSettings:
+        callback = self.callback("evaluation")
+        if not isinstance(callback, EvaluationCallbackConfig):
+            raise ValueError("evaluation callback is not configured")
+        return EvaluationCallbackSettings(
+            environment=self.evaluation_environment(),
+            interval=callback.interval,
+            episodes=callback.episodes,
+            final_episodes=callback.final_episodes,
             seed=self.run.seed,
         )
 
@@ -315,30 +450,35 @@ class RunConfig(StrictModel):
 
     @model_validator(mode="after")
     def validate_relationships(self):
+        names = [callback.name for callback in self.callbacks]
+        if len(names) != len(set(names)):
+            raise ValueError("each callback may only be configured once")
         if not self.environment.continuous:
             raise ValueError("the configured PPO actor supports continuous action spaces only")
         episode_wrappers = [
             wrapper for wrapper in self.environment.wrappers
             if wrapper.name == "record_episode_stats"
         ]
-        if self.callbacks.episode_statistics and not episode_wrappers:
+        statistics_callback = self.callback("episode_statistics")
+        if statistics_callback is not None and not episode_wrappers:
             raise ValueError("callbacks.episode_statistics requires a record_episode_stats environment wrapper")
-        if len(episode_wrappers) > 1 and self.callbacks.episode_statistics:
+        if len(episode_wrappers) > 1 and statistics_callback is not None:
             raise ValueError("callbacks.episode_statistics supports one record_episode_stats wrapper")
         if (
-            self.callbacks.episode_statistics
+            statistics_callback is not None
             and episode_wrappers
-            and self.callbacks.episode_statistics_key != episode_wrappers[0].stats_key
+            and statistics_callback.stats_key != episode_wrappers[0].stats_key
         ):
             raise ValueError("callbacks.episode_statistics_key must match environment wrapper stats_key")
+        video_callback = self.callback("record_video")
         video_stats_wrappers = [
-            wrapper for wrapper in self.callbacks.video_wrappers
+            wrapper for wrapper in video_callback.wrappers
             if wrapper.name == "record_episode_stats"
-        ]
-        if self.callbacks.record_video and not video_stats_wrappers:
-            raise ValueError("callbacks.record_video requires record_episode_stats in video_wrappers")
-        if self.callbacks.record_video and len(video_stats_wrappers) > 1:
-            raise ValueError("callbacks.record_video supports one record_episode_stats video wrapper")
+        ] if isinstance(video_callback, RecordVideoCallbackConfig) else []
+        if isinstance(video_callback, RecordVideoCallbackConfig) and not video_stats_wrappers:
+            raise ValueError("record_video callback requires record_episode_stats in its wrappers")
+        if isinstance(video_callback, RecordVideoCallbackConfig) and len(video_stats_wrappers) > 1:
+            raise ValueError("record_video callback supports one record_episode_stats wrapper")
         if self.rollout.minibatch_size > self.rollout.buffer_size * self.environment.num_envs:
             raise ValueError("rollout.minibatch_size cannot exceed buffer_size * environment.num_envs")
         if len(self.network.actor.action_low) != len(self.network.actor.action_high):

@@ -127,31 +127,35 @@ tracking:
   log_system_metrics: true
 
 callbacks:
-  checkpoints: true
-  checkpoint_interval: 200
-  checkpoint_folder: ./logs/checkpoints
-  metrics: true
-  metrics_granularity: batch
-  episode_statistics: true
-  episode_statistics_mode: mean
-  episode_statistics_key: episode
-  record_video: true
-  video_interval: 50000
-  video_folder: ./logs/videos
-  video_skip: null
-  video_normalize_rewards: false
-  video_recording:
-    name: record_video
-    episode_trigger: all
-    episode_interval: 1
-    video_length: 0
-    video_name_prefix: rl-video
-    video_fps: null
-    video_disable_logger: true
-  video_wrappers:
-    - name: record_episode_stats
-      stats_buffer_length: 100
-      stats_key: episode
-    - name: grayscale
-      keep_dim: true
-    - name: max_and_skip
+  - name: checkpoints
+    interval: 200
+    folder: ./logs/checkpoints
+  - name: metrics
+    granularity: batch
+  - name: episode_statistics
+    mode: mean
+    stats_key: episode
+  - name: evaluation
+    interval: 50000
+    episodes: 10
+    final_episodes: 1000
+  - name: record_video
+    interval: 50000
+    folder: ./logs/videos
+    skip: null
+    normalize_rewards: false
+    recording:
+      name: record_video
+      episode_trigger: all
+      episode_interval: 1
+      video_length: 0
+      video_name_prefix: rl-video
+      video_fps: null
+      video_disable_logger: true
+    wrappers:
+      - name: record_episode_stats
+        stats_buffer_length: 100
+        stats_key: episode
+      - name: grayscale
+        keep_dim: true
+      - name: max_and_skip

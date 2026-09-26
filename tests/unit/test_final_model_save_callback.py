@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import torch as T
 
+from rl_lib.tracking.console_logger import ConsoleMetricsLogger
 from rl_lib.training.callbacks.final_model_save import FinalModelSaveCallback
 
 
@@ -30,7 +31,7 @@ def test_final_model_callback_saves_model_and_logs_state_dict(tmp_path, monkeypa
     callback = FinalModelSaveCallback(
         SimpleNamespace(network=network),
         tmp_path / "run",
-        mlflow_logger,
+        [ConsoleMetricsLogger(), mlflow_logger],
     )
 
     callback.on_rollout_end()

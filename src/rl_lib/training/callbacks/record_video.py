@@ -1,9 +1,9 @@
 from logging import getLogger
-import torch as T
 
 from rl_lib.agent import Agent
 from rl_lib.envs.make_env import make_env
 from rl_lib.training.callbacks.base import CollectorCallback
+from rl_lib.inference import log_evaluation_results, run_inference
 from rl_lib.tracking.base import MetricsLogger
 from rl_lib.training.callbacks.utils import stop_video_recording
 from rl_lib.run_config import VideoCallbackSettings
@@ -29,23 +29,18 @@ class RecordVideoCallback(CollectorCallback):
 
 
     def record(self, step: int):
-        self.agent.eval()
-        self.agent.reset()
         logger.debug("Recording video...")
-        state, _ = self.env.reset(seed=self.cfg.seed)
-        done = T.zeros(self.env.num_envs, dtype=T.bool).to(self.agent.device)
-        while not done.any():
-            state, _, _, _, _, _, _, _, done, info = self.agent.step_env(
-                self.env, state, done, temperature=self.agent.cfg.deterministic_temperature
-            )
+        results = run_inference(
+            self.agent,
+            self.env,
+            episodes=1,
+            seed=self.cfg.seed,
+            temperature=self.agent.cfg.deterministic_temperature,
+            episode_stats_key=self.cfg.stats_key,
+        )
 
         video_path = stop_video_recording(self.env.envs[0])
-
-        metrics = {
-            "evaluation/episode_returns": float(info[self.cfg.stats_key]["r"][0]),
-            "evaluation/episode_lengths": float(info[self.cfg.stats_key]["l"][0]),
-        }
-        [lgr.log_metrics(metrics, step=step) for lgr in self._loggers]
+        log_evaluation_results(results, self._loggers, step=step, scope="video")
 
         if video_path:
             [lgr.log_artifact(video_path, artifact_path=f"videos/step_{self._step}") for lgr in self._loggers]

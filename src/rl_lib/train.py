@@ -19,12 +19,7 @@ from rl_lib.networks.factory import Network
 from rl_lib.run_config import RunConfig, load_config
 from rl_lib.tracking.console_logger import ConsoleMetricsLogger
 from rl_lib.tracking.mlflow_logger import MLflowLogger
-from rl_lib.training.callbacks.checkpoints_save import CheckpointsSaveCallback
-from rl_lib.training.callbacks.final_model_save import FinalModelSaveCallback
-from rl_lib.training.callbacks.metrics_logger import MetricsLoggingCallback
-from rl_lib.training.callbacks.params_logger import ParamsLoggingCallback
-from rl_lib.training.callbacks.record_statistics import RecordStatisticLoggerCallback
-from rl_lib.training.callbacks.record_video import RecordVideoCallback
+from rl_lib.training.callbacks.factory import create_callbacks
 from rl_lib.training.ppo_trainer import PPOTrainer
 from rl_lib.training.rollout_collector import RolloutCollector
 
@@ -100,41 +95,24 @@ def run_training(config: RunConfig, config_path: str | Path | None = None) -> No
         video_agent = Agent(network, device, config.agent)
         buffer = RolloutBuffer(config.rollout, stack_size=config.agent.stack_size)
 
-        trainer_callbacks = []
-        if config.callbacks.checkpoints:
-            trainer_callbacks.append(CheckpointsSaveCallback(agent, config.checkpoint_settings()))
-        for metric_logger in metrics_loggers:
-            if config.callbacks.metrics:
-                trainer_callbacks.append(MetricsLoggingCallback(metric_logger, config.metrics_settings()))
-        trainer = PPOTrainer(agent=agent, config=config.trainer, callbacks=trainer_callbacks)
-        trainer.setup_train(config.run, config.rollout)
-
-        collector_callbacks = []
-        run_config_dump = config.model_dump(mode="json")
-        for metric_logger in metrics_loggers:
-            collector_callbacks.append(ParamsLoggingCallback(metric_logger, run_config=run_config_dump))
-            if config.callbacks.episode_statistics:
-                collector_callbacks.append(RecordStatisticLoggerCallback(
-                    metric_logger, config.episode_statistics_settings()
-                ))
-        if config.callbacks.record_video:
-            collector_callbacks.append(RecordVideoCallback(
-                agent=video_agent,
-                metrics_loggers=metrics_loggers,
-                config=config.video_settings(),
-            ))
-        collector_callbacks.append(FinalModelSaveCallback(
+        run_config_dump = config.model_dump(mode="json", exclude_unset=True)
+        callback_groups = create_callbacks(
+            config=config,
             agent=agent,
-            folder=config.checkpoint_folder,
-            mlflow_logger=mlflow_logger,
-        ))
+            video_agent=video_agent,
+            metrics_loggers=metrics_loggers,
+            run_config=run_config_dump,
+        )
+
+        trainer = PPOTrainer(agent=agent, config=config.trainer, callbacks=callback_groups.trainer)
+        trainer.setup_train(config.run, config.rollout)
 
         collector = RolloutCollector(
             env,
             buffer,
             trainer,
             config.rollout,
-            callbacks=collector_callbacks,
+            callbacks=callback_groups.collector,
             seed=config.run.seed,
             run_config=run_config_dump,
         )
