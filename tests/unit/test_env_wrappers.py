@@ -26,10 +26,19 @@ from gymnasium.wrappers.vector import NormalizeReward
 
 from rl_lib.envs.wrappers.registry import WRAPPERS
 from rl_lib.envs.wrappers.reward_wrappers import RewardOnEpisodeEndWrapper
+from rl_lib.run_config import EnvironmentSettings, WrapperSettings
 
 
 make_env_module = importlib.import_module("rl_lib.envs.make_env")
 make_env = make_env_module.make_env
+
+
+def env_settings(**overrides) -> EnvironmentSettings:
+    """Bare environment settings: no wrappers and no reward normalization, so
+    each test states only the plumbing it asserts on."""
+    base = {"id": "SomeEnv-v0", "num_envs": 1, "wrappers": [], "normalize_rewards": False}
+    base.update(overrides)
+    return EnvironmentSettings(**base)
 
 
 class _PixelEnv(gym.Env):
@@ -97,7 +106,7 @@ def capture_make_vec(monkeypatch):
 
 
 def test_make_env_passes_the_requested_shape(capture_make_vec):
-    make_env("SomeEnv-v0", num_envs=4, vectorization_mode="sync")
+    make_env(env_settings(num_envs=4, vectorization_mode="sync"))
 
     assert capture_make_vec["env_id"] == "SomeEnv-v0"
     assert capture_make_vec["num_envs"] == 4
@@ -109,13 +118,13 @@ def test_make_env_passes_the_requested_shape(capture_make_vec):
 
 
 def test_make_env_defaults_to_async_without_render_mode(capture_make_vec):
-    make_env("SomeEnv-v0", num_envs=1)
+    make_env(env_settings())
 
     assert capture_make_vec["vectorization_mode"] is VectorizeMode.ASYNC
 
 
 def test_make_env_recording_forces_sync_and_rgb(capture_make_vec):
-    make_env("SomeEnv-v0", num_envs=1, record=True, vectorization_mode="async")
+    make_env(env_settings(record_video=True, vectorization_mode="async"))
 
     assert capture_make_vec["vectorization_mode"] is VectorizeMode.SYNC
     assert capture_make_vec["render_mode"] == "rgb_array"
@@ -123,7 +132,7 @@ def test_make_env_recording_forces_sync_and_rgb(capture_make_vec):
 
 
 def test_make_env_inserts_the_video_wrapper_first(capture_make_vec):
-    make_env("SomeEnv-v0", num_envs=1, record=True, wrappers=["grayscale"])
+    make_env(env_settings(record_video=True, wrappers=[WrapperSettings(name="grayscale")]))
 
     assert [wrapper.func for wrapper in capture_make_vec["wrappers"]] == [
         WRAPPERS["record_video"],
@@ -132,21 +141,15 @@ def test_make_env_inserts_the_video_wrapper_first(capture_make_vec):
 
 
 def test_make_env_does_not_mutate_the_callers_wrapper_list(capture_make_vec):
-    wrappers = ["grayscale"]
+    wrappers = [WrapperSettings(name="grayscale")]
 
-    make_env("SomeEnv-v0", num_envs=1, record=True, wrappers=wrappers)
+    make_env(env_settings(record_video=True, wrappers=wrappers))
 
-    assert wrappers == ["grayscale"]
+    assert wrappers == [WrapperSettings(name="grayscale")]
 
 
 def test_make_env_forwards_the_video_folder_and_skip(capture_make_vec):
-    make_env(
-        "SomeEnv-v0",
-        num_envs=1,
-        record=True,
-        skip=7,
-        video_folder="tmp/videos",
-    )
+    make_env(env_settings(record_video=True, skip=7, video_folder="tmp/videos"))
 
     wrapper = capture_make_vec["wrappers"][0]
     assert wrapper.keywords["video_folder"] == "tmp/videos"
@@ -156,14 +159,10 @@ def test_make_env_forwards_the_video_folder_and_skip(capture_make_vec):
 
 
 def test_make_env_forwards_typed_wrapper_specific_options(capture_make_vec):
-    make_env(
-        "SomeEnv-v0",
-        num_envs=1,
-        wrappers=[
-            {"name": "record_episode_stats", "stats_buffer_length": 25, "stats_key": "episode_stats"},
-            {"name": "max_and_skip", "skip": 3},
-        ],
-    )
+    make_env(env_settings(wrappers=[
+        {"name": "record_episode_stats", "stats_buffer_length": 25, "stats_key": "episode_stats"},
+        {"name": "max_and_skip", "skip": 3},
+    ]))
 
     stats_wrapper, skip_wrapper = capture_make_vec["wrappers"]
     assert stats_wrapper.keywords["stats_buffer_length"] == 25
@@ -172,7 +171,9 @@ def test_make_env_forwards_typed_wrapper_specific_options(capture_make_vec):
 
 
 def test_make_env_wraps_with_normalized_rewards():
-    env = make_env(ENV_ID, num_envs=2, vectorization_mode="sync", normalize_rewards=True)
+    env = make_env(EnvironmentSettings(
+        id=ENV_ID, num_envs=2, vectorization_mode="sync", normalize_rewards=True, wrappers=[]
+    ))
 
     try:
         assert isinstance(env, NormalizeReward)
@@ -187,11 +188,11 @@ def test_make_env_leaves_rewards_untouched_by_default(capture_make_vec, monkeypa
     sentinel = object()
     monkeypatch.setattr(make_env_module, "make_vec", lambda env_id, **kwargs: sentinel)
 
-    assert make_env("SomeEnv-v0", num_envs=2) is sentinel
+    assert make_env(env_settings(num_envs=2)) is sentinel
 
 
 def test_make_env_disables_continuous_for_discrete_envs(capture_make_vec):
-    make_env("SomeEnv-v0", num_envs=1, continuous=False)
+    make_env(env_settings(continuous=False))
 
     assert capture_make_vec["continuous"] is False
 
@@ -383,6 +384,6 @@ def test_apply_is_a_pure_function():
 
 
 def test_frame_stack_is_usable_through_make_env(capture_make_vec):
-    make_env("SomeEnv-v0", num_envs=1, wrappers=[{"name": "frame_stack", "stack_size": 2}])
+    make_env(env_settings(wrappers=[{"name": "frame_stack", "stack_size": 2}]))
 
     capture_make_vec["wrappers"][0](_PixelEnv())

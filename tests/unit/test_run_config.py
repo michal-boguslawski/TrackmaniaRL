@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from rl_lib.buffers.rollout_buffer import RolloutBuffer
-from rl_lib.run_config import RunConfig, WrapperSettings, load_config
+from rl_lib.run_config import RolloutSettings, RunConfig, WrapperSettings, load_config
 from rl_lib.training.ppo_trainer import PPOTrainer
 
 
@@ -79,8 +79,11 @@ def test_wrapper_settings_validate_name_and_wrapper_specific_options():
 
 
 def test_rollout_and_trainer_settings_reach_runtime_components(agent):
-    buffer = RolloutBuffer(size=8, stack_size=agent.stack_size, gamma=0.8, gae_lambda=0.7)
-    trainer = PPOTrainer(agent, config=RunConfig.model_validate({
+    buffer = RolloutBuffer(
+        RolloutSettings(buffer_size=8, gamma=0.8, gae_lambda=0.7),
+        stack_size=agent.stack_size,
+    )
+    trainer = PPOTrainer(agent, RunConfig.model_validate({
         "trainer": {
             "backbone_lr": 0.0002,
             "head_lr": 0.0003,
@@ -93,8 +96,8 @@ def test_rollout_and_trainer_settings_reach_runtime_components(agent):
 
     assert buffer.config()["gamma"] == pytest.approx(0.8)
     assert buffer.config()["gae_lambda"] == pytest.approx(0.7)
-    assert trainer.backbone_lr == pytest.approx(0.0002)
-    assert trainer.head_lr == pytest.approx(0.0003)
+    assert trainer.cfg.backbone_lr == pytest.approx(0.0002)
+    assert trainer.cfg.head_lr == pytest.approx(0.0003)
     assert trainer._optimizer.__class__.__name__ == "Adam"
     assert trainer.cfg.backbone_max_grad_norm == pytest.approx(0.75)
     assert trainer.cfg.entropy_coef_min == pytest.approx(0.00002)

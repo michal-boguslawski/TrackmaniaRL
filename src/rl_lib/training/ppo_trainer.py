@@ -7,11 +7,11 @@ from torch import nn
 from torch.optim import Adam, AdamW
 from torch.distributions import Distribution
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR
-from typing import Iterator, Literal
+from typing import Iterator
 
 from rl_lib.agent import Agent
 from rl_lib.training.callbacks.base import TrainingCallback, CallbackList
-from rl_lib.run_config import TrainerSettings
+from rl_lib.run_config import RolloutSettings, RunSettings, TrainerSettings
 
 
 logger = getLogger(__name__)
@@ -21,61 +21,21 @@ class PPOTrainer:
     def __init__(
         self,
         agent: Agent,
-        ppo_epsilon: float | None = None,
-        critic_beta: float | None = None,
-        entropy_coef: float | None = None,
-        advantage_normalization_strategy: Literal["batch", "global"] | None = None,
-        entropy_decay: float | None = None,
+        config: TrainerSettings,
         callbacks: list[TrainingCallback] | None = None,
-        target_kl: float | None = None,
-        kl_warmup_steps: int | None = None,
-        backbone_lr: float | None = None,
-        head_lr: float | None = None,
-        weight_decay: float | None = None,
-        optimizer_eps: float | None = None,
-        mean_reg_coef: float | None = None,
-        hard_stop_kl: bool | None = None,
-        config: TrainerSettings | None = None,
     ):
-        base = config or TrainerSettings()
-        overrides = {
-            "ppo_epsilon": ppo_epsilon,
-            "critic_beta": critic_beta,
-            "entropy_coef": entropy_coef,
-            "advantage_normalization_strategy": advantage_normalization_strategy,
-            "entropy_decay": entropy_decay,
-            "target_kl": target_kl,
-            "kl_warmup_steps": kl_warmup_steps,
-            "backbone_lr": backbone_lr,
-            "head_lr": head_lr,
-            "weight_decay": weight_decay,
-            "optimizer_eps": optimizer_eps,
-            "mean_reg_coef": mean_reg_coef,
-            "hard_stop_kl": hard_stop_kl,
-        }
-        self.cfg = base.model_copy(update={key: value for key, value in overrides.items() if value is not None})
+        self.cfg = config
         self._agent = agent
-        self.backbone_lr = self.cfg.backbone_lr
-        self.head_lr = self.cfg.head_lr
-        self.weight_decay = self.cfg.weight_decay
-
         self._optimizer = self._build_optimizer()
-
         self._scheduler = None
-        self.ppo_epsilon = self.cfg.ppo_epsilon
-        self.critic_beta = self.cfg.critic_beta
-        self.entropy_coef = self.cfg.entropy_coef
-        self.mean_reg_coef = self.cfg.mean_reg_coef
-        self.advantage_normalization_strategy = self.cfg.advantage_normalization_strategy
-        self.entropy_decay = self.cfg.entropy_decay
-        self._critic_loss_fn = nn.HuberLoss(reduction="none", delta=self._agent._network.cfg.critic.huber_delta)
-
-        self._target_kl = self.cfg.target_kl
-        self._kl_warmup_steps = self.cfg.kl_warmup_steps
-        self._hard_stop_kl = self.cfg.hard_stop_kl
-
+        # The only trainer value that is not purely configuration: entropy_coef
+        # decays every update, so its live value lives on the instance while
+        # cfg.entropy_coef stays the initial coefficient.
+        self._entropy_coef = self.cfg.entropy_coef
+        self._critic_loss_fn = nn.HuberLoss(
+            reduction="none", delta=self._agent.network.cfg.critic.huber_delta
+        )
         self._step = 0
-
         self._callbacks = CallbackList(callbacks)
         self._agent.train()
 
@@ -84,18 +44,18 @@ class PPOTrainer:
         optimizer_type = {"Adam": Adam, "AdamW": AdamW}[self.cfg.optimizer]
         return optimizer_type(
             [
-                {"params": param_groups["backbone_decay"], "lr": self.backbone_lr, "weight_decay": self.weight_decay},
-                {"params": param_groups["backbone_no_decay"], "lr": self.backbone_lr, "weight_decay": self.cfg.no_decay_weight_decay},
-                {"params": param_groups["head_decay"], "lr": self.head_lr, "weight_decay": self.weight_decay},
-                {"params": param_groups["head_no_decay"], "lr": self.head_lr, "weight_decay": self.cfg.no_decay_weight_decay},
+                {"params": param_groups["backbone_decay"], "lr": self.cfg.backbone_lr, "weight_decay": self.cfg.weight_decay},
+                {"params": param_groups["backbone_no_decay"], "lr": self.cfg.backbone_lr, "weight_decay": self.cfg.no_decay_weight_decay},
+                {"params": param_groups["head_decay"], "lr": self.cfg.head_lr, "weight_decay": self.cfg.weight_decay},
+                {"params": param_groups["head_no_decay"], "lr": self.cfg.head_lr, "weight_decay": self.cfg.no_decay_weight_decay},
             ],
             eps=self.cfg.optimizer_eps,
             betas=(self.cfg.optimizer_beta1, self.cfg.optimizer_beta2),
             amsgrad=self.cfg.optimizer_amsgrad,
         )
 
-    def setup_train(self, training_steps: int, batch_size: int) -> None:
-        total_iters = training_steps // batch_size + self.cfg.scheduler_extra_iters
+    def setup_train(self, run: RunSettings, rollout: RolloutSettings) -> None:
+        total_iters = run.total_steps // rollout.buffer_size + self.cfg.scheduler_extra_iters
         if self.cfg.scheduler == "cosine":
             self._scheduler = CosineAnnealingLR(
                 self._optimizer,
@@ -103,7 +63,7 @@ class PPOTrainer:
                 T_max=total_iters,
             )
         elif self.cfg.scheduler == "linear":
-            max_lr = max(self.backbone_lr, self.head_lr)
+            max_lr = max(self.cfg.backbone_lr, self.cfg.head_lr)
             self._scheduler = LinearLR(
                 self._optimizer,
                 start_factor=self.cfg.scheduler_start_factor,
@@ -112,6 +72,7 @@ class PPOTrainer:
             )
         else:
             self._scheduler = None
+
 
     @property
     def stack_size(self) -> int:
@@ -134,9 +95,9 @@ class PPOTrainer:
         backbone_max_norm = self.cfg.backbone_max_grad_norm if backbone_max_norm is None else backbone_max_norm
         actor_max_norm = self.cfg.actor_max_grad_norm if actor_max_norm is None else actor_max_norm
         critic_max_norm = self.cfg.critic_max_grad_norm if critic_max_norm is None else critic_max_norm
-        backbone_params = list(self._agent._network.cnn.parameters()) + list(self._agent._network.sequence_encoder.parameters())
-        actor_params = list(self._agent._network.actor.parameters())
-        critic_params = list(self._agent._network.critic.parameters())
+        backbone_params = list(self._agent.network.cnn.parameters()) + list(self._agent.network.sequence_encoder.parameters())
+        actor_params = list(self._agent.network.actor.parameters())
+        critic_params = list(self._agent.network.critic.parameters())
 
         backbone_norm = nn.utils.clip_grad_norm_(backbone_params, backbone_max_norm)
         actor_norm = nn.utils.clip_grad_norm_(actor_params, actor_max_norm)
@@ -160,7 +121,7 @@ class PPOTrainer:
     ) -> dict[str, float]:
 
         (actor_loss, critic_loss, entropy_loss), loss_metrics = self.calculate_losses(advantages, returns, old_log_probs, old_values, observation, action, dones)
-        loss = actor_loss + self.critic_beta * critic_loss - self.entropy_coef * entropy_loss
+        loss = actor_loss + self.cfg.critic_beta * critic_loss - self._entropy_coef * entropy_loss
 
         self._optimizer.zero_grad()
 
@@ -190,7 +151,7 @@ class PPOTrainer:
         return metrics
 
     def _actor_loss(self, advantages: T.Tensor, log_probs: T.Tensor, old_log_probs: T.Tensor, action_mean: T.Tensor) -> tuple[T.Tensor, dict[str, float]]:
-        if self.advantage_normalization_strategy and self.advantage_normalization_strategy == "batch":
+        if self.cfg.advantage_normalization_strategy and self.cfg.advantage_normalization_strategy == "batch":
             advantages = (advantages - advantages.mean()) / (advantages.std() + self.cfg.advantage_epsilon)
 
         assert log_probs.shape == old_log_probs.shape
@@ -199,8 +160,8 @@ class PPOTrainer:
         ratio = log_ratio.sum(-1).clamp(-5, 5).exp()
 
         clipped_ratio = ratio.clamp(
-            min=1 - self.ppo_epsilon,
-            max=1 + self.ppo_epsilon
+            min=1 - self.cfg.ppo_epsilon,
+            max=1 + self.cfg.ppo_epsilon
         )
 
         assert advantages.shape == ratio.shape
@@ -210,7 +171,7 @@ class PPOTrainer:
         ).mean()
         
         mean_reg = action_mean.pow(2).mean()
-        actor_loss = surrogate_loss + self.mean_reg_coef * mean_reg
+        actor_loss = surrogate_loss + self.cfg.mean_reg_coef * mean_reg
 
         metrics = self._actor_loss_metrics(log_ratio, surrogate_loss, mean_reg, action_mean)
         metrics["metrics/actor_loss"] = actor_loss.detach().item()
@@ -225,7 +186,7 @@ class PPOTrainer:
             ratio_per_action = log_ratio.exp()
             approx_kl_per_action = (ratio_per_action - 1 - log_ratio).mean(dim=0)
             ratio_max = ratio_total.max()
-            clip_fraction = (T.abs(ratio_total - 1) > self.ppo_epsilon).float().mean()
+            clip_fraction = (T.abs(ratio_total - 1) > self.cfg.ppo_epsilon).float().mean()
 
         metrics = {
             "metrics/approx_kl": approx_kl.item(),
@@ -251,7 +212,7 @@ class PPOTrainer:
 
     def _critic_loss(self, returns: T.Tensor, values: T.Tensor, old_values: T.Tensor) -> tuple[T.Tensor, dict[str, float]]:
         assert values.shape == old_values.shape == returns.shape
-        value_clip_epsilon = self.cfg.value_clip_epsilon or self.ppo_epsilon
+        value_clip_epsilon = self.cfg.value_clip_epsilon or self.cfg.ppo_epsilon
         clipped_values = old_values + (values - old_values).clamp(-value_clip_epsilon, value_clip_epsilon)
         loss_unclipped = self._critic_loss_fn(values, returns)
         loss_clipped = self._critic_loss_fn(clipped_values, returns)
@@ -315,13 +276,11 @@ class PPOTrainer:
         batch: dict[str, T.Tensor],
         minibatch_size: int,
         stack_size: int,
-        shuffle: bool | None = None,
+        shuffle: bool,
     ) -> Iterator[dict[str, T.Tensor]]:
-        """Iterate over IID minibatches from a batch of sequences."""
+        """Iterate over minibatches from a batch of sequences."""
 
         num_envs, batch_size, _ = batch["action"].shape
-        if shuffle is None:
-            shuffle = TrainerSettings().minibatch_indexing_mode == "iid"
         indices = (
             np.random.permutation(batch_size * num_envs)
             if shuffle
@@ -386,7 +345,7 @@ class PPOTrainer:
             metrics=self._get_metrics_from_batch(batch)
         )
 
-        if self.advantage_normalization_strategy and self.advantage_normalization_strategy == "global":
+        if self.cfg.advantage_normalization_strategy and self.cfg.advantage_normalization_strategy == "global":
             batch["advantages"] = (batch["advantages"] - batch["advantages"].mean()) / (batch["advantages"].std() + self.cfg.advantage_epsilon)
 
         for epoch in range(epochs):
@@ -407,9 +366,9 @@ class PPOTrainer:
                 epoch_kls.append(minibatch_metrics["metrics/approx_kl"])
 
                 if (
-                    minibatch_metrics["metrics/approx_kl"] > self._target_kl * self.cfg.kl_stop_multiplier and
-                    training_step > self._kl_warmup_steps and
-                    self._hard_stop_kl
+                    minibatch_metrics["metrics/approx_kl"] > self.cfg.target_kl * self.cfg.kl_stop_multiplier and
+                    training_step > self.cfg.kl_warmup_steps and
+                    self.cfg.hard_stop_kl
                 ):
                     logger.warning(f"Hard stop mid-epoch: KL {minibatch_metrics['metrics/approx_kl']:.4f}")
                     break
@@ -419,18 +378,18 @@ class PPOTrainer:
             self._on_epoch()
             if (
                 mean_epoch_kl is not None
-                and mean_epoch_kl > self._target_kl
-                and training_step > self._kl_warmup_steps
-                and self._hard_stop_kl
+                and mean_epoch_kl > self.cfg.target_kl
+                and training_step > self.cfg.kl_warmup_steps
+                and self.cfg.hard_stop_kl
             ):
-                logger.warning(f"Early stop epoch {epoch}: KL {mean_epoch_kl:.4f} > {self._target_kl}")
+                logger.warning(f"Early stop epoch {epoch}: KL {mean_epoch_kl:.4f} > {self.cfg.target_kl}")
                 break
 
         if self._scheduler:
             self._scheduler.step()
-        self.entropy_coef = max(self.entropy_decay * self.entropy_coef, self.cfg.entropy_coef_min)
+        self._entropy_coef = max(self.cfg.entropy_decay * self._entropy_coef, self.cfg.entropy_coef_min)
         metrics = {
-            "training/entropy_coef": self.entropy_coef,
+            "training/entropy_coef": self._entropy_coef,
             # "training/lr": self._optimizer.param_groups[0]["lr"]
         }
         for i, pg in enumerate(self._optimizer.param_groups):
@@ -440,19 +399,19 @@ class PPOTrainer:
     def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}("
-            f"ppo_epsilon={self.ppo_epsilon}, "
-            f"critic_beta={self.critic_beta}, "
-            f"entropy_coef={self.entropy_coef}, "
-            f"entropy_decay={self.entropy_decay}, "
-            f"target_kl={self._target_kl}, "
-            f"kl_warmup_steps={self._kl_warmup_steps}, "
-            f"backbone_lr={self.backbone_lr}, "
-            f"head_lr={self.head_lr}, "
-            f"weight_decay={self.weight_decay}, "
-            f"hard_stop_kl={self._hard_stop_kl}, "
-            f"advantage_normalization_strategy={self.advantage_normalization_strategy!r}, "
+            f"ppo_epsilon={self.cfg.ppo_epsilon}, "
+            f"critic_beta={self.cfg.critic_beta}, "
+            f"entropy_coef={self._entropy_coef}, "
+            f"entropy_decay={self.cfg.entropy_decay}, "
+            f"target_kl={self.cfg.target_kl}, "
+            f"kl_warmup_steps={self.cfg.kl_warmup_steps}, "
+            f"backbone_lr={self.cfg.backbone_lr}, "
+            f"head_lr={self.cfg.head_lr}, "
+            f"weight_decay={self.cfg.weight_decay}, "
+            f"hard_stop_kl={self.cfg.hard_stop_kl}, "
+            f"advantage_normalization_strategy={self.cfg.advantage_normalization_strategy!r}, "
             f"scheduler={self._scheduler.__class__.__name__ if self._scheduler else None}, "
-            f"mean_reg_coef={self.mean_reg_coef})"
+            f"mean_reg_coef={self.cfg.mean_reg_coef})"
         )
 
     def config(self) -> dict[str, int | float | str]:
@@ -464,7 +423,7 @@ class PPOTrainer:
                 if isinstance(value, (int, float, str, bool)) or value is None
             },
             "entropy_coef_init": self.cfg.entropy_coef,
-            "entropy_coef_current": self.entropy_coef,
+            "entropy_coef_current": self._entropy_coef,
             "optimizer": self._optimizer.__class__.__name__,
             "scheduler_config": self.cfg.scheduler,
             "scheduler": self._scheduler.__class__.__name__ if self._scheduler else "none",

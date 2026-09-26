@@ -6,17 +6,10 @@ from rl_lib.networks.utils import init_layer, make_activation
 
 
 class Critic(nn.Module):
-    def __init__(self, in_dim: int, hidden_dim: int | None = None, config: CriticConfig | None = None):
+    def __init__(self, in_dim: int, config: CriticConfig):
         super().__init__()
         self.in_dim = in_dim
-
-        if config is not None:
-            self.cfg = config
-        elif hidden_dim is not None:
-            default_layer = CriticConfig().hidden_layers[0]
-            self.cfg = CriticConfig(hidden_layers=[default_layer.model_copy(update={"out_dim": hidden_dim})])
-        else:
-            self.cfg = CriticConfig()
+        self.cfg = config
 
         hidden_layers = self.cfg.hidden_layers
         modules: list[nn.Module] = []

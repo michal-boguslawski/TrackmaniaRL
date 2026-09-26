@@ -15,6 +15,7 @@ import torch as T
 
 from rl_lib.agent import Agent
 from rl_lib.networks.factory import Network
+from rl_lib.run_config import AgentSettings
 from rl_lib.networks.config import (
     ActorConfig,
     CNNConfig,
@@ -50,7 +51,7 @@ def big_stack_agent() -> Agent:
         critic=CriticConfig(hidden_layers=[LinearLayerConfig(out_dim=8, activation="gelu")]),
     )
     network = Network(1, ACTION_DIM, 4, config)
-    return Agent(network, 1, ACTION_DIM, 4, device="cpu")
+    return Agent(network, device="cpu", config=AgentSettings(stack_size=4))
 
 
 def test_preprocess_observation_normalises_and_moves_channels_first(agent: Agent, observations):

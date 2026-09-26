@@ -14,6 +14,7 @@ import torch as T
 from rl_lib.agent import Agent
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
 from rl_lib.training.callbacks.base import TrainingCallback
+from rl_lib.run_config import RolloutSettings, RunSettings, TrainerSettings
 from rl_lib.training.ppo_trainer import PPOTrainer
 
 
@@ -43,8 +44,13 @@ class SpyCallback(TrainingCallback):
 
 
 @pytest.fixture
-def trainer(agent: Agent) -> PPOTrainer:
-    return PPOTrainer(agent)
+def trainer_settings() -> TrainerSettings:
+    return TrainerSettings()
+
+
+@pytest.fixture
+def trainer(agent: Agent, trainer_settings: TrainerSettings) -> PPOTrainer:
+    return PPOTrainer(agent, trainer_settings)
 
 
 @pytest.fixture
@@ -52,7 +58,7 @@ def rollout(agent: Agent) -> dict[str, T.Tensor]:
     """A rollout collected through the agent, so the stored log-probs and values
     are the ones the update path has to reproduce."""
 
-    buffer = RolloutBuffer(size=SIZE, stack_size=STACK_SIZE)
+    buffer = RolloutBuffer(RolloutSettings(buffer_size=SIZE), stack_size=STACK_SIZE)
     done = T.zeros(NUM_ENVS, dtype=T.bool)
     for index in range(SIZE):
         state = T.randint(0, 256, (NUM_ENVS, *OBSERVATION_SHAPE), dtype=T.uint8)
@@ -114,7 +120,7 @@ def tagged_batch() -> dict[str, T.Tensor]:
 
 
 def test_minibatch_shapes_follow_the_rollout(trainer: PPOTrainer, rollout: dict[str, T.Tensor]):
-    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE))
+    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
 
     assert minibatch["observation"].shape == (4 * STACK_SIZE, *OBSERVATION_SHAPE)
     assert minibatch["dones"].shape == (4 * STACK_SIZE,)
@@ -128,7 +134,7 @@ def test_minibatch_shapes_follow_the_rollout(trainer: PPOTrainer, rollout: dict[
 def test_minibatches_cover_every_transition_exactly_once(trainer: PPOTrainer, rollout):
     expected = sorted(rollout["advantages"].flatten().tolist())
     seen: list[float] = []
-    for minibatch in trainer._get_iid_minibatches(rollout, 4, STACK_SIZE):
+    for minibatch in trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True):
         seen.extend(minibatch["advantages"].flatten().tolist())
 
     assert len(seen) == len(expected)
@@ -136,7 +142,7 @@ def test_minibatches_cover_every_transition_exactly_once(trainer: PPOTrainer, ro
 
 
 def test_minibatch_count_and_tail_size(trainer: PPOTrainer, rollout):
-    sizes = [mb["action"].shape[0] for mb in trainer._get_iid_minibatches(rollout, 4, STACK_SIZE)]
+    sizes = [mb["action"].shape[0] for mb in trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True)]
 
     assert sizes == [4, 4, 2]
     assert sum(sizes) == NUM_ENVS * (SIZE - 1)
@@ -144,7 +150,7 @@ def test_minibatch_count_and_tail_size(trainer: PPOTrainer, rollout):
 
 def test_minibatches_cover_every_tagged_transition_once(trainer: PPOTrainer, tagged_batch):
     seen: list[int] = []
-    for minibatch in trainer._get_iid_minibatches(tagged_batch, 4, STACK_SIZE):
+    for minibatch in trainer._get_iid_minibatches(tagged_batch, 4, STACK_SIZE, shuffle=True):
         seen.extend(int(value) for value in minibatch["action"][:, 0].tolist())
 
     assert sorted(seen) == sorted(
@@ -153,7 +159,7 @@ def test_minibatches_cover_every_tagged_transition_once(trainer: PPOTrainer, tag
 
 
 def test_minibatch_observation_windows_match_their_transition(trainer: PPOTrainer, tagged_batch):
-    for minibatch in trainer._get_iid_minibatches(tagged_batch, 4, STACK_SIZE):
+    for minibatch in trainer._get_iid_minibatches(tagged_batch, 4, STACK_SIZE, shuffle=True):
         window = minibatch["observation"][:, 0, 0, 0]
         for index, tag in enumerate(minibatch["action"][:, 0].tolist()):
             env, step = divmod(int(tag), ENV_STRIDE)
@@ -172,7 +178,7 @@ def test_minibatch_observation_windows_match_their_transition(trainer: PPOTraine
 def test_minibatch_generation_is_a_static_helper_that_leaves_the_batch_alone(rollout):
     before = {key: value.clone() for key, value in rollout.items()}
 
-    minibatch = next(PPOTrainer._get_iid_minibatches(rollout, 4, STACK_SIZE))
+    minibatch = next(PPOTrainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
 
     assert minibatch["observation"].shape == (4 * STACK_SIZE, *OBSERVATION_SHAPE)
     for key, value in rollout.items():
@@ -193,7 +199,7 @@ def test_actor_loss_with_an_unchanged_policy_is_the_plain_surrogate(trainer: PPO
 
 
 def test_actor_loss_normalises_advantages_per_minibatch(agent: Agent):
-    trainer = PPOTrainer(agent, advantage_normalization_strategy="batch", mean_reg_coef=0.0)
+    trainer = PPOTrainer(agent, TrainerSettings(advantage_normalization_strategy="batch", mean_reg_coef=0.0))
     advantages = T.tensor([1.0, 2.0, 3.0])
     log_probs = T.rand(3, ACTION_DIM)
     action_mean = T.zeros(3, ACTION_DIM)
@@ -205,7 +211,7 @@ def test_actor_loss_normalises_advantages_per_minibatch(agent: Agent):
 
 
 def test_actor_loss_clips_the_importance_ratio(trainer: PPOTrainer):
-    trainer.ppo_epsilon = 0.2
+    trainer.cfg = trainer.cfg.model_copy(update={"ppo_epsilon": 0.2})
     advantages = T.ones(4)
     old_log_probs = T.zeros(4, ACTION_DIM)
     # one unit of log-ratio per action dim sums to log(1.65) -> above 1 + epsilon
@@ -223,7 +229,7 @@ def test_actor_loss_penalises_the_action_mean(trainer: PPOTrainer):
     advantages = T.zeros(2)
     log_probs = T.zeros(2, ACTION_DIM)
     action_mean = T.ones(2, ACTION_DIM)
-    trainer.mean_reg_coef = 0.5
+    trainer.cfg = trainer.cfg.model_copy(update={"mean_reg_coef": 0.5})
 
     loss, metrics = trainer._actor_loss(advantages, log_probs, log_probs, action_mean)
 
@@ -252,7 +258,7 @@ def test_actor_loss_metrics_are_reported_per_action_dim(trainer: PPOTrainer):
 
 
 def test_critic_loss_takes_the_worse_of_clipped_and_unclipped(trainer: PPOTrainer):
-    trainer.ppo_epsilon = 0.2
+    trainer.cfg = trainer.cfg.model_copy(update={"ppo_epsilon": 0.2})
     returns = T.zeros(4)
     old_values = T.zeros(4)
 
@@ -267,7 +273,7 @@ def test_critic_loss_takes_the_worse_of_clipped_and_unclipped(trainer: PPOTraine
 
 
 def test_critic_loss_ignores_the_clip_when_the_value_is_inside_it(trainer: PPOTrainer):
-    trainer.ppo_epsilon = 0.5
+    trainer.cfg = trainer.cfg.model_copy(update={"ppo_epsilon": 0.5})
     returns = T.zeros(2)
 
     loss, metrics = trainer._critic_loss(returns, T.full((2,), 0.1), T.zeros(2))
@@ -317,7 +323,7 @@ def test_entropy_loss_is_zero_for_a_uniform_beta(trainer: PPOTrainer):
 
 
 def test_calculate_losses_combines_every_term(agent: Agent, trainer: PPOTrainer, rollout):
-    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE))
+    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
 
     (actor_loss, critic_loss, entropy_loss), metrics = trainer.calculate_losses(
         minibatch["advantages"],
@@ -336,7 +342,7 @@ def test_calculate_losses_combines_every_term(agent: Agent, trainer: PPOTrainer,
 
 
 def test_train_step_updates_the_parameters(trainer: PPOTrainer, rollout):
-    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE))
+    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
     before = {name: param.clone() for name, param in trainer._agent._network.named_parameters()}
 
     metrics = trainer.train_step(**minibatch)
@@ -350,7 +356,7 @@ def test_train_step_updates_the_parameters(trainer: PPOTrainer, rollout):
 
 
 def test_train_step_clips_gradients(trainer: PPOTrainer, rollout):
-    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE))
+    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
     trainer.train_step(**minibatch)
 
     norms = trainer._agent.get_parital_clip_grad_norms()
@@ -360,7 +366,7 @@ def test_train_step_clips_gradients(trainer: PPOTrainer, rollout):
 
 
 def test_train_step_skips_a_non_finite_loss(trainer: PPOTrainer, rollout, monkeypatch):
-    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE))
+    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
     before = {name: param.clone() for name, param in trainer._agent._network.named_parameters()}
     monkeypatch.setattr(
         trainer,
@@ -393,7 +399,7 @@ def test_train_runs_every_epoch_and_drives_the_callbacks(trainer: PPOTrainer, ro
 
 
 def test_train_normalises_advantages_globally(agent: Agent, rollout):
-    trainer = PPOTrainer(agent, advantage_normalization_strategy="global")
+    trainer = PPOTrainer(agent, TrainerSettings(advantage_normalization_strategy="global"))
     before = rollout["advantages"].clone()
 
     trainer.train(rollout, epochs=1, minibatch_size=4, training_step=0)
@@ -412,9 +418,9 @@ def test_train_leaves_advantages_untouched_without_normalisation(trainer: PPOTra
 
 
 def test_train_stops_mid_epoch_when_the_kl_spikes(trainer: PPOTrainer, rollout, monkeypatch):
-    trainer._hard_stop_kl = True
-    trainer._target_kl = 0.01
-    trainer._kl_warmup_steps = 0
+    trainer.cfg = trainer.cfg.model_copy(update={"hard_stop_kl": True})
+    trainer.cfg = trainer.cfg.model_copy(update={"target_kl": 0.01})
+    trainer.cfg = trainer.cfg.model_copy(update={"kl_warmup_steps": 0})
     monkeypatch.setattr(
         PPOTrainer,
         "train_step",
@@ -433,9 +439,9 @@ def test_train_stops_mid_epoch_when_the_kl_spikes(trainer: PPOTrainer, rollout, 
 
 
 def test_train_keeps_going_while_the_kl_stays_below_target(trainer: PPOTrainer, rollout, monkeypatch):
-    trainer._hard_stop_kl = True
-    trainer._target_kl = 0.01
-    trainer._kl_warmup_steps = 0
+    trainer.cfg = trainer.cfg.model_copy(update={"hard_stop_kl": True})
+    trainer.cfg = trainer.cfg.model_copy(update={"target_kl": 0.01})
+    trainer.cfg = trainer.cfg.model_copy(update={"kl_warmup_steps": 0})
     monkeypatch.setattr(
         PPOTrainer,
         "train_step",
@@ -452,9 +458,9 @@ def test_train_keeps_going_while_the_kl_stays_below_target(trainer: PPOTrainer, 
 
 
 def test_train_respects_the_kl_warmup(trainer: PPOTrainer, rollout, monkeypatch):
-    trainer._hard_stop_kl = True
-    trainer._target_kl = 0.01
-    trainer._kl_warmup_steps = 10_000
+    trainer.cfg = trainer.cfg.model_copy(update={"hard_stop_kl": True})
+    trainer.cfg = trainer.cfg.model_copy(update={"target_kl": 0.01})
+    trainer.cfg = trainer.cfg.model_copy(update={"kl_warmup_steps": 10_000})
     monkeypatch.setattr(
         PPOTrainer,
         "train_step",
@@ -480,22 +486,22 @@ def test_train_reraises_update_failures(trainer: PPOTrainer, rollout, monkeypatc
 
 
 def test_entropy_coefficient_decays_towards_a_floor(trainer: PPOTrainer, rollout):
-    trainer.entropy_coef = 1e-2
-    trainer.entropy_decay = 0.5
+    trainer._entropy_coef = 1e-2
+    trainer.cfg = trainer.cfg.model_copy(update={"entropy_decay": 0.5})
 
     trainer.train(rollout, epochs=1, minibatch_size=4, training_step=0)
-    assert trainer.entropy_coef == pytest.approx(5e-3)
+    assert trainer._entropy_coef == pytest.approx(5e-3)
 
-    trainer.entropy_coef = 1e-5
+    trainer._entropy_coef = 1e-5
     trainer.train(rollout, epochs=1, minibatch_size=4, training_step=0)
-    assert trainer.entropy_coef == pytest.approx(1e-4)
+    assert trainer._entropy_coef == pytest.approx(1e-4)
 
 
 def test_setup_train_builds_a_cosine_schedule(agent: Agent):
-    trainer = PPOTrainer(agent)
+    trainer = PPOTrainer(agent, TrainerSettings())
     assert trainer._scheduler is None
 
-    trainer.setup_train(training_steps=1000, batch_size=128)
+    trainer.setup_train(RunSettings(total_steps=1000), RolloutSettings(buffer_size=128))
 
     assert type(trainer._scheduler).__name__ == "CosineAnnealingLR"
     assert trainer._scheduler.T_max == 1000 // 128 + 1
@@ -503,8 +509,8 @@ def test_setup_train_builds_a_cosine_schedule(agent: Agent):
 
 
 def test_train_steps_the_scheduler(agent: Agent, rollout):
-    trainer = PPOTrainer(agent)
-    trainer.setup_train(training_steps=10_000, batch_size=SIZE)
+    trainer = PPOTrainer(agent, TrainerSettings())
+    trainer.setup_train(RunSettings(total_steps=10_000), RolloutSettings(buffer_size=SIZE))
     before = [group["lr"] for group in trainer._optimizer.param_groups]
 
     trainer.train(rollout, epochs=1, minibatch_size=4, training_step=0)
@@ -514,7 +520,7 @@ def test_train_steps_the_scheduler(agent: Agent, rollout):
 
 
 def test_optimizer_groups_use_the_configured_learning_rates(agent: Agent):
-    trainer = PPOTrainer(agent, backbone_lr=1e-3, head_lr=1e-5, weight_decay=1e-2, optimizer_eps=1e-6)
+    trainer = PPOTrainer(agent, TrainerSettings(backbone_lr=1e-3, head_lr=1e-5, weight_decay=1e-2, optimizer_eps=1e-6))
     groups = trainer._optimizer.param_groups
 
     assert [group["lr"] for group in groups] == [1e-3, 1e-3, 1e-5, 1e-5]
@@ -526,9 +532,9 @@ def test_optimizer_groups_use_the_configured_learning_rates(agent: Agent):
 def test_config_reports_the_hyperparameters(trainer: PPOTrainer):
     config = trainer.config()
 
-    assert config["ppo_epsilon"] == trainer.ppo_epsilon
-    assert config["critic_beta"] == trainer.critic_beta
-    assert config["entropy_coef_init"] == trainer.entropy_coef
+    assert config["ppo_epsilon"] == trainer.cfg.ppo_epsilon
+    assert config["critic_beta"] == trainer.cfg.critic_beta
+    assert config["entropy_coef_init"] == trainer.cfg.entropy_coef
     assert config["advantage_normalization_strategy"] == "none"
     assert config["scheduler"] == "none"
     assert config["optimizer"] == "AdamW"
@@ -555,7 +561,7 @@ def test_metrics_from_batch_summarise_the_rollout(trainer: PPOTrainer, rollout):
 
 
 def test_clip_grad_norm_returns_one_norm_per_parameter_group(trainer: PPOTrainer, rollout):
-    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE))
+    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
     log_probs, values, _, _ = trainer._agent.evaluate_actions(
         minibatch["observation"], minibatch["action"], minibatch["dones"]
     )
@@ -635,16 +641,16 @@ def test_repr_mentions_the_hyperparameters(trainer: PPOTrainer):
     text = repr(trainer)
 
     assert "PPOTrainer(" in text
-    assert f"ppo_epsilon={trainer.ppo_epsilon}" in text
-    assert f"target_kl={trainer._target_kl}" in text
+    assert f"ppo_epsilon={trainer.cfg.ppo_epsilon}" in text
+    assert f"target_kl={trainer.cfg.target_kl}" in text
     assert "scheduler=None" in text
 
 
 def test_training_switches_the_agent_to_train_mode(agent: Agent):
     agent.eval()
-    PPOTrainer(agent)
+    PPOTrainer(agent, TrainerSettings())
 
-    assert agent._network.training
+    assert agent.network.training
 
 
 def test_network_config_is_the_agents(trainer: PPOTrainer, agent: Agent):

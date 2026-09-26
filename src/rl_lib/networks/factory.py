@@ -16,14 +16,18 @@ class Network(nn.Module):
         observation_dim: int,
         action_dim: int,
         stack_size: int,
-        config: NetworkConfig | None = None,
+        config: NetworkConfig,
         action_low: list[float] | None = None,
         action_high: list[float] | None = None,
     ):
         super().__init__()
-        self.cfg = config or NetworkConfig()
+        self.cfg = config
+        self.stack_size = stack_size
+        self.observation_dim = observation_dim
+        self.action_dim = action_dim
 
-        self.cnn = CNN(observation_dim, config=self.cfg.cnn)
+        self.cnn = CNN(observation_dim, self.cfg.cnn)
+
         self.sequence_encoder = TemporalCNN1D(
             stack_size, in_dim=self.cnn.out_dim, config=self.cfg.temporal
         )

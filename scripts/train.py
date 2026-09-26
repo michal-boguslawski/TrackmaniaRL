@@ -58,138 +58,77 @@ def run_training(config: RunConfig, config_path: str | Path | None = None) -> No
     session_id = setup_logging(config.run.log_config, default_level=level) if config.run.log_config else setup_logging(default_level=level)
     logger = logging.getLogger(__name__)
     device = _resolve_device(config)
+    config = config.with_runtime(
+        session_id=session_id,
+        config_path=str(config_path) if config_path is not None else None,
+        device=str(device),
+        mlflow_experiment_name=config.experiment_name if config.tracking.mlflow else None,
+        mlflow_run_name=config.run_name if config.tracking.mlflow else None,
+    )
     _seed_everything(config.run.seed)
     gc.collect()
     if device.type == "cuda" and config.run.clear_cuda_cache:
         T.cuda.empty_cache()
         T.cuda.reset_peak_memory_stats(device)
 
-    checkpoint_folder = str(Path(config.callbacks.checkpoint_folder) / session_id)
-    video_folder = str(Path(config.callbacks.video_folder) / session_id)
-    env_name = config.environment.id
-    experiment_name = config.tracking.experiment_name or env_name
-    run_name = config.tracking.run_name or f"{config.run.name}/{session_id}"
-
     console_logger = ConsoleMetricsLogger() if config.tracking.console else None
     with ExitStack() as stack:
         mlflow_logger = stack.enter_context(
             MLflowLogger(
-                experiment_name,
-                run_name=run_name,
+                config.experiment_name,
+                run_name=config.run_name,
                 log_system_metrics=config.tracking.log_system_metrics,
             )
             if config.tracking.mlflow
             else nullcontext(None)
         )
         metrics_loggers = [item for item in (console_logger, mlflow_logger) if item is not None]
-        env = stack.enter_context(closing(make_env(
-            env_name,
-            num_envs=config.environment.num_envs,
-            skip=config.environment.skip,
-            continuous=config.environment.continuous,
-            normalize_rewards=config.environment.normalize_rewards,
-            vectorization_mode=config.environment.vectorization_mode,
-            wrappers=config.environment.wrappers,
-            autoreset_mode=config.environment.autoreset_mode,
-            reward_normalization_gamma=config.environment.reward_normalization_gamma,
-            reward_normalization_epsilon=config.environment.reward_normalization_epsilon,
-        )))
+        env = stack.enter_context(closing(make_env(config.environment)))
+        config = config.with_runtime(
+            observation_shape=list(env.observation_space.shape),
+            action_shape=list(env.action_space.shape),
+        )
 
         network = Network(
-            observation_dim=env.observation_space.shape[-1],
-            action_dim=env.action_space.shape[-1],
+            observation_dim=config.runtime.observation_shape[-1],
+            action_dim=config.runtime.action_shape[-1],
             stack_size=config.agent.stack_size,
             config=config.network,
         ).to(device)
-        agent = Agent(
-            network=network,
-            observation_dim=env.observation_space.shape[-1],
-            action_dim=env.action_space.shape[-1],
-            stack_size=config.agent.stack_size,
-            device=device,
-            config=config.agent,
-        )
-        video_agent = Agent(
-            network=network,
-            observation_dim=env.observation_space.shape[-1],
-            action_dim=env.action_space.shape[-1],
-            stack_size=config.agent.stack_size,
-            device=device,
-            config=config.agent,
-        )
-        buffer = RolloutBuffer(
-            size=config.rollout.buffer_size,
-            stack_size=config.agent.stack_size,
-            gamma=config.rollout.gamma,
-            gae_lambda=config.rollout.gae_lambda,
-        )
+        agent = Agent(network, device, config.agent)
+        video_agent = Agent(network, device, config.agent)
+        buffer = RolloutBuffer(config.rollout, stack_size=config.agent.stack_size)
 
         trainer_callbacks = []
         if config.callbacks.checkpoints:
-            trainer_callbacks.append(CheckpointsSaveCallback(checkpoint_folder, agent, intervals=config.callbacks.checkpoint_interval))
+            trainer_callbacks.append(CheckpointsSaveCallback(agent, config.checkpoint_settings()))
         for metric_logger in metrics_loggers:
             if config.callbacks.metrics:
-                trainer_callbacks.append(MetricsLoggingCallback(
-                    metric_logger,
-                    granularity=config.callbacks.metrics_granularity,
-                ))
-        trainer = PPOTrainer(agent=agent, callbacks=trainer_callbacks, config=config.trainer)
-        trainer.setup_train(config.run.total_steps, config.rollout.buffer_size)
+                trainer_callbacks.append(MetricsLoggingCallback(metric_logger, config.metrics_settings()))
+        trainer = PPOTrainer(agent=agent, config=config.trainer, callbacks=trainer_callbacks)
+        trainer.setup_train(config.run, config.rollout)
 
         collector_callbacks = []
         run_config_dump = config.model_dump(mode="json")
-        run_config_dump["resolved_runtime"] = {
-            "config_path": str(config_path) if config_path is not None else None,
-            "session_id": session_id,
-            "device": str(device),
-            "environment_observation_shape": list(env.observation_space.shape),
-            "environment_action_shape": list(env.action_space.shape),
-            "checkpoint_folder": checkpoint_folder,
-            "video_folder": video_folder,
-            "mlflow_experiment_name": experiment_name if config.tracking.mlflow else None,
-            "mlflow_run_name": run_name if config.tracking.mlflow else None,
-            "total_steps_unit": "vector-environment steps",
-        }
         for metric_logger in metrics_loggers:
             collector_callbacks.append(ParamsLoggingCallback(metric_logger, run_config=run_config_dump))
             if config.callbacks.episode_statistics:
                 collector_callbacks.append(RecordStatisticLoggerCallback(
-                    metric_logger,
-                    mode=config.callbacks.episode_statistics_mode,
-                    stats_key=config.callbacks.episode_statistics_key,
+                    metric_logger, config.episode_statistics_settings()
                 ))
         if config.callbacks.record_video:
-            video_stats_key = next(
-                wrapper.stats_key
-                for wrapper in config.callbacks.video_wrappers
-                if wrapper.name == "record_episode_stats"
-            )
             collector_callbacks.append(RecordVideoCallback(
-                env_name,
                 agent=video_agent,
-                video_folder=video_folder,
                 metrics_loggers=metrics_loggers,
-                skip=config.callbacks.video_skip or config.environment.skip,
-                wrappers=config.callbacks.video_wrappers,
-                interval=config.callbacks.video_interval,
-                seed=config.run.seed,
-                autoreset_mode=config.environment.autoreset_mode,
-                normalize_rewards=config.callbacks.video_normalize_rewards,
-                reward_normalization_gamma=config.environment.reward_normalization_gamma,
-                reward_normalization_epsilon=config.environment.reward_normalization_epsilon,
-                video_recording=config.callbacks.video_recording,
-                stats_key=video_stats_key,
+                config=config.video_settings(),
             ))
 
         collector = RolloutCollector(
             env,
             buffer,
             trainer,
-            epochs=config.rollout.epochs,
-            minibatch_size=config.rollout.minibatch_size,
+            config.rollout,
             callbacks=collector_callbacks,
-            gamma=config.rollout.gamma,
-            gae_lambda=config.rollout.gae_lambda,
             seed=config.run.seed,
             run_config=run_config_dump,
         )

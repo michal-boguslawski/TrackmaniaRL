@@ -7,6 +7,8 @@ import numpy as np
 from gymnasium import spaces
 from gymnasium.vector import AutoresetMode
 
+from rl_lib.run_config import EnvironmentSettings
+
 
 class OneStepEnv(gym.Env):
     def __init__(self, continuous=True, render_mode=None):
@@ -27,7 +29,9 @@ def test_same_step_autoreset_does_not_emit_reset_only_steps():
         gym.register(test_env_id, entry_point=OneStepEnv, max_episode_steps=1)
 
     make_env = import_module("rl_lib.envs.make_env").make_env
-    env = make_env(test_env_id, num_envs=1, vectorization_mode="sync")
+    env = make_env(EnvironmentSettings(
+        id=test_env_id, num_envs=1, vectorization_mode="sync", normalize_rewards=False, wrappers=[]
+    ))
 
     try:
         assert env.autoreset_mode is AutoresetMode.SAME_STEP
@@ -50,7 +54,9 @@ def test_same_step_autoreset_does_not_emit_reset_only_steps():
 
 def test_car_racing_vector_env_resets_and_steps():
     make_env = import_module("rl_lib.envs.make_env").make_env
-    env = make_env("CarRacing-v3", num_envs=1, vectorization_mode="sync", skip=1)
+    env = make_env(EnvironmentSettings(
+        id="CarRacing-v3", num_envs=1, vectorization_mode="sync", skip=1, normalize_rewards=False, wrappers=[]
+    ))
 
     try:
         assert env.autoreset_mode is AutoresetMode.SAME_STEP

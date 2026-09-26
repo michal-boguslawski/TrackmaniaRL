@@ -20,21 +20,18 @@ class RolloutStep:
 class RolloutBuffer:
     def __init__(
         self,
-        size: int,
+        config: RolloutSettings,
         stack_size: int,
-        gamma: float | None = None,
-        gae_lambda: float | None = None,
-        *args,
-        **kwargs
     ):
-        self.size = size
+        self.cfg = config
+        self.size = config.buffer_size
         self._stack_size = stack_size
-        defaults = RolloutSettings()
-        self.gamma = defaults.gamma if gamma is None else gamma
-        self.gae_lambda = defaults.gae_lambda if gae_lambda is None else gae_lambda
+        self.gamma = config.gamma
+        self.gae_lambda = config.gae_lambda
         self._buffer: dict[str, deque[T.Tensor]] = {}
         self._counter: int = 0
         self.reset()
+
 
     def is_full(self) -> bool:
         return self._counter == self.size

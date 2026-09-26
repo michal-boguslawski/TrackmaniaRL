@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 import yaml
@@ -20,6 +21,23 @@ class RunSettings(StrictModel):
     clear_cuda_cache: bool = True
     log_config: str | None = None
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "DEBUG"
+
+
+class RuntimeSettings(StrictModel):
+    """Process-level facts resolved at startup. Never authored in YAML: the
+    entrypoint fills this in via RunConfig.with_runtime once logging, the device
+    and the environment are known."""
+
+    session_id: str = ""
+    config_path: str | None = None
+    device: str = "cpu"
+    observation_shape: list[int] = Field(default_factory=list)
+    action_shape: list[int] = Field(default_factory=list)
+    checkpoint_folder: str = ""
+    video_folder: str = ""
+    total_steps_unit: str = "vector-environment steps"
+    mlflow_experiment_name: str | None = None
+    mlflow_run_name: str | None = None
 
 
 class WrapperSettings(StrictModel):
@@ -76,6 +94,8 @@ class EnvironmentSettings(StrictModel):
     reward_normalization_epsilon: float = Field(default=1e-8, gt=0)
     vectorization_mode: Literal["async", "sync"] = "async"
     autoreset_mode: Literal["same_step", "next_step", "disabled"] = "same_step"
+    record_video: bool = False
+    video_folder: str = "./logs/videos"
     wrappers: list[WrapperSettings] = Field(default_factory=lambda: [
         WrapperSettings(name="record_episode_stats"),
         WrapperSettings(name="grayscale"),
@@ -180,6 +200,45 @@ class CallbackSettings(StrictModel):
         return self
 
 
+class CheckpointCallbackSettings(StrictModel):
+    """Resolved checkpoint-callback configuration: the folder already includes
+    the session id."""
+
+    folder: str
+    interval: PositiveInt
+
+
+class MetricsCallbackSettings(StrictModel):
+    granularity: Literal["minibatch", "epoch", "batch"]
+
+
+class EpisodeStatisticsCallbackSettings(StrictModel):
+    mode: Literal["step", "mean"]
+    stats_key: str = Field(default="episode", min_length=1)
+
+
+class VideoCallbackSettings(StrictModel):
+    """Everything the video callback needs, resolved from the environment,
+    callback and run sections. The evaluation environment is a single
+    synchronous env that records frames."""
+
+    environment: EnvironmentSettings
+    interval: PositiveInt
+    seed: int
+
+    @property
+    def stats_key(self) -> str:
+        stats_wrappers = [
+            wrapper for wrapper in self.environment.wrappers
+            if wrapper.name == "record_episode_stats"
+        ]
+        if len(stats_wrappers) != 1:
+            raise ValueError(
+                "the video environment needs exactly one record_episode_stats wrapper to read episode stats"
+            )
+        return stats_wrappers[0].stats_key
+
+
 class RunConfig(StrictModel):
     run: RunSettings = Field(default_factory=RunSettings)
     environment: EnvironmentSettings = Field(default_factory=EnvironmentSettings)
@@ -189,6 +248,70 @@ class RunConfig(StrictModel):
     trainer: TrainerSettings = Field(default_factory=TrainerSettings)
     tracking: TrackingSettings = Field(default_factory=TrackingSettings)
     callbacks: CallbackSettings = Field(default_factory=CallbackSettings)
+    runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
+
+    def with_runtime(self, **updates) -> RunConfig:
+        """Copy this config with resolved runtime facts folded in. Validation is
+        intentionally skipped: every update is either a scalar this module
+        already constrains or a re-validated settings model built here."""
+        return self.model_copy(update={"runtime": self.runtime.model_copy(update=updates)})
+
+    @property
+    def checkpoint_folder(self) -> str:
+        return str(Path(self.callbacks.checkpoint_folder) / self.runtime.session_id)
+
+    @property
+    def video_folder(self) -> str:
+        return str(Path(self.callbacks.video_folder) / self.runtime.session_id)
+
+    @property
+    def experiment_name(self) -> str:
+        return self.tracking.experiment_name or self.environment.id
+
+    @property
+    def run_name(self) -> str:
+        return self.tracking.run_name or f"{self.run.name}/{self.runtime.session_id}"
+
+    def video_environment(self) -> EnvironmentSettings:
+        """The single-environment, frame-recording environment used for
+        evaluation rollouts."""
+        return self.environment.model_copy(update={
+            "num_envs": 1,
+            "skip": self.callbacks.video_skip or self.environment.skip,
+            "vectorization_mode": "sync",
+            "record_video": True,
+            "video_folder": self.video_folder,
+            "normalize_rewards": self.callbacks.video_normalize_rewards,
+            "wrappers": [self.callbacks.video_recording, *self.callbacks.video_wrappers],
+        })
+
+    def checkpoint_settings(self) -> CheckpointCallbackSettings:
+        return CheckpointCallbackSettings(
+            folder=self.checkpoint_folder,
+            interval=self.callbacks.checkpoint_interval,
+        )
+
+    def metrics_settings(self) -> MetricsCallbackSettings:
+        return MetricsCallbackSettings(granularity=self.callbacks.metrics_granularity)
+
+    def episode_statistics_settings(self) -> EpisodeStatisticsCallbackSettings:
+        return EpisodeStatisticsCallbackSettings(
+            mode=self.callbacks.episode_statistics_mode,
+            stats_key=self.callbacks.episode_statistics_key,
+        )
+
+    def video_settings(self) -> VideoCallbackSettings:
+        return VideoCallbackSettings(
+            environment=self.video_environment(),
+            interval=self.callbacks.video_interval,
+            seed=self.run.seed,
+        )
+
+    @model_validator(mode="after")
+    def validate_runtime_is_not_authored(self):
+        if "runtime" in self.model_fields_set:
+            raise ValueError("run.runtime is resolved by the entrypoint and cannot be set in YAML")
+        return self
 
     @model_validator(mode="after")
     def validate_relationships(self):
@@ -235,8 +358,6 @@ class RunConfig(StrictModel):
 
 def load_config(path: str) -> RunConfig:
     """Load and validate a training configuration from YAML."""
-    from pathlib import Path
-
     config_path = Path(path)
     try:
         with config_path.open("rt", encoding="utf-8") as stream:

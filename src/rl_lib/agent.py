@@ -19,29 +19,28 @@ class Agent:
     def __init__(
         self,
         network: Network,
-        observation_dim: int,
-        action_dim: int,
-        stack_size: int,
         device: T.device | str,
-        config: AgentSettings | None = None,
-        **kwargs
+        config: AgentSettings,
     ):
-        self.cfg = config or AgentSettings(stack_size=stack_size)
-        if self.cfg.stack_size != stack_size:
+        if config.stack_size != network.stack_size:
             raise ValueError(
-                f"agent stack_size ({self.cfg.stack_size}) must match configured network stack_size ({stack_size})"
+                f"agent stack_size ({config.stack_size}) must match the network stack_size ({network.stack_size})"
             )
-        self._observation_dim = observation_dim
-        self._action_dim = action_dim
-        self._stack_size = self.cfg.stack_size
+        self.cfg = config
+        self._stack_size = config.stack_size
         self._device = T.device(device)
         self._obs_window: deque[T.Tensor] = deque(maxlen=self._stack_size)
         self._done_window: deque[T.Tensor] = deque(maxlen=self._stack_size)
         self._network = network
 
     @property
+    def network(self) -> Network:
+        return self._network
+
+    @property
     def device(self) -> T.device:
         return self._device
+
 
     def _preprocess_observation(self, observation: T.Tensor) -> T.Tensor:
         """Input shape (batch, height, width, channel)"""

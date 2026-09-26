@@ -1,36 +1,35 @@
-from typing import Any, Literal
+from typing import Any
 
 from rl_lib.tracking.base import MetricsLogger
 from rl_lib.training.callbacks.base import CollectorCallback
-from rl_lib.run_config import CallbackSettings
+from rl_lib.run_config import EpisodeStatisticsCallbackSettings
 
 
 class RecordStatisticLoggerCallback(CollectorCallback):
     def __init__(
         self,
         logger: MetricsLogger,
-        mode: Literal["step", "mean"] = "step",
-        stats_key: str | None = None,
+        config: EpisodeStatisticsCallbackSettings,
     ):
         self._logger = logger
-        self.mode = mode
-        self.stats_key = stats_key or CallbackSettings().episode_statistics_key
+        self.cfg = config
         self._returns_sum = 0.0
         self._lengths_sum = 0.0
         self._n = 0
         self._last_step: int | None = None
 
+
     def on_rollout_start(self, *args, **kwargs):
         pass
 
     def on_env_step(self, step: int, info: dict[str, Any], *args, **kwargs):
-        if self.stats_key in info:
-            dones = info[f"_{self.stats_key}"]
-            returns = info[self.stats_key]["r"][dones]
-            lengths = info[self.stats_key]["l"][dones]
+        if self.cfg.stats_key in info:
+            dones = info[f"_{self.cfg.stats_key}"]
+            returns = info[self.cfg.stats_key]["r"][dones]
+            lengths = info[self.cfg.stats_key]["l"][dones]
             n = int(dones.sum())
 
-            if self.mode == "step":
+            if self.cfg.mode == "step":
                 metrics = {
                     "episode/returns": returns.mean(),
                     "episode/lengths": lengths.mean(),
@@ -47,7 +46,7 @@ class RecordStatisticLoggerCallback(CollectorCallback):
         self.flush()
 
     def flush(self):
-        if self.mode != "mean" or self._n == 0:
+        if self.cfg.mode != "mean" or self._n == 0:
             return
 
         metrics = {

@@ -5,6 +5,7 @@ import torch as T
 from tqdm import tqdm
 
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
+from rl_lib.run_config import RolloutSettings
 from rl_lib.training.ppo_trainer import PPOTrainer
 from rl_lib.training.callbacks.base import CollectorCallback, CallbackList
 
@@ -15,24 +16,24 @@ class RolloutCollector:
         env: VectorEnv,
         buffer: RolloutBuffer,
         trainer: PPOTrainer,
-        epochs: int,
-        minibatch_size: int,
+        config: RolloutSettings,
         callbacks: list[CollectorCallback] | None = None,
-        gamma: float | None = None,
-        gae_lambda: float | None = None,
         seed: int | None = None,
         run_config: dict | None = None,
     ):
+        if buffer.cfg != config:
+            raise ValueError(
+                "the collector and its buffer must share one RolloutSettings; "
+                "epochs/minibatch_size and gamma/gae_lambda would otherwise disagree"
+            )
         self.env = env
         self.buffer = buffer
         self.trainer = trainer
-        self.epochs = epochs
-        self.minibatch_size = minibatch_size
-        self.gamma = buffer.gamma if gamma is None else gamma
-        self.gae_lambda = buffer.gae_lambda if gae_lambda is None else gae_lambda
+        self.cfg = config
         self.seed = seed
         self.run_config = run_config or {}
         self._callbacks = CallbackList(callbacks)
+
 
     def _on_rollout_start(self, *args, **kwargs):
         self._callbacks.on_rollout_start(*args, **kwargs)
@@ -99,11 +100,12 @@ class RolloutCollector:
 
             if self.buffer.is_full():
                 self.trainer.train(
-                    self.buffer.get(gamma=self.gamma, gae_lambda=self.gae_lambda),
-                    epochs=self.epochs,
-                    minibatch_size=self.minibatch_size,
+                    self.buffer.get(),
+                    epochs=self.cfg.epochs,
+                    minibatch_size=self.cfg.minibatch_size,
                     training_step=i,
                 )
+
                 self.buffer.reset_counter()
                 self._callback_flush()
 
@@ -112,8 +114,8 @@ class RolloutCollector:
     def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}("
-            f"epochs={self.epochs}, "
-            f"minibatch_size={self.minibatch_size}, "
+            f"epochs={self.cfg.epochs}, "
+            f"minibatch_size={self.cfg.minibatch_size}, "
             f"num_envs={self.env.num_envs}, "
             f"buffer={self.buffer!r}, "
             f"trainer={self.trainer!r})"
@@ -123,12 +125,13 @@ class RolloutCollector:
         """Flat, MLflow-loggable config for the whole training run, merging
         this collector's own params with buffer/trainer/network configs."""
         merged: dict[str, int | float | str] = {
-            "epochs": self.epochs,
-            "minibatch_size": self.minibatch_size,
+            "epochs": self.cfg.epochs,
+            "minibatch_size": self.cfg.minibatch_size,
             "num_envs": self.env.num_envs,
-            "gamma": self.gamma,
-            "gae_lambda": self.gae_lambda,
+            "gamma": self.buffer.gamma,
+            "gae_lambda": self.buffer.gae_lambda,
         }
+
         if training_steps is not None:
             merged["training_steps"] = training_steps
         def flatten(prefix: str, value):

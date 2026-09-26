@@ -12,12 +12,13 @@ import torch as T
 from torch.distributions import Distribution, TransformedDistribution
 
 from rl_lib.networks.actor import Actor, StableTanhTransform
-from rl_lib.networks.config import ActorConfig
+from rl_lib.networks.config import ActorConfig, LinearLayerConfig
 
 
 ACTION_DIM = 3
 IN_DIM = 8
 BATCH = 10
+HIDDEN_DIM = 8
 
 # steering, gas, brake
 ACTION_LOW = T.tensor([-1.0, 0.0, 0.0])
@@ -26,9 +27,13 @@ ACTION_HIGH = T.tensor([1.0, 1.0, 1.0])
 NEUTRAL_MEAN = T.tensor([0.0, 0.5, 0.5])
 
 
+def actor_config() -> ActorConfig:
+    return ActorConfig(hidden_layers=[LinearLayerConfig(out_dim=HIDDEN_DIM, activation="gelu")])
+
+
 @pytest.fixture
 def actor() -> Actor:
-    return Actor(action_dim=ACTION_DIM, in_dim=IN_DIM, hidden_dim=8)
+    return Actor(action_dim=ACTION_DIM, in_dim=IN_DIM, config=actor_config())
 
 
 def test_forward_returns_distribution_and_transformed_mean(actor: Actor):
@@ -57,7 +62,7 @@ def test_forward_mean_is_in_transformed_action_coordinates():
     head returns, so it has to live in action space: a neutral policy encodes
     steering 0, not the left edge of the Beta support."""
 
-    actor = Actor(ACTION_DIM, IN_DIM, hidden_dim=8)
+    actor = Actor(ACTION_DIM, IN_DIM, config=actor_config())
     with T.no_grad():
         actor._network[-1].weight.zero_()
         actor._network[-1].bias.zero_()

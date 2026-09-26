@@ -28,6 +28,15 @@ from rl_lib.training.callbacks.params_logger import ParamsLoggingCallback
 from rl_lib.training.callbacks.record_statistics import RecordStatisticLoggerCallback
 from rl_lib.training.callbacks.record_video import RecordVideoCallback
 from rl_lib.training.callbacks.utils import stop_video_recording
+from rl_lib.run_config import (
+    AgentSettings,
+    CheckpointCallbackSettings,
+    EnvironmentSettings,
+    EpisodeStatisticsCallbackSettings,
+    MetricsCallbackSettings,
+    VideoCallbackSettings,
+    WrapperSettings,
+)
 from rl_lib.tracking.base import MetricsLogger
 
 
@@ -217,7 +226,7 @@ def test_params_logger_ignores_an_empty_config(config):
 
 def test_minibatch_granularity_logs_every_minibatch():
     logger = FakeLogger()
-    callback = MetricsLoggingCallback(logger, granularity="minibatch")
+    callback = MetricsLoggingCallback(logger, MetricsCallbackSettings(granularity="minibatch"))
 
     callback.on_start(step=0, metrics={"rollout/returns": 1.0})
     callback.on_minibatch(metrics={"loss/total": 1.0}, step=10)
@@ -235,7 +244,7 @@ def test_minibatch_granularity_logs_every_minibatch():
 
 def test_epoch_granularity_averages_the_minibatches_of_an_epoch():
     logger = FakeLogger()
-    callback = MetricsLoggingCallback(logger, granularity="epoch")
+    callback = MetricsLoggingCallback(logger, MetricsCallbackSettings(granularity="epoch"))
 
     callback.on_start(step=0, metrics={"rollout/returns": 1.0})
     callback.on_minibatch(metrics={"loss/total": 1.0, "loss/critic": 2.0})
@@ -255,7 +264,7 @@ def test_epoch_granularity_averages_the_minibatches_of_an_epoch():
 
 def test_epoch_granularity_does_not_average_empty_epochs():
     logger = FakeLogger()
-    callback = MetricsLoggingCallback(logger, granularity="epoch")
+    callback = MetricsLoggingCallback(logger, MetricsCallbackSettings(granularity="epoch"))
 
     callback.on_start(step=0, metrics={"rollout/returns": 1.0})
     callback.on_epoch()
@@ -267,7 +276,7 @@ def test_epoch_granularity_does_not_average_empty_epochs():
 
 def test_batch_granularity_defers_to_the_end_of_the_rollout():
     logger = FakeLogger()
-    callback = MetricsLoggingCallback(logger, granularity="batch")
+    callback = MetricsLoggingCallback(logger, MetricsCallbackSettings(granularity="batch"))
 
     callback.on_start(step=5, metrics={"rollout/returns": 1.0})
     callback.on_minibatch(metrics={"loss/total": 1.0})
@@ -289,7 +298,7 @@ def test_batch_granularity_defers_to_the_end_of_the_rollout():
 
 def test_flush_merges_same_step_entries_and_empties_the_buffer():
     logger = FakeLogger()
-    callback = MetricsLoggingCallback(logger, granularity="minibatch")
+    callback = MetricsLoggingCallback(logger, MetricsCallbackSettings(granularity="minibatch"))
 
     callback.on_start(step=1, metrics={"loss/total": 1.0})
     callback.on_start(step=1, metrics={"loss/critic": 2.0})
@@ -303,7 +312,7 @@ def test_flush_merges_same_step_entries_and_empties_the_buffer():
 
 def test_on_start_drops_minibatches_left_over_from_the_previous_rollout():
     logger = FakeLogger()
-    callback = MetricsLoggingCallback(logger, granularity="epoch")
+    callback = MetricsLoggingCallback(logger, MetricsCallbackSettings(granularity="epoch"))
 
     callback.on_minibatch(metrics={"loss/total": 99.0})
     callback.on_start(step=1, metrics={"rollout/returns": 0.0})
@@ -321,14 +330,14 @@ def test_on_start_drops_minibatches_left_over_from_the_previous_rollout():
 def test_checkpoint_callback_creates_the_folder(tmp_path, agent: Agent):
     path = tmp_path / "nested" / "checkpoints"
 
-    CheckpointsSaveCallback(str(path), agent, intervals=2)
+    CheckpointsSaveCallback(agent, CheckpointCallbackSettings(folder=str(path), interval=2))
 
     assert path.is_dir()
 
 
 def test_checkpoint_callback_saves_every_interval(tmp_path, agent: Agent):
     path = tmp_path / "checkpoints"
-    callback = CheckpointsSaveCallback(str(path), agent, intervals=3)
+    callback = CheckpointsSaveCallback(agent, CheckpointCallbackSettings(folder=str(path), interval=3))
 
     for _ in range(9):
         callback.on_end()
@@ -339,7 +348,7 @@ def test_checkpoint_callback_saves_every_interval(tmp_path, agent: Agent):
 
 def test_checkpoint_round_trips_the_agent(tmp_path, agent: Agent, observations):
     path = tmp_path / "checkpoints"
-    callback = CheckpointsSaveCallback(str(path), agent, intervals=1)
+    callback = CheckpointsSaveCallback(agent, CheckpointCallbackSettings(folder=str(path), interval=1))
     callback.on_end()
 
     obs = observations(2)
@@ -348,11 +357,9 @@ def test_checkpoint_round_trips_the_agent(tmp_path, agent: Agent, observations):
     before = agent.act(obs, T.zeros(2, dtype=T.bool))[0]
 
     restored = Agent(
-        network=agent._network,
-        observation_dim=1,
-        action_dim=3,
-        stack_size=agent.stack_size,
+        network=agent.network,
         device="cpu",
+        config=AgentSettings(stack_size=agent.stack_size),
     )
     restored.load_state_dict(path / "checkpoint_1.pt")
     restored.reset()
@@ -364,7 +371,7 @@ def test_checkpoint_round_trips_the_agent(tmp_path, agent: Agent, observations):
 
 def test_checkpoint_callback_ignores_the_other_hooks(tmp_path, agent: Agent):
     path = tmp_path / "checkpoints"
-    callback = CheckpointsSaveCallback(str(path), agent, intervals=1)
+    callback = CheckpointsSaveCallback(agent, CheckpointCallbackSettings(folder=str(path), interval=1))
 
     callback.on_start()
     callback.on_minibatch()
@@ -390,7 +397,7 @@ def _episode_info(returns, lengths, done_mask=None, key: str = "episode"):
 
 def test_statistics_step_mode_logs_per_step_averages():
     logger = FakeLogger()
-    callback = RecordStatisticLoggerCallback(logger, mode="step")
+    callback = RecordStatisticLoggerCallback(logger, EpisodeStatisticsCallbackSettings(mode="step"))
 
     callback.on_env_step(step=4, info=_episode_info([2.0, 4.0], [10, 20]))
 
@@ -401,7 +408,7 @@ def test_statistics_step_mode_logs_per_step_averages():
 
 def test_statistics_step_mode_ignores_partial_episode_masks():
     logger = FakeLogger()
-    callback = RecordStatisticLoggerCallback(logger, mode="step")
+    callback = RecordStatisticLoggerCallback(logger, EpisodeStatisticsCallbackSettings(mode="step"))
 
     callback.on_env_step(
         step=1,
@@ -413,7 +420,7 @@ def test_statistics_step_mode_ignores_partial_episode_masks():
 
 def test_statistics_step_mode_ignores_steps_without_episode_data():
     logger = FakeLogger()
-    callback = RecordStatisticLoggerCallback(logger, mode="step")
+    callback = RecordStatisticLoggerCallback(logger, EpisodeStatisticsCallbackSettings(mode="step"))
 
     callback.on_env_step(step=0, info={})
 
@@ -422,7 +429,7 @@ def test_statistics_step_mode_ignores_steps_without_episode_data():
 
 def test_statistics_mean_mode_accumulates_until_the_rollout_ends():
     logger = FakeLogger()
-    callback = RecordStatisticLoggerCallback(logger, mode="mean")
+    callback = RecordStatisticLoggerCallback(logger, EpisodeStatisticsCallbackSettings(mode="mean"))
 
     callback.on_env_step(step=1, info=_episode_info([2.0, 4.0], [10, 20]))
     callback.on_env_step(step=2, info=_episode_info([6.0], [30]))
@@ -440,7 +447,7 @@ def test_statistics_mean_mode_accumulates_until_the_rollout_ends():
 
 def test_statistics_mean_mode_flush_is_a_noop_without_episodes():
     logger = FakeLogger()
-    callback = RecordStatisticLoggerCallback(logger, mode="mean")
+    callback = RecordStatisticLoggerCallback(logger, EpisodeStatisticsCallbackSettings(mode="mean"))
 
     callback.on_rollout_end()
     callback.flush()
@@ -450,7 +457,7 @@ def test_statistics_mean_mode_flush_is_a_noop_without_episodes():
 
 def test_statistics_step_mode_flush_is_a_noop():
     logger = FakeLogger()
-    callback = RecordStatisticLoggerCallback(logger, mode="step")
+    callback = RecordStatisticLoggerCallback(logger, EpisodeStatisticsCallbackSettings(mode="step"))
 
     callback.on_env_step(step=1, info=_episode_info([2.0], [10]))
     callback.flush()
@@ -467,7 +474,7 @@ def test_statistics_step_mode_flush_is_a_noop():
 )
 def test_statistics_reads_gymnasics_nested_final_info():
     logger = FakeLogger()
-    callback = RecordStatisticLoggerCallback(logger, mode="step")
+    callback = RecordStatisticLoggerCallback(logger, EpisodeStatisticsCallbackSettings(mode="step"))
 
     callback.on_env_step(
         step=6,
@@ -544,22 +551,35 @@ def test_stop_video_recording_falls_back_to_close_video_recorder():
     assert stopped == ["close_video_recorder"]
 
 
+def _video_settings(**overrides) -> VideoCallbackSettings:
+    environment = EnvironmentSettings(
+        id="CarRacing-v3",
+        num_envs=1,
+        wrappers=[
+            WrapperSettings(name="record_video", video_folder="videos"),
+            WrapperSettings(name="record_episode_stats"),
+        ],
+    )
+    base = {"environment": environment, "interval": 10_000, "seed": 1}
+    base.update(overrides)
+    return VideoCallbackSettings(**base)
+
+
 @pytest.fixture
 def video_callback(monkeypatch, agent: Agent):
     """A RecordVideoCallback whose env is a stub, so no game window is opened."""
 
     created: dict[str, Any] = {}
 
-    def _make_env(env_id, num_envs, **kwargs):
-        created.update({"env_id": env_id, "num_envs": num_envs, **kwargs})
+    def _make_env(config):
+        created.update(config)
         return _StubVideoEnv()
 
     monkeypatch.setattr("rl_lib.training.callbacks.record_video.make_env", _make_env)
     return RecordVideoCallback(
-        env_id="CarRacing-v3",
         agent=agent,
-        video_folder="videos",
         metrics_loggers=[],
+        config=_video_settings(),
     )
 
 
@@ -595,7 +615,7 @@ def test_video_callback_records_on_the_interval(video_callback: RecordVideoCallb
     recorded: list[int] = []
     monkeypatch.setattr(RecordVideoCallback, "record", lambda self, step: recorded.append(step))
 
-    video_callback.interval = 10
+    video_callback.cfg = video_callback.cfg.model_copy(update={"interval": 10})
     for step in range(25):
         video_callback.on_env_step(step=step, info={})
 
@@ -608,10 +628,9 @@ def test_video_callback_rollout_end_is_broken(monkeypatch, agent: Agent):
         "rl_lib.training.callbacks.record_video.make_env", lambda *a, **k: _StubVideoEnv()
     )
     callback = RecordVideoCallback(
-        env_id="CarRacing-v3",
         agent=agent,
-        video_folder="videos",
         metrics_loggers=[],
+        config=_video_settings(),
     )
 
     with pytest.raises(TypeError):

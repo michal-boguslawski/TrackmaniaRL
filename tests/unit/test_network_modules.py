@@ -47,12 +47,15 @@ def cnn() -> CNN:
 
 @pytest.fixture
 def temporal() -> TemporalCNN1D:
-    return TemporalCNN1D(STACK_SIZE, in_dim=FEATURE_DIM, out_dim=FEATURE_DIM)
+    return TemporalCNN1D(STACK_SIZE, in_dim=FEATURE_DIM, config=TemporalConfig(out_dim=FEATURE_DIM))
 
 
 @pytest.fixture
 def critic() -> Critic:
-    return Critic(in_dim=FEATURE_DIM, hidden_dim=8)
+    return Critic(
+        in_dim=FEATURE_DIM,
+        config=CriticConfig(hidden_layers=[LinearLayerConfig(out_dim=8, activation="gelu")]),
+    )
 
 
 # ---------------------------------------------------------------- CNN
@@ -137,7 +140,7 @@ def test_temporal_does_not_modify_its_input(temporal: TemporalCNN1D):
 
 
 def test_temporal_handles_a_single_frame_stack():
-    encoder = TemporalCNN1D(1, in_dim=FEATURE_DIM, out_dim=FEATURE_DIM)
+    encoder = TemporalCNN1D(1, in_dim=FEATURE_DIM, config=TemporalConfig(out_dim=FEATURE_DIM))
 
     encoded = encoder(T.rand(2, 1, FEATURE_DIM))
 

@@ -10,11 +10,11 @@ class CNN(nn.Module):
     def __init__(
         self,
         observation_dim: int,
-        config: CNNConfig | None = None,
+        config: CNNConfig,
     ):
         super().__init__()
         self.observation_dim = observation_dim
-        self.cfg = config or CNNConfig()
+        self.cfg = config
 
         layers: list[nn.Module] = []
         in_channels = observation_dim

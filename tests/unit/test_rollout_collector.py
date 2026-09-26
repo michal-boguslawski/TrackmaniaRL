@@ -17,6 +17,7 @@ from gymnasium.vector import AutoresetMode
 from rl_lib.buffers.rollout_buffer import RolloutBuffer
 from rl_lib.training.callbacks.base import CollectorCallback
 from rl_lib.training.rollout_collector import RolloutCollector
+from rl_lib.run_config import RolloutSettings, TrainerSettings
 from rl_lib.training.ppo_trainer import PPOTrainer
 
 
@@ -117,14 +118,24 @@ def _flag(collector: RolloutCollector, key: str, step: int) -> T.Tensor:
     return collector.buffer._buffer[key][step + collector.trainer.stack_size - 1]
 
 
+def _collector(vector_env, agent, buffer_size=3, minibatch_size=2, **env_kwargs) -> RolloutCollector:
+    """A collector whose buffer and collector share one RolloutSettings, so
+    epochs/minibatch_size and gamma/gae_lambda cannot drift apart."""
+    settings = RolloutSettings(
+        buffer_size=buffer_size, epochs=1, minibatch_size=minibatch_size
+    )
+    return RolloutCollector(
+        env=vector_env(**env_kwargs),
+        buffer=RolloutBuffer(settings, stack_size=agent.stack_size),
+        trainer=PPOTrainer(agent, TrainerSettings()),
+        config=settings,
+    )
+
+
 @pytest.fixture
 def collector(vector_env, agent) -> RolloutCollector:
-    return RolloutCollector(
-        env=vector_env(),
-        buffer=RolloutBuffer(size=ROLLOUT_SIZE, stack_size=agent.stack_size),
-        trainer=PPOTrainer(agent),
-        epochs=1,
-        minibatch_size=4,
+    return _collector(
+        vector_env, agent, buffer_size=ROLLOUT_SIZE, minibatch_size=4
     )
 
 
@@ -183,8 +194,8 @@ def test_run_drives_every_callback_hook(collector: RolloutCollector):
     config = callback.events[0][1]
     assert config["training_steps"] == ROLLOUT_SIZE
     assert config["num_envs"] == NUM_ENVS
-    assert config["epochs"] == collector.epochs
-    assert config["minibatch_size"] == collector.minibatch_size
+    assert config["epochs"] == collector.cfg.epochs
+    assert config["minibatch_size"] == collector.cfg.minibatch_size
     assert any(key.startswith("buffer.") for key in config)
     assert any(key.startswith("trainer.") for key in config)
     assert any(key.startswith("network.") for key in config)
@@ -203,13 +214,7 @@ def test_env_step_callbacks_see_the_environment_step_counter(collector: RolloutC
 
 
 def test_truncation_bootstraps_from_the_final_observation(vector_env, agent):
-    collector = RolloutCollector(
-        env=vector_env(horizon=2),
-        buffer=RolloutBuffer(size=3, stack_size=agent.stack_size),
-        trainer=PPOTrainer(agent),
-        epochs=1,
-        minibatch_size=2,
-    )
+    collector = _collector(vector_env, agent, horizon=2)
 
     collector.run(training_steps=3)
 
@@ -227,13 +232,7 @@ def test_truncation_bootstraps_from_the_final_observation(vector_env, agent):
 
 
 def test_termination_does_not_bootstrap(vector_env, agent):
-    collector = RolloutCollector(
-        env=vector_env(horizon=2, terminate=True),
-        buffer=RolloutBuffer(size=3, stack_size=agent.stack_size),
-        trainer=PPOTrainer(agent),
-        epochs=1,
-        minibatch_size=2,
-    )
+    collector = _collector(vector_env, agent, horizon=2, terminate=True)
 
     collector.run(training_steps=3)
 
@@ -243,13 +242,7 @@ def test_termination_does_not_bootstrap(vector_env, agent):
 
 
 def test_missing_final_observation_raises(vector_env, agent, monkeypatch):
-    collector = RolloutCollector(
-        env=vector_env(horizon=2),
-        buffer=RolloutBuffer(size=3, stack_size=agent.stack_size),
-        trainer=PPOTrainer(agent),
-        epochs=1,
-        minibatch_size=2,
-    )
+    collector = _collector(vector_env, agent, horizon=2)
     monkeypatch.setattr(
         type(collector.env),
         "step",
@@ -267,13 +260,7 @@ def test_missing_final_observation_raises(vector_env, agent, monkeypatch):
 
 
 def test_incomplete_final_observation_mask_raises(vector_env, agent, monkeypatch):
-    collector = RolloutCollector(
-        env=vector_env(horizon=2),
-        buffer=RolloutBuffer(size=3, stack_size=agent.stack_size),
-        trainer=PPOTrainer(agent),
-        epochs=1,
-        minibatch_size=2,
-    )
+    collector = _collector(vector_env, agent, horizon=2)
     original_step = type(collector.env).step
 
     def _step(self, action):
@@ -296,7 +283,7 @@ def test_config_merges_the_buffer_trainer_and_network_settings(collector: Rollou
     assert "training_steps" not in config
     assert config["buffer.size"] == collector.buffer.size
     assert config["buffer.stack_size"] == collector.trainer.stack_size
-    assert config["trainer.ppo_epsilon"] == collector.trainer.ppo_epsilon
+    assert config["trainer.ppo_epsilon"] == collector.trainer.cfg.ppo_epsilon
     assert all(
         isinstance(value, (int, float, str, bool)) for value in config.values()
     ), "the config has to stay flat and loggable"

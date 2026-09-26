@@ -15,6 +15,7 @@ import pytest
 import torch as T
 
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
+from rl_lib.run_config import RolloutSettings
 
 
 SIZE = 4
@@ -29,7 +30,10 @@ LAMBDA = 0.5
 
 @pytest.fixture
 def buffer() -> RolloutBuffer:
-    return RolloutBuffer(size=SIZE, stack_size=STACK_SIZE)
+    return RolloutBuffer(
+        RolloutSettings(buffer_size=SIZE, gamma=GAMMA, gae_lambda=LAMBDA),
+        stack_size=STACK_SIZE,
+    )
 
 
 @pytest.fixture
@@ -190,8 +194,8 @@ def test_config_reports_size_and_stack_size(buffer: RolloutBuffer):
     assert buffer.config() == {
         "size": SIZE,
         "stack_size": STACK_SIZE,
-        "gamma": 0.99,
-        "gae_lambda": 0.95,
+        "gamma": GAMMA,
+        "gae_lambda": LAMBDA,
     }
 
 

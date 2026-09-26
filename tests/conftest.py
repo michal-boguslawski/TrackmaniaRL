@@ -20,6 +20,7 @@ from rl_lib.networks.config import (
     TemporalConfig,
 )
 from rl_lib.networks.factory import Network
+from rl_lib.run_config import AgentSettings
 
 
 OBSERVATION_SHAPE = (96, 96, 1)
@@ -66,14 +67,13 @@ def network(network_config: NetworkConfig) -> Network:
 
 
 @pytest.fixture
-def agent(network: Network) -> Agent:
-    return Agent(
-        network=network,
-        observation_dim=OBSERVATION_DIM,
-        action_dim=ACTION_DIM,
-        stack_size=STACK_SIZE,
-        device="cpu",
-    )
+def agent_settings() -> AgentSettings:
+    return AgentSettings(stack_size=STACK_SIZE)
+
+
+@pytest.fixture
+def agent(network: Network, agent_settings: AgentSettings) -> Agent:
+    return Agent(network=network, device="cpu", config=agent_settings)
 
 
 @pytest.fixture

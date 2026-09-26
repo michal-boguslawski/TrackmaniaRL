@@ -23,17 +23,11 @@ class StableTanhTransform(TanhTransform):
 
 
 class Actor(nn.Module):
-    def __init__(self, action_dim: int, in_dim: int, hidden_dim: int | None = None, config: ActorConfig | None = None):
+    def __init__(self, action_dim: int, in_dim: int, config: ActorConfig):
         super().__init__()
         self.action_dim = action_dim
         self.in_dim = in_dim
-        if config is not None:
-            self.cfg = config
-        elif hidden_dim is not None:
-            default_layer = ActorConfig().hidden_layers[0]
-            self.cfg = ActorConfig(hidden_layers=[default_layer.model_copy(update={"out_dim": hidden_dim})])
-        else:
-            self.cfg = ActorConfig()
+        self.cfg = config
         if len(self.cfg.action_low) != action_dim or len(self.cfg.action_high) != action_dim:
             raise ValueError(
                 f"actor action bounds must each have action_dim={action_dim} values; "

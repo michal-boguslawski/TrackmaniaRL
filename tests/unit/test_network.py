@@ -27,7 +27,7 @@ STACK_SIZE = 4
 
 @pytest.fixture
 def network() -> Network:
-    return Network(observation_dim=1, action_dim=3, stack_size=STACK_SIZE)
+    return Network(observation_dim=1, action_dim=3, stack_size=STACK_SIZE, config=NetworkConfig())
 
 
 def test_network_feature_extract_shape(network: Network):

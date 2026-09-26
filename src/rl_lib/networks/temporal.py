@@ -5,17 +5,11 @@ from rl_lib.networks.config import TemporalConfig
 
 
 class TemporalCNN1D(nn.Module):
-    def __init__(self, stack_size: int, in_dim: int, out_dim: int | None = None, config: TemporalConfig | None = None):
+    def __init__(self, stack_size: int, in_dim: int, config: TemporalConfig):
         super().__init__()
         self.stack_size = stack_size
         self.in_dim = in_dim
-
-        if config is not None:
-            self.cfg = config
-        elif out_dim is not None:
-            self.cfg = TemporalConfig(out_dim=out_dim)
-        else:
-            self.cfg = TemporalConfig()
+        self.cfg = config
 
         self._encoder = nn.Conv1d(in_dim, self.cfg.out_dim, kernel_size=stack_size, bias=self.cfg.bias)
         self._norm = nn.LayerNorm(in_dim, eps=self.cfg.norm_eps, elementwise_affine=self.cfg.norm_affine) if self.cfg.normalize_input else nn.Identity()

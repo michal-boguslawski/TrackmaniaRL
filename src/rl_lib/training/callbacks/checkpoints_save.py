@@ -2,6 +2,7 @@ from logging import getLogger
 from pathlib import Path
 
 from rl_lib.training.callbacks.base import TrainingCallback
+from rl_lib.run_config import CheckpointCallbackSettings
 from rl_lib.agent import Agent
 
 
@@ -9,10 +10,11 @@ logger = getLogger(__name__)
 
 
 class CheckpointsSaveCallback(TrainingCallback):
-    def __init__(self, path: str, agent: Agent, intervals: int = 20):
-        self._path = Path(path)
+    def __init__(self, agent: Agent, config: CheckpointCallbackSettings):
+        self._path = Path(config.folder)
         self._agent = agent
-        self._intervals = intervals
+        self.cfg = config
+        self._intervals = config.interval
         self._cnt = 0
         self._path.mkdir(parents=True, exist_ok=True)
         logger.debug(f"CheckpointsSaveCallback created with intervals={self._intervals}")
