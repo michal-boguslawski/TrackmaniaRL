@@ -241,24 +241,49 @@ def test_get_returns_a_window_of_observations_per_transition(buffer: RolloutBuff
         assert window.tolist() == expected, f"window for transition {transition}"
 
 
-def test_get_aligns_the_done_flags_with_the_observation_windows(buffer: RolloutBuffer, step_factory):
+def test_get_marks_episode_starts_on_the_observation_columns(buffer: RolloutBuffer, step_factory):
+    """`dones` means "this frame is the first of a new episode", the convention
+    `Agent.act` masks with. A step stores the flag produced by stepping *at* it,
+    so its boundary belongs to the following frame - and therefore to the
+    following observation column, since column `c` is step `c - stack_size + 1`.
+    """
+
     for index in range(SIZE):
         buffer.add(
             step_factory(
                 index=index,
                 terminated=T.tensor([index == 1, False]),
-                truncated=T.tensor([False, index == 2]),
+                truncated=T.tensor([False, index == 1]),
             )
         )
 
     batch = buffer.get()
 
-    # column 0 is the duplicated first step, column `index + 1` is step `index`
-    assert not batch["dones"][0, 0] and not batch["dones"][0, 1]
-    assert batch["dones"][0, 2], "step 1 terminated env 0"
-    assert not batch["dones"][0, 3]
-    assert not batch["dones"][1, 2]
-    assert batch["dones"][1, 3], "step 2 truncated env 1"
+    # the step-1 boundary is the start of step 2, which is column 3
+    assert [bool(v) for v in batch["dones"][0]] == [False, False, False, True]
+    assert [bool(v) for v in batch["dones"][1]] == [False, False, False, True]
+
+
+def test_done_windows_mask_the_frames_from_before_the_boundary(buffer: RolloutBuffer, step_factory):
+    """The window the PPO update masks must keep the frames of the episode that
+    is running and drop the ones left over from the episode before it - the
+    inverse is what a misaligned flag produces."""
+
+    for index in range(SIZE):
+        buffer.add(step_factory(index=index, terminated=T.tensor([index == 1, False])))
+
+    batch = buffer.get()
+
+    def mask_for(transition: int) -> list[bool]:
+        window = batch["dones"][0, transition : transition + STACK_SIZE]
+        kept = window.logical_not() & (window.flip(0).cumsum(0).flip(0) > 0)
+        return kept.tolist()
+
+    # the boundary ends step 1, so step 2 opens a new episode: its window keeps
+    # step 2 and drops the leftover step 1, while earlier windows are untouched
+    assert mask_for(0) == [False, False]
+    assert mask_for(1) == [False, False]
+    assert mask_for(2) == [True, False]
 
 
 def test_get_uses_the_gamma_and_lambda_it_is_given(buffer: RolloutBuffer, step_factory):

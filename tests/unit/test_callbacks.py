@@ -622,8 +622,23 @@ def test_video_callback_records_on_the_interval(video_callback: RecordVideoCallb
     assert recorded == [0, 10, 20]
 
 
-def test_video_callback_rollout_end_is_broken(monkeypatch, agent: Agent):
-    """`on_rollout_end` calls `self.record()` although `record` requires a step."""
+def test_video_callback_rollout_end_closes_its_env(monkeypatch, agent: Agent, video_callback: RecordVideoCallback):
+    recorded: list[int] = []
+    monkeypatch.setattr(RecordVideoCallback, "record", lambda self, step: recorded.append(step))
+
+    video_callback.on_rollout_end()
+
+    assert recorded == [1], "the closing recording continues from the last reported step"
+    assert video_callback.env.closed is True
+
+
+def test_video_callback_closes_its_env_when_recording_fails(monkeypatch, agent: Agent):
+    """A failed recording must not leak the evaluation environment."""
+
+    def boom(self, step: int):
+        raise RuntimeError("recording failed")
+
+    monkeypatch.setattr(RecordVideoCallback, "record", boom)
     monkeypatch.setattr(
         "rl_lib.training.callbacks.record_video.make_env", lambda *a, **k: _StubVideoEnv()
     )
@@ -633,7 +648,7 @@ def test_video_callback_rollout_end_is_broken(monkeypatch, agent: Agent):
         config=_video_settings(),
     )
 
-    with pytest.raises(TypeError):
+    with pytest.raises(RuntimeError, match="recording failed"):
         callback.on_rollout_end()
 
-    assert callback.env.closed is False
+    assert callback.env.closed is True

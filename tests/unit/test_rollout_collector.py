@@ -241,6 +241,46 @@ def test_termination_does_not_bootstrap(vector_env, agent):
     assert _value(collector, "truncated_value", 1).tolist() == [0.0, 0.0]
 
 
+def test_update_rebuilds_the_same_temporal_masks_as_collection(
+    vector_env, agent, monkeypatch
+):
+    """PPO's importance ratio is only meaningful if the update re-encodes the
+    history the action was actually taken with, so the mask the buffer hands to
+    the update has to match the one `Agent.act` used, episode boundaries
+    included. A buffer large enough to hold the whole run keeps the weights
+    fixed, so the two paths are directly comparable."""
+
+    horizon = 3
+    steps = 2 * horizon + 1
+    collector = _collector(vector_env, agent, buffer_size=steps + 1, horizon=horizon)
+
+    masks: list[T.Tensor] = []
+    original = agent._get_mask_window
+
+    def spy(done: T.Tensor) -> T.Tensor:
+        mask = original(done)
+        masks.append(mask.clone())
+        return mask
+
+    monkeypatch.setattr(agent, "_get_mask_window", spy)
+    collector.run(training_steps=steps)
+
+    batch = collector.buffer.get()
+    stack_size = agent.stack_size
+
+    for transition, collected in enumerate(masks[:-1]):
+        for env in range(NUM_ENVS):
+            window = batch["dones"][env, transition : transition + stack_size]
+            rebuilt = window.logical_not() & (window.flip(0).cumsum(0).flip(0) > 0)
+            T.testing.assert_close(
+                rebuilt, collected[env], atol=0, rtol=0
+            ), f"env {env}, transition {transition}"
+
+    # the horizon is crossed inside this rollout, so the comparison is not vacuous
+    assert any(mask.any() for mask in masks), "no frame was ever masked out"
+    assert batch["dones"].any(), "the rollout contains no episode boundary"
+
+
 def test_missing_final_observation_raises(vector_env, agent, monkeypatch):
     collector = _collector(vector_env, agent, horizon=2)
     monkeypatch.setattr(

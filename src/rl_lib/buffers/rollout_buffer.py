@@ -103,9 +103,23 @@ class RolloutBuffer:
             gae_lambda,
             buffer["truncated_value"][:, :-1],
         )
-        dones = T.logical_or(
+        episode_ends = T.logical_or(
             buffer["terminated"],
             buffer["truncated"]
+        )
+        # `dones` has to answer "is this frame the first of a new episode", the
+        # question `Agent._get_mask_window` asks while collecting: a frame is
+        # history only if no episode boundary precedes it inside the window. The
+        # stored flags answer a different question - "did stepping at this frame
+        # end the episode" - and that boundary belongs to the *next* frame. So
+        # the flags move one column to the right, and the leading columns that
+        # `observation` fills by duplicating step 0 start no episode.
+        dones = T.cat(
+            [
+                T.zeros_like(episode_ends[:, : self._stack_size]),
+                episode_ends[:, self._stack_size - 1 : -1],
+            ],
+            dim=1,
         )
 
         flat = {

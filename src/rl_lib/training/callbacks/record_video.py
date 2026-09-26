@@ -25,6 +25,7 @@ class RecordVideoCallback(CollectorCallback):
         self._loggers = metrics_loggers
         self.env = make_env(config.environment)
         self._step = 0
+        self._last_step = 0
 
 
     def record(self, step: int):
@@ -49,7 +50,6 @@ class RecordVideoCallback(CollectorCallback):
         if video_path:
             [lgr.log_artifact(video_path, artifact_path=f"videos/step_{self._step}") for lgr in self._loggers]
 
-        self.agent.train()
         self._step += 1
         return
 
@@ -57,13 +57,20 @@ class RecordVideoCallback(CollectorCallback):
         pass
 
     def on_env_step(self, step: int, *args, **kwargs):
+        self._last_step = step
         if step % self.cfg.interval == 0:
             self.record(step)
 
 
     def on_rollout_end(self, *args, **kwargs):
-        self.record()
-        self.env.close()
+        # the collector ends a rollout without a step number, so continue from
+        # the last one it reported; the environment is closed either way, and a
+        # failed recording must not leave the policy in eval mode
+        try:
+            self.record(self._last_step + 1)
+        finally:
+            self.env.close()
+            self.agent.train()
 
     def flush(self, *args, **kwargs):
         pass
