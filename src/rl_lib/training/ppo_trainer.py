@@ -33,6 +33,7 @@ class PPOTrainer:
         weight_decay: float = 1e-4,
         optimizer_eps: float = 1e-5,
         mean_reg_coef: float = 1e-2,
+        hard_stop_kl: bool = True,
     ):
         self._agent = agent
         self.backbone_lr = backbone_lr
@@ -52,6 +53,7 @@ class PPOTrainer:
 
         self._target_kl = target_kl
         self._kl_warmup_steps = kl_warmup_steps
+        self._hard_stop_kl = hard_stop_kl
 
         self._step = 0
 
@@ -340,14 +342,18 @@ class PPOTrainer:
                     raise e
                 epoch_kls.append(minibatch_metrics["metrics/approx_kl"])
 
-                if minibatch_metrics["metrics/approx_kl"] > self._target_kl * 3 and training_step > self._kl_warmup_steps:
+                if (
+                    minibatch_metrics["metrics/approx_kl"] > self._target_kl * 3 and
+                    training_step > self._kl_warmup_steps and
+                    self._hard_stop_kl
+                ):
                     logger.warning(f"Hard stop mid-epoch: KL {minibatch_metrics['metrics/approx_kl']:.4f}")
                     break
 
                 self._on_minibatch(metrics=minibatch_metrics, step=self._step)
             mean_epoch_kl = float(np.mean(epoch_kls))
             self._on_epoch()
-            if mean_epoch_kl > self._target_kl and training_step > self._kl_warmup_steps:
+            if mean_epoch_kl > self._target_kl and training_step > self._kl_warmup_steps and self._hard_stop_kl:
                 logger.warning(f"Early stop epoch {epoch}: KL {mean_epoch_kl:.4f} > {self._target_kl}")
                 break
 
@@ -374,8 +380,9 @@ class PPOTrainer:
             f"backbone_lr={self.backbone_lr}, "
             f"head_lr={self.head_lr}, "
             f"weight_decay={self.weight_decay}, "
+            f"hard_stop_kl={self._hard_stop_kl}, "
             f"advantage_normalization_strategy={self.advantage_normalization_strategy!r}, "
-            f"scheduler={self._scheduler.__class__.__name__ if self._scheduler else None} "
+            f"scheduler={self._scheduler.__class__.__name__ if self._scheduler else None}, "
             f"mean_reg_coef={self.mean_reg_coef})"
         )
 
@@ -396,6 +403,7 @@ class PPOTrainer:
             "optimizer_eps": self._optimizer.defaults.get("eps"),
             "scheduler": self._scheduler.__class__.__name__ if self._scheduler else "none",
             "mean_reg_coef": self.mean_reg_coef,
+            "hard_stop_kl": self._hard_stop_kl,
         }
 
     def network_config(self) -> dict[str, int | float | str]:

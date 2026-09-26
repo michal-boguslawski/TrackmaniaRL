@@ -3,9 +3,9 @@ from pydantic import BaseModel, PositiveInt
 
 
 class CNNConfig(BaseModel):
-    channels: PositiveInt = 16
-    hidden_dim: PositiveInt = 128
-    out_dim: PositiveInt = 128
+    channels: PositiveInt = 32
+    hidden_dim: PositiveInt = 256
+    out_dim: PositiveInt = 256
 
 
 class TemporalConfig(BaseModel):
@@ -13,11 +13,11 @@ class TemporalConfig(BaseModel):
 
 
 class ActorConfig(BaseModel):
-    hidden_dim: PositiveInt = 1024
+    hidden_dim: PositiveInt = 256
 
 
 class CriticConfig(BaseModel):
-    hidden_dim: PositiveInt = 1024
+    hidden_dim: PositiveInt = 256
 
 
 class NetworkConfig(BaseModel):

@@ -21,11 +21,11 @@ from src.rl_lib.agent import Agent
 
 
 BATCH_SIZE = 1024
-NUM_ENVS = 8
+NUM_ENVS = 16
 STACK_SIZE = 4
 SKIP = 2
-MINIBATCH_SIZE = 256
-EPOCHS = 4
+MINIBATCH_SIZE = 512
+EPOCHS = 3
 DEVICE = T.device("cuda" if T.cuda.is_available() else "cpu")
 
 
@@ -103,10 +103,14 @@ def main():
         trainer = PPOTrainer(
             agent=agent,
             ppo_epsilon=0.1,
+            critic_beta=0.8,
             entropy_coef=1e-2,
             entropy_decay=0.999,
-            # head_lr=3e-5,
+            mean_reg_coef=0.001,
+            weight_decay=1e-5,
+            backbone_lr=3e-5,
             advantage_normalization_strategy="global",
+            hard_stop_kl=True,
             callbacks=[
                 CheckpointsSaveCallback(checkpoints_folder, agent, intervals=200),
                 MetricsLoggingCallback(console_metrics_logger, granularity="batch"),
