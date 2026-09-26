@@ -1,3 +1,5 @@
+"""Unit tests for actor distributions."""
+
 import pytest
 import torch as T
 from torch.distributions import Distribution

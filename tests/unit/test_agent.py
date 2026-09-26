@@ -1,3 +1,5 @@
+"""Unit tests for the observation-processing agent."""
+
 import pytest
 import torch as T
 

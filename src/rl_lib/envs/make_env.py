@@ -1,6 +1,6 @@
 from copy import copy
 from gymnasium import make_vec, VectorizeMode
-from gymnasium.vector import VectorEnv
+from gymnasium.vector import AutoresetMode, VectorEnv
 from gymnasium.wrappers.vector import NormalizeReward
 from functools import partial
 
@@ -33,6 +33,9 @@ def make_env(
         env_id,
         num_envs=num_envs,
         vectorization_mode=VectorizeMode.SYNC if record else VectorizeMode(vectorization_mode),
+        # SAME_STEP keeps terminal actions as transitions and avoids emitting
+        # a separate reset-only step on the next call to env.step().
+        vector_kwargs={"autoreset_mode": AutoresetMode.SAME_STEP},
         render_mode="rgb_array" if record else None,
         continuous=continuous,
         wrappers=wrappers_fn,
