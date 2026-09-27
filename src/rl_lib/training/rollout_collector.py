@@ -14,7 +14,7 @@ from tqdm import tqdm
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
 from rl_lib.run_config import RolloutSettings
 from rl_lib.training.ppo_trainer import PPOTrainer
-from rl_lib.training.callbacks.base import CollectorCallback, CallbackList
+from rl_lib.training.callbacks.base import Callback, CallbackList
 
 
 class RolloutCollector:
@@ -40,7 +40,7 @@ class RolloutCollector:
         buffer: RolloutBuffer,
         trainer: PPOTrainer,
         config: RolloutSettings,
-        callbacks: list[CollectorCallback] | None = None,
+        callbacks: list[Callback] | None = None,
         seed: int | None = None,
         run_config: dict | None = None,
     ):
@@ -51,7 +51,7 @@ class RolloutCollector:
             buffer: RolloutBuffer instance.
             trainer: PPOTrainer instance.
             config: RolloutSettings shared with buffer (validated for consistency).
-            callbacks: List of CollectorCallbacks for rollout-level events.
+            callbacks: Callbacks for rollout-level events.
             seed: Random seed for environment reset.
             run_config: Full config dict for MLflow parameter logging.
 

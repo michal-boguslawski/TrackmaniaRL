@@ -23,7 +23,7 @@ from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR
 from typing import Iterator
 
 from rl_lib.agent import Agent
-from rl_lib.training.callbacks.base import TrainingCallback, CallbackList
+from rl_lib.training.callbacks.base import Callback, CallbackList
 from rl_lib.run_config import RolloutSettings, RunSettings, TrainerSettings
 
 
@@ -50,14 +50,14 @@ class PPOTrainer:
         self,
         agent: Agent,
         config: TrainerSettings,
-        callbacks: list[TrainingCallback] | None = None,
+        callbacks: list[Callback] | None = None,
     ):
         """Initialize the PPO trainer.
 
         Args:
             agent: Agent wrapping the policy/value network.
             config: TrainerSettings with all PPO hyperparameters.
-            callbacks: List of TrainingCallbacks for training events.
+            callbacks: Callbacks for training events.
         """
         self.cfg = config
         self._agent = agent

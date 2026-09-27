@@ -1,81 +1,63 @@
-"""Base callback interfaces for training and rollout collection.
+"""Unified callback interface for training and rollout collection.
 
-Defines abstract base classes for callbacks at two levels:
-- TrainingCallback: called during PPO optimization (minibatch/epoch/start/end)
-- CollectorCallback: called during environment rollout collection (step/start/end)
-
-CallbackList provides a generic dispatcher that forwards calls to all registered
-callbacks of the same type.
+Defines hooks for PPO optimization and environment rollout collection.
+CallbackList dispatches each event to its registered callbacks.
 """
 
-from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 
 
-class TrainingCallback(ABC):
-    """Callbacks for PPO training loop events.
+class Callback:
+    """Base callback for PPO training and rollout collection events.
 
-    Called by PPOTrainer at:
-    - on_start: before epochs begin (receives step, metrics from full batch)
-    - on_minibatch: after each minibatch step (receives metrics, step)
-    - on_epoch: after each epoch completes
-    - on_end: after all epochs (receives final metrics, step)
+    PPOTrainer invokes ``on_start``, ``on_minibatch``, ``on_epoch`` and
+    ``on_end``. RolloutCollector invokes ``on_rollout_start``, ``on_env_step``,
+    ``on_rollout_end`` and ``flush``. Unused hooks default to no-ops.
     """
 
-    @abstractmethod
-    def on_start(self, *args, **kwargs) -> None: ...
+    def on_start(self, *args, **kwargs) -> None:
+        """Handle the trainer-start event."""
 
-    @abstractmethod
-    def on_minibatch(self, *args, **kwargs) -> None: ...
+    def on_minibatch(self, *args, **kwargs) -> None:
+        """Handle the trainer-minibatch event."""
 
-    @abstractmethod
-    def on_end(self, *args, **kwargs) -> None: ...
+    def on_end(self, *args, **kwargs) -> None:
+        """Handle the trainer-end event."""
 
-    @abstractmethod
-    def on_epoch(self, *args, **kwargs) -> None: ...
+    def on_epoch(self, *args, **kwargs) -> None:
+        """Handle the trainer-epoch event."""
 
+    def on_rollout_start(self, *args, **kwargs) -> None:
+        """Handle the collector-start event."""
 
-class CollectorCallback(ABC):
-    """Callbacks for rollout collection events.
+    def on_env_step(self, *args, **kwargs) -> None:
+        """Handle the collector-environment-step event."""
 
-    Called by RolloutCollector at:
-    - on_rollout_start: before collection begins (receives config)
-    - on_env_step: after each environment step (receives step index, info)
-    - on_rollout_end: after collection completes
-    - flush: periodic flush (e.g., when buffer fills and trainer runs)
-    """
+    def on_rollout_end(self, *args, **kwargs) -> None:
+        """Handle the collector-end event."""
 
-    @abstractmethod
-    def on_rollout_start(self, *args, **kwargs) -> None: ...
-
-    @abstractmethod
-    def on_env_step(self, *args, **kwargs) -> None: ...
-
-    @abstractmethod
-    def on_rollout_end(self, *args, **kwargs) -> None: ...
-
-    @abstractmethod
-    def flush(self, *args, **kwargs) -> None: ...
+    def flush(self, *args, **kwargs) -> None:
+        """Handle the collector-flush event."""
 
 
-C = TypeVar("C", TrainingCallback, CollectorCallback)
+C = TypeVar("C", bound=Callback)
 
 
 class CallbackList(Generic[C]):
-    """Dispatches method calls to a list of same-type callbacks.
-
-    Uses __getattr__ to dynamically forward any method call to all
-    registered callbacks. Unknown methods raise AttributeError.
+    """Dispatch callback events in registration order.
 
     Args:
-        callbacks: List of callback instances (TrainingCallback or CollectorCallback).
+        callbacks: Callback instances to receive dispatched events.
     """
 
     def __init__(self, callbacks: list[C] | None = None):
         self._callbacks: list[C] = callbacks or []
 
     def __getattr__(self, name: str):
+        """Return a dispatcher for a callback event."""
+
         def _dispatch(*args, **kwargs):
-            for cb in self._callbacks:
-                getattr(cb, name)(*args, **kwargs)
+            for callback in self._callbacks:
+                getattr(callback, name)(*args, **kwargs)
+
         return _dispatch

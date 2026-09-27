@@ -129,7 +129,6 @@ tracking:
 callbacks:
   - name: checkpoints
     interval: 200
-    folder: ./logs/checkpoints
   - name: metrics
     granularity: batch
   - name: episode_statistics

@@ -1,4 +1,4 @@
-"""Callback factory: builds TrainingCallback/CollectorCallback instances from config.
+"""Callback factory: builds callback instances from run configuration.
 
 Registers callback constructors in CALLBACK_FACTORIES and provides create_callbacks()
 to instantiate all configured callbacks with resolved settings.
@@ -10,13 +10,12 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from rl_lib.agent import Agent
-from rl_lib.run_config import RunConfig
+from rl_lib.run_config import CheckpointsCallbackConfig, RunConfig
 from rl_lib.tracking.base import MetricsLogger
-from rl_lib.training.callbacks.base import CollectorCallback, TrainingCallback
-from rl_lib.training.callbacks.checkpoints_save import CheckpointsSaveCallback
+from rl_lib.training.callbacks.base import Callback
 from rl_lib.training.callbacks.evaluate import EvaluationCallback
-from rl_lib.training.callbacks.final_model_save import FinalModelSaveCallback
 from rl_lib.training.callbacks.metrics_logger import MetricsLoggingCallback
+from rl_lib.training.callbacks.model_checkpoint import ModelCheckpointCallback
 from rl_lib.training.callbacks.params_logger import ParamsLoggingCallback
 from rl_lib.training.callbacks.record_statistics import RecordStatisticLoggerCallback
 from rl_lib.training.callbacks.record_video import RecordVideoCallback
@@ -27,11 +26,11 @@ class CallbackGroups:
     """Container for callbacks split by when they're invoked.
 
     Attributes:
-        trainer: Callbacks invoked during PPO optimization (TrainingCallback).
-        collector: Callbacks invoked during environment rollout (CollectorCallback).
+        trainer: Callbacks invoked during PPO optimization.
+        collector: Callbacks invoked during environment rollout.
     """
-    trainer: list[TrainingCallback] = field(default_factory=list)
-    collector: list[CollectorCallback] = field(default_factory=list)
+    trainer: list[Callback] = field(default_factory=list)
+    collector: list[Callback] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -54,10 +53,16 @@ CallbackBuilder = Callable[[CallbackFactoryContext], CallbackGroups]
 
 
 def _checkpoints(context: CallbackFactoryContext) -> CallbackGroups:
-    """Build checkpoint saving callback (trainer-level)."""
-    return CallbackGroups(
-        trainer=[CheckpointsSaveCallback(context.agent, context.config.checkpoint_settings())]
+    """Build the periodic and final model checkpoint callback."""
+    config = context.config.callback("checkpoints")
+    if not isinstance(config, CheckpointsCallbackConfig):
+        raise ValueError("checkpoints callback is not configured")
+    callback = ModelCheckpointCallback(
+        context.agent,
+        context.metrics_loggers,
+        interval=config.interval,
     )
+    return CallbackGroups(collector=[callback])
 
 
 def _metrics(context: CallbackFactoryContext) -> CallbackGroups:
@@ -123,7 +128,7 @@ def create_callbacks(
     """Create all configured trainer/collector callbacks.
 
     Always adds ParamsLoggingCallback (logs full config at start) and
-    FinalModelSaveCallback (saves final model at end) in addition to
+    ModelCheckpointCallback (saves final model at end) in addition to
     callbacks specified in config.callbacks.
 
     Args:
@@ -154,9 +159,6 @@ def create_callbacks(
         groups.trainer.extend(created.trainer)
         groups.collector.extend(created.collector)
 
-    groups.collector.append(FinalModelSaveCallback(
-        agent=agent,
-        folder=config.checkpoint_folder,
-        metrics_loggers=metrics_loggers,
-    ))
+    if not config.callback("checkpoints"):
+        groups.collector.append(ModelCheckpointCallback(agent, metrics_loggers))
     return groups

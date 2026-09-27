@@ -11,10 +11,10 @@ import numpy as np
 
 from rl_lib.run_config import MetricsCallbackSettings
 from rl_lib.tracking.base import MetricsLogger
-from rl_lib.training.callbacks.base import TrainingCallback
+from rl_lib.training.callbacks.base import Callback
 
 
-class MetricsLoggingCallback(TrainingCallback):
+class MetricsLoggingCallback(Callback):
     """Log training metrics at specified granularity.
 
     Attributes:

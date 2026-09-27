@@ -2,11 +2,10 @@ from rl_lib.run_config import RunConfig
 from rl_lib.tracking.base import MetricsLogger
 from rl_lib.training.callbacks.evaluate import EvaluationCallback
 from rl_lib.training.callbacks.factory import create_callbacks
-from rl_lib.training.callbacks.final_model_save import FinalModelSaveCallback
 from rl_lib.training.callbacks.metrics_logger import MetricsLoggingCallback
+from rl_lib.training.callbacks.model_checkpoint import ModelCheckpointCallback
 from rl_lib.training.callbacks.params_logger import ParamsLoggingCallback
 from rl_lib.training.callbacks.record_statistics import RecordStatisticLoggerCallback
-from rl_lib.training.callbacks.checkpoints_save import CheckpointsSaveCallback
 
 
 class _Logger(MetricsLogger):
@@ -20,7 +19,7 @@ class _UnusedEnv:
 
 
 def test_callback_factory_creates_configured_callbacks_in_their_groups(
-    tmp_path, monkeypatch, agent, network_config
+    monkeypatch, agent, network_config
 ):
     config = RunConfig.model_validate({
         "environment": {
@@ -30,7 +29,7 @@ def test_callback_factory_creates_configured_callbacks_in_their_groups(
         "agent": {"stack_size": agent.stack_size},
         "network": network_config.model_dump(),
         "callbacks": [
-            {"name": "checkpoints", "folder": str(tmp_path / "checkpoints")},
+            {"name": "checkpoints", "interval": 200},
             {"name": "metrics"},
             {"name": "episode_statistics"},
             {"name": "evaluation", "interval": 10, "episodes": 2, "final_episodes": 3},
@@ -48,13 +47,11 @@ def test_callback_factory_creates_configured_callbacks_in_their_groups(
         run_config={"run": "test"},
     )
 
-    assert [type(callback) for callback in groups.trainer] == [
-        CheckpointsSaveCallback,
-        MetricsLoggingCallback,
-    ]
+    assert [type(callback) for callback in groups.trainer] == [MetricsLoggingCallback]
     assert [type(callback) for callback in groups.collector] == [
         ParamsLoggingCallback,
+        ModelCheckpointCallback,
         RecordStatisticLoggerCallback,
         EvaluationCallback,
-        FinalModelSaveCallback,
     ]
+    assert groups.collector[1]._interval == 200

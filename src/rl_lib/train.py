@@ -33,6 +33,7 @@ from rl_lib.logger_setup import setup_logging, shutdown_logging
 from rl_lib.networks.factory import Network
 from rl_lib.run_config import RunConfig, load_config
 from rl_lib.tracking.console_logger import ConsoleMetricsLogger
+from rl_lib.tracking.local_artifact_logger import LocalArtifactLogger
 from rl_lib.tracking.mlflow_logger import MLflowLogger
 from rl_lib.training.callbacks.factory import create_callbacks
 from rl_lib.training.ppo_trainer import PPOTrainer
@@ -92,7 +93,14 @@ def run_training(config: RunConfig, config_path: str | Path | None = None) -> No
             if config.tracking.mlflow
             else nullcontext(None)
         )
-        metrics_loggers = [item for item in (console_logger, mlflow_logger) if item is not None]
+        local_artifact_logger = LocalArtifactLogger(
+            Path("logs") / "artifacts" / session_id
+        )
+        metrics_loggers = [
+            item
+            for item in (console_logger, mlflow_logger, local_artifact_logger)
+            if item is not None
+        ]
         env = stack.enter_context(closing(make_env(config.environment)))
         config = config.with_runtime(
             observation_shape=list(env.observation_space.shape),

@@ -13,10 +13,10 @@ from rl_lib.evaluation.inference import log_evaluation_results, run_inference
 from rl_lib.evaluation.runtime import _episode_stats_key
 from rl_lib.run_config import EvaluationCallbackSettings
 from rl_lib.tracking.base import MetricsLogger
-from rl_lib.training.callbacks.base import CollectorCallback
+from rl_lib.training.callbacks.base import Callback
 
 
-class EvaluationCallback(CollectorCallback):
+class EvaluationCallback(Callback):
     """Evaluate the current policy periodically and after training completes.
 
     Uses a copy of the training agent (shares network weights) to run

@@ -13,7 +13,7 @@ import torch as T
 
 from rl_lib.agent import Agent
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
-from rl_lib.training.callbacks.base import TrainingCallback
+from rl_lib.training.callbacks.base import Callback
 from rl_lib.run_config import RolloutSettings, RunSettings, TrainerSettings
 from rl_lib.training.ppo_trainer import PPOTrainer
 
@@ -26,7 +26,7 @@ OBSERVATION_SHAPE = (96, 96, 1)
 ENV_STRIDE = 50
 
 
-class SpyCallback(TrainingCallback):
+class SpyCallback(Callback):
     def __init__(self):
         self.events: list[tuple] = []
 

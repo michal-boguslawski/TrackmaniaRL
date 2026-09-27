@@ -20,7 +20,7 @@
 - [x] Centralize training/environment settings and log the resolved configuration, including seed, GAE parameters, wrappers, and the meaning of `training_steps`.
 - [x] Use one import path consistently (`rl_lib.*` or `src.rl_lib.*`) to avoid loading duplicate module identities.
 - [ ] Make the `rl-lib` console entrypoint launch the intended application, or remove it until it does. `rl_lib.main` still prints the `uv init` placeholder.
-- [ ] Fill `RuntimeSettings.checkpoint_folder` and `video_folder` in the entrypoint. `RunConfig` derives the real per-session paths as properties, so the two runtime fields are logged as `""` and the paths actually used never reach MLflow.
+- [ ] Fill `RuntimeSettings.video_folder` in the entrypoint. `RunConfig` derives the real per-session path as a property, so the runtime field is logged as `""` and the path actually used never reaches MLflow.
 - [ ] Cover the resolved-config dump with a test. The params logger is only checked against a literal dict, so nothing would catch the `training_steps` unit or the GAE parameters going missing.
 
 ## Efficiency and maintainability

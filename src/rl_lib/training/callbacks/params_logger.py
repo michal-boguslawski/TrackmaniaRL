@@ -5,10 +5,10 @@ optionally the full run config dict to all metrics loggers.
 """
 
 from rl_lib.tracking.base import MetricsLogger
-from rl_lib.training.callbacks.base import CollectorCallback
+from rl_lib.training.callbacks.base import Callback
 
 
-class ParamsLoggingCallback(CollectorCallback):
+class ParamsLoggingCallback(Callback):
     """Log training configuration parameters at rollout start.
 
     On rollout_start, logs:

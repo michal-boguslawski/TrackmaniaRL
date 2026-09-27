@@ -9,11 +9,11 @@ output in the info dict. Supports two modes:
 from typing import Any
 
 from rl_lib.tracking.base import MetricsLogger
-from rl_lib.training.callbacks.base import CollectorCallback
+from rl_lib.training.callbacks.base import Callback
 from rl_lib.run_config import EpisodeStatisticsCallbackSettings
 
 
-class RecordStatisticLoggerCallback(CollectorCallback):
+class RecordStatisticLoggerCallback(Callback):
     """Log episode statistics from vector environment info dict.
 
     Extracts episode returns and lengths from the stats_key entry in info

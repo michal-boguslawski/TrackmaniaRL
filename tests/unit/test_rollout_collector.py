@@ -15,7 +15,7 @@ from gymnasium import spaces
 from gymnasium.vector import AutoresetMode
 
 from rl_lib.buffers.rollout_buffer import RolloutBuffer
-from rl_lib.training.callbacks.base import CollectorCallback
+from rl_lib.training.callbacks.base import Callback
 from rl_lib.training.rollout_collector import RolloutCollector
 from rl_lib.run_config import RolloutSettings, TrainerSettings
 from rl_lib.training.ppo_trainer import PPOTrainer
@@ -64,7 +64,7 @@ class _CountingEnv(gym.Env):
         return self._observation(), reward, terminated, truncated, info
 
 
-class _SpyCollectorCallback(CollectorCallback):
+class _SpyCallback(Callback):
     def __init__(self):
         self.events: list[tuple] = []
 
@@ -180,7 +180,7 @@ def test_run_resets_the_environment_and_buffer(collector: RolloutCollector):
 
 
 def test_run_drives_every_callback_hook(collector: RolloutCollector):
-    callback = _SpyCollectorCallback()
+    callback = _SpyCallback()
     collector._callbacks = type(collector._callbacks)([callback])
 
     collector.run(training_steps=ROLLOUT_SIZE)
@@ -202,7 +202,7 @@ def test_run_drives_every_callback_hook(collector: RolloutCollector):
 
 
 def test_env_step_callbacks_see_the_environment_step_counter(collector: RolloutCollector):
-    callback = _SpyCollectorCallback()
+    callback = _SpyCallback()
     collector._callbacks = type(collector._callbacks)([callback])
 
     collector.run(training_steps=ROLLOUT_SIZE)

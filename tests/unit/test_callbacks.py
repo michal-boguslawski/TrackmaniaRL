@@ -1,6 +1,6 @@
-"""Unit tests for the training/collector callback layer.
+"""Unit tests for the training and rollout callback layer.
 
-Covers the abstract hook contracts, the callback dispatcher, the console
+Covers the callback hook defaults, the callback dispatcher, the console
 metrics backend and each concrete callback. Known source defects are pinned
 with strict xfails instead of being papered over.
 """
@@ -18,19 +18,15 @@ import torch as T
 
 from rl_lib.agent import Agent
 from rl_lib.training.callbacks.base import (
+    Callback,
     CallbackList,
-    CollectorCallback,
-    TrainingCallback,
 )
-from rl_lib.training.callbacks.checkpoints_save import CheckpointsSaveCallback
 from rl_lib.training.callbacks.metrics_logger import MetricsLoggingCallback
 from rl_lib.training.callbacks.params_logger import ParamsLoggingCallback
 from rl_lib.training.callbacks.record_statistics import RecordStatisticLoggerCallback
 from rl_lib.training.callbacks.record_video import RecordVideoCallback
 from rl_lib.training.callbacks.utils import stop_video_recording
 from rl_lib.run_config import (
-    AgentSettings,
-    CheckpointCallbackSettings,
     EnvironmentSettings,
     EpisodeStatisticsCallbackSettings,
     MetricsCallbackSettings,
@@ -56,47 +52,31 @@ class FakeLogger(MetricsLogger):
         self.artifacts.append((local_path, artifact_path))
 
 
-class MinimalTrainingCallback(TrainingCallback):
-    def on_start(self, *args, **kwargs) -> None: ...
-    def on_minibatch(self, *args, **kwargs) -> None: ...
-    def on_end(self, *args, **kwargs) -> None: ...
-    def on_epoch(self, *args, **kwargs) -> None: ...
+class MinimalCallback(Callback):
+    def __init__(self):
+        self.steps = []
 
-
-class MinimalCollectorCallback(CollectorCallback):
-    def on_rollout_start(self, *args, **kwargs) -> None: ...
-    def on_env_step(self, *args, **kwargs) -> None: ...
-    def on_rollout_end(self, *args, **kwargs) -> None: ...
-    def flush(self, *args, **kwargs) -> None: ...
+    def on_env_step(self, step: int, *args, **kwargs) -> None:
+        self.steps.append(step)
 
 
 # ---------------------------------------------------------------- contracts
 
 
-def test_training_cannot_be_instantiated_without_every_hook():
-    with pytest.raises(TypeError):
-        TrainingCallback()  # type: ignore[abstract]
+def test_callback_defaults_to_noops_for_every_event():
+    callback = Callback()
+    callback.on_start()
+    callback.on_minibatch()
+    callback.on_end()
+    callback.on_epoch()
+    callback.on_rollout_start()
+    callback.on_env_step()
+    callback.on_rollout_end()
+    callback.flush()
 
 
-def test_collector_cannot_be_instantiated_without_every_hook():
-    with pytest.raises(TypeError):
-        CollectorCallback()  # type: ignore[abstract]
-
-
-def test_a_complete_training_subclass_is_usable():
-    assert isinstance(MinimalTrainingCallback(), TrainingCallback)
-
-
-def test_a_complete_collector_subclass_is_usable():
-    assert isinstance(MinimalCollectorCallback(), CollectorCallback)
-
-
-def test_a_missing_hook_keeps_the_subclass_abstract():
-    class _Partial(TrainingCallback):
-        def on_start(self, *args, **kwargs) -> None: ...
-
-    with pytest.raises(TypeError):
-        _Partial()  # type: ignore[abstract]
+def test_callback_subclass_only_needs_to_implement_used_events():
+    assert isinstance(MinimalCallback(), Callback)
 
 
 # ---------------------------------------------------------------- dispatch
@@ -105,7 +85,7 @@ def test_a_missing_hook_keeps_the_subclass_abstract():
 def test_callback_list_dispatches_to_every_callback_in_order():
     calls: list[tuple[str, str, dict]] = []
 
-    class _Recording(MinimalTrainingCallback):
+    class _Recording(MinimalCallback):
         def __init__(self, name: str):
             self.name = name
 
@@ -154,7 +134,7 @@ def test_callback_list_tolerates_no_callbacks():
 def test_callback_list_forwards_positional_arguments():
     seen: list[tuple] = []
 
-    class _Recording(MinimalCollectorCallback):
+    class _Recording(MinimalCallback):
         def on_env_step(self, *args, **kwargs):
             seen.append((args, kwargs))
 
@@ -322,62 +302,6 @@ def test_on_start_drops_minibatches_left_over_from_the_previous_rollout():
 
     logged = {key: value for metrics, _ in logger.metrics for key, value in metrics.items()}
     assert logged["loss/total"] == 1.0
-
-
-# ---------------------------------------------------------------- checkpoints
-
-
-def test_checkpoint_callback_creates_the_folder(tmp_path, agent: Agent):
-    path = tmp_path / "nested" / "checkpoints"
-
-    CheckpointsSaveCallback(agent, CheckpointCallbackSettings(folder=str(path), interval=2))
-
-    assert path.is_dir()
-
-
-def test_checkpoint_callback_saves_every_interval(tmp_path, agent: Agent):
-    path = tmp_path / "checkpoints"
-    callback = CheckpointsSaveCallback(agent, CheckpointCallbackSettings(folder=str(path), interval=3))
-
-    for _ in range(9):
-        callback.on_end()
-
-    saved = sorted(entry.name for entry in path.iterdir())
-    assert saved == ["checkpoint_3.pt", "checkpoint_6.pt", "checkpoint_9.pt"]
-
-
-def test_checkpoint_round_trips_the_agent(tmp_path, agent: Agent, observations):
-    path = tmp_path / "checkpoints"
-    callback = CheckpointsSaveCallback(agent, CheckpointCallbackSettings(folder=str(path), interval=1))
-    callback.on_end()
-
-    obs = observations(2)
-    agent.reset()
-    T.manual_seed(123)
-    before = agent.act(obs, T.zeros(2, dtype=T.bool))[0]
-
-    restored = Agent(
-        network=agent.network,
-        device="cpu",
-        config=AgentSettings(stack_size=agent.stack_size),
-    )
-    restored.load_state_dict(path / "checkpoint_1.pt")
-    restored.reset()
-    T.manual_seed(123)
-    after = restored.act(obs, T.zeros(2, dtype=T.bool))[0]
-
-    T.testing.assert_close(before, after)
-
-
-def test_checkpoint_callback_ignores_the_other_hooks(tmp_path, agent: Agent):
-    path = tmp_path / "checkpoints"
-    callback = CheckpointsSaveCallback(agent, CheckpointCallbackSettings(folder=str(path), interval=1))
-
-    callback.on_start()
-    callback.on_minibatch()
-    callback.on_epoch()
-
-    assert list(path.iterdir()) == []
 
 
 # ---------------------------------------------------------------- statistics

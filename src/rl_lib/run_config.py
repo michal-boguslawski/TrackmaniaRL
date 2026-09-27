@@ -33,7 +33,6 @@ class RuntimeSettings(StrictModel):
     device: str = "cpu"
     observation_shape: list[int] = Field(default_factory=list)
     action_shape: list[int] = Field(default_factory=list)
-    checkpoint_folder: str = ""
     video_folder: str = ""
     total_steps_unit: str = "vector-environment steps"
     mlflow_experiment_name: str | None = None
@@ -175,7 +174,6 @@ class TrackingSettings(StrictModel):
 class CheckpointsCallbackConfig(StrictModel):
     name: Literal["checkpoints"]
     interval: PositiveInt = 200
-    folder: str = "./logs/checkpoints"
 
 
 class MetricsCallbackConfig(StrictModel):
@@ -229,14 +227,6 @@ CallbackSettings = Annotated[
     ],
     Field(discriminator="name"),
 ]
-
-
-class CheckpointCallbackSettings(StrictModel):
-    """Resolved checkpoint-callback configuration: the folder already includes
-    the session id."""
-
-    folder: str
-    interval: PositiveInt
 
 
 class MetricsCallbackSettings(StrictModel):
@@ -303,7 +293,7 @@ class RunConfig(StrictModel):
         legacy_callbacks = (
             (
                 "checkpoints",
-                {"interval": old.get("checkpoint_interval", 200), "folder": old.get("checkpoint_folder", "./logs/checkpoints")},
+                {"interval": old.get("checkpoint_interval", 200)},
             ),
             ("metrics", {"granularity": old.get("metrics_granularity", "batch")}),
             (
@@ -344,12 +334,6 @@ class RunConfig(StrictModel):
         intentionally skipped: every update is either a scalar this module
         already constrains or a re-validated settings model built here."""
         return self.model_copy(update={"runtime": self.runtime.model_copy(update=updates)})
-
-    @property
-    def checkpoint_folder(self) -> str:
-        callback = self.callback("checkpoints")
-        folder = callback.folder if isinstance(callback, CheckpointsCallbackConfig) else "./logs/checkpoints"
-        return str(Path(folder) / self.runtime.session_id)
 
     @property
     def video_folder(self) -> str:
@@ -395,15 +379,6 @@ class RunConfig(StrictModel):
             "record_video": False,
             "wrappers": wrappers,
         })
-
-    def checkpoint_settings(self) -> CheckpointCallbackSettings:
-        callback = self.callback("checkpoints")
-        if not isinstance(callback, CheckpointsCallbackConfig):
-            raise ValueError("checkpoints callback is not configured")
-        return CheckpointCallbackSettings(
-            folder=self.checkpoint_folder,
-            interval=callback.interval,
-        )
 
     def metrics_settings(self) -> MetricsCallbackSettings:
         callback = self.callback("metrics")
