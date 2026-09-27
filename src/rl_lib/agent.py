@@ -352,19 +352,116 @@ class Agent:
         """
         return nn.utils.clip_grad_norm_(self._network.parameters(), max_norm)
 
+    def clip_grad_norms(
+        self,
+        backbone_max_norm: float,
+        actor_max_norm: float,
+        critic_max_norm: float,
+    ) -> dict[str, T.Tensor]:
+        """Measure module norms once and clip the three PPO parameter groups.
+
+        Per-parameter norms are computed together, then reused to form both the
+        diagnostic module norms and the clipping-group norms. The returned
+        tensors remain on the model device so callers can batch scalar
+        synchronization with other metrics.
+
+        Args:
+            backbone_max_norm: Maximum norm for CNN and sequence encoder grads.
+            actor_max_norm: Maximum norm for actor grads.
+            critic_max_norm: Maximum norm for critic grads.
+
+        Returns:
+            Scalar tensors for the unclipped module norms and the three
+            pre-clipping parameter-group norms.
+        """
+        norms, gradients = self._get_gradient_norm_tensors()
+        group_norms = {
+            "grad_norm/backbone_total": self._combine_norms(
+                [norms["grad_norm/cnn"], norms["grad_norm/sequence_encoder"]]
+            ),
+            "grad_norm/actor_total": norms["grad_norm/actor"],
+            "grad_norm/critic_total": norms["grad_norm/critic"],
+        }
+
+        self._clip_gradient_group(
+            gradients["backbone"], group_norms["grad_norm/backbone_total"], backbone_max_norm
+        )
+        self._clip_gradient_group(
+            gradients["actor"], group_norms["grad_norm/actor_total"], actor_max_norm
+        )
+        self._clip_gradient_group(
+            gradients["critic"], group_norms["grad_norm/critic_total"], critic_max_norm
+        )
+        return {**norms, **group_norms}
+
     def get_partial_clip_grad_norms(self) -> dict[str, float]:
         """Get per-module gradient norms for monitoring (no clipping).
 
         Returns:
             Dict with keys: cnn, sequence_encoder, actor, critic, max.
         """
-        return {
-            "grad_norm/cnn": nn.utils.clip_grad_norm_(self._network.cnn.parameters(), float("inf")).item(),
-            "grad_norm/sequence_encoder": nn.utils.clip_grad_norm_(self._network.sequence_encoder.parameters(), float("inf")).item(),
-            "grad_norm/actor": nn.utils.clip_grad_norm_(self._network.actor.parameters(), float("inf")).item(),
-            "grad_norm/critic": nn.utils.clip_grad_norm_(self._network.critic.parameters(), float("inf")).item(),
-            "grad_norm/max": nn.utils.clip_grad_norm_(self._network.parameters(), float("inf")).item(),
+        norm_tensors, _ = self._get_gradient_norm_tensors()
+        keys = tuple(norm_tensors)
+        values = T.stack([norm_tensors[key] for key in keys]).detach().cpu().tolist()
+        return dict(zip(keys, values, strict=True))
+
+    def _get_gradient_norm_tensors(
+        self,
+    ) -> tuple[dict[str, T.Tensor], dict[str, list[T.Tensor]]]:
+        """Compute all diagnostic norms in one batched pass over gradients."""
+        modules = {
+            "cnn": list(self._network.cnn.parameters()),
+            "sequence_encoder": list(self._network.sequence_encoder.parameters()),
+            "actor": list(self._network.actor.parameters()),
+            "critic": list(self._network.critic.parameters()),
         }
+        gradients: dict[str, list[T.Tensor]] = {
+            name: [parameter.grad for parameter in parameters if parameter.grad is not None]
+            for name, parameters in modules.items()
+        }
+        active_names = [name for name, grads in gradients.items() for _ in grads]
+        all_gradients = [grad for grads in gradients.values() for grad in grads]
+
+        if all_gradients:
+            per_parameter_norms = T._foreach_norm(all_gradients, 2)
+            module_norms: dict[str, list[T.Tensor]] = {name: [] for name in modules}
+            for name, norm in zip(active_names, per_parameter_norms, strict=True):
+                module_norms[name].append(norm)
+            zero = per_parameter_norms[0].new_zeros(())
+            norms = {
+                f"grad_norm/{name}": self._combine_norms(module_norms[name], zero)
+                for name in modules
+            }
+            norms["grad_norm/max"] = self._combine_norms(list(per_parameter_norms), zero)
+        else:
+            zero = T.zeros((), device=self.device)
+            norms = {
+                **{f"grad_norm/{name}": zero for name in modules},
+                "grad_norm/max": zero,
+            }
+
+        return norms, {
+            "backbone": gradients["cnn"] + gradients["sequence_encoder"],
+            "actor": gradients["actor"],
+            "critic": gradients["critic"],
+        }
+
+    @staticmethod
+    def _combine_norms(norms: list[T.Tensor], zero: T.Tensor | None = None) -> T.Tensor:
+        """Combine parameter norms into a single L2 norm."""
+        if not norms:
+            assert zero is not None
+            return zero
+        return T.linalg.vector_norm(T.stack(norms), ord=2)
+
+    @staticmethod
+    def _clip_gradient_group(
+        gradients: list[T.Tensor], total_norm: T.Tensor, max_norm: float
+    ) -> None:
+        """Scale gradients in-place using an already-computed group norm."""
+        if gradients:
+            clip_coefficient = T.clamp(max_norm / (total_norm + 1e-6), max=1.0)
+            T._foreach_mul_(gradients, clip_coefficient)
 
     def save_state_dict(self, path: str) -> None:
         """Save network state dict to disk."""

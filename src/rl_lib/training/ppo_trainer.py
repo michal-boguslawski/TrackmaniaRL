@@ -30,6 +30,16 @@ from rl_lib.run_config import RolloutSettings, RunSettings, TrainerSettings
 logger = getLogger(__name__)
 
 
+def _tensor_metrics_to_scalars(metrics: dict[str, T.Tensor]) -> dict[str, float]:
+    """Move scalar metric tensors to Python in one device synchronization."""
+    if not metrics:
+        return {}
+    keys = tuple(metrics)
+    values = T.stack([metrics[key].detach().reshape(()) for key in keys])
+    scalars = values.cpu().tolist()
+    return dict(zip(keys, scalars, strict=True))
+
+
 class PPOTrainer:
     """PPO optimization loop with callbacks and adaptive hyperparameters.
 
@@ -170,19 +180,19 @@ class PPOTrainer:
         backbone_max_norm = self.cfg.backbone_max_grad_norm if backbone_max_norm is None else backbone_max_norm
         actor_max_norm = self.cfg.actor_max_grad_norm if actor_max_norm is None else actor_max_norm
         critic_max_norm = self.cfg.critic_max_grad_norm if critic_max_norm is None else critic_max_norm
-        backbone_params = list(self._agent.network.cnn.parameters()) + list(self._agent.network.sequence_encoder.parameters())
-        actor_params = list(self._agent.network.actor.parameters())
-        critic_params = list(self._agent.network.critic.parameters())
-
-        backbone_norm = nn.utils.clip_grad_norm_(backbone_params, backbone_max_norm)
-        actor_norm = nn.utils.clip_grad_norm_(actor_params, actor_max_norm)
-        critic_norm = nn.utils.clip_grad_norm_(critic_params, critic_max_norm)
-
-        return {
-            "grad_norm/backbone_total": backbone_norm.item(),
-            "grad_norm/actor_total": actor_norm.item(),
-            "grad_norm/critic_total": critic_norm.item(),
-        }
+        norm_tensors = self._agent.clip_grad_norms(
+            backbone_max_norm, actor_max_norm, critic_max_norm
+        )
+        return _tensor_metrics_to_scalars(
+            {
+                key: norm_tensors[key]
+                for key in (
+                    "grad_norm/backbone_total",
+                    "grad_norm/actor_total",
+                    "grad_norm/critic_total",
+                )
+            }
+        )
 
     def train_step(
         self,
@@ -220,22 +230,36 @@ class PPOTrainer:
 
         loss.backward()
 
-        metrics = self._get_train_step_metrics(loss)
-        self.clip_grad_norm()
+        grad_norms = self._agent.clip_grad_norms(
+            self.cfg.backbone_max_grad_norm,
+            self.cfg.actor_max_grad_norm,
+            self.cfg.critic_max_grad_norm,
+        )
+        metrics = self._get_train_step_metrics(loss, grad_norms)
 
         self._optimizer.step()
         self._step += 1
 
         return {**loss_metrics, **metrics}
 
-    def _get_train_step_metrics(self, loss: T.Tensor) -> dict[str, float]:
-        """Collect scalar metrics for this minibatch step."""
-        with T.no_grad():
-            metrics = {
-                "loss/total": loss.detach().item(),
-                **self._agent.get_partial_clip_grad_norms()
-            }
-        return metrics
+    def _get_train_step_metrics(
+        self, loss: T.Tensor, grad_norms: dict[str, T.Tensor]
+    ) -> dict[str, float]:
+        """Collect loss and gradient diagnostics with one scalar transfer."""
+        metric_tensors = {
+            "loss/total": loss.detach(),
+            **{
+                key: grad_norms[key]
+                for key in (
+                    "grad_norm/cnn",
+                    "grad_norm/sequence_encoder",
+                    "grad_norm/actor",
+                    "grad_norm/critic",
+                    "grad_norm/max",
+                )
+            },
+        }
+        return _tensor_metrics_to_scalars(metric_tensors)
 
     def _actor_loss(self, advantages: T.Tensor, log_probs: T.Tensor, old_log_probs: T.Tensor, action_mean: T.Tensor) -> tuple[T.Tensor, dict[str, float]]:
         """Compute clipped surrogate actor loss with mean regularization.
@@ -273,12 +297,20 @@ class PPOTrainer:
         mean_reg = action_mean.pow(2).mean()
         actor_loss = surrogate_loss + self.cfg.mean_reg_coef * mean_reg
 
-        metrics = self._actor_loss_metrics(log_ratio, surrogate_loss, mean_reg, action_mean)
-        metrics["metrics/actor_loss"] = actor_loss.detach().item()
+        metrics = self._actor_loss_metrics(
+            log_ratio, surrogate_loss, mean_reg, action_mean, actor_loss
+        )
 
         return actor_loss, metrics
 
-    def _actor_loss_metrics(self, log_ratio: T.Tensor, surrogate_loss: T.Tensor, mean_reg: T.Tensor, action_mean: T.Tensor) -> dict[str, float]:
+    def _actor_loss_metrics(
+        self,
+        log_ratio: T.Tensor,
+        surrogate_loss: T.Tensor,
+        mean_reg: T.Tensor,
+        action_mean: T.Tensor,
+        actor_loss: T.Tensor,
+    ) -> dict[str, float]:
         """Compute detailed actor metrics for logging."""
         with T.no_grad():
             log_ratio_total = log_ratio.sum(-1)
@@ -289,27 +321,33 @@ class PPOTrainer:
             ratio_max = ratio_total.max()
             clip_fraction = (T.abs(ratio_total - 1) > self.cfg.ppo_epsilon).float().mean()
 
-        metrics = {
-            "metrics/approx_kl": approx_kl.item(),
-            "metrics/ratio_max": ratio_max.item(),
-            "metrics/clip_fraction": clip_fraction.item(),
-            "metrics/surrogate_loss": surrogate_loss.detach().item(),
-            "metrics/mean_reg": mean_reg.detach().item(),
-        }
-
         with T.no_grad():
-            metrics["metrics/mean_abs_max"] = action_mean.abs().max().item()
-            for i in range(action_mean.shape[-1]):
-                metrics[f"metrics/mean_abs_max_{i}"] = action_mean[:, i].abs().max().item()
-            # fraction of samples within 1e-3 of tanh saturation (y = tanh(x), |y|>1-1e-3 <=> |x|>~4.0)
-            metrics["metrics/tanh_saturation_frac"] = (
-                action_mean.abs() > self.cfg.tanh_saturation_threshold
-            ).float().mean().item()
-        
-        for i, value in enumerate(approx_kl_per_action):
-            metrics[f"metrics/approx_kl_{i}"] = value.item()
+            metric_tensors = {
+                "metrics/actor_loss": actor_loss.detach(),
+                "metrics/approx_kl": approx_kl,
+                "metrics/ratio_max": ratio_max,
+                "metrics/clip_fraction": clip_fraction,
+                "metrics/surrogate_loss": surrogate_loss.detach(),
+                "metrics/mean_reg": mean_reg.detach(),
+                "metrics/mean_abs_max": action_mean.abs().max(),
+                "metrics/tanh_saturation_frac": (
+                    action_mean.abs() > self.cfg.tanh_saturation_threshold
+                ).float().mean(),
+            }
+            metric_tensors.update(
+                {
+                    f"metrics/mean_abs_max_{i}": action_mean[:, i].abs().max()
+                    for i in range(action_mean.shape[-1])
+                }
+            )
+            metric_tensors.update(
+                {
+                    f"metrics/approx_kl_{i}": value
+                    for i, value in enumerate(approx_kl_per_action)
+                }
+            )
 
-        return metrics
+        return _tensor_metrics_to_scalars(metric_tensors)
 
     def _critic_loss(self, returns: T.Tensor, values: T.Tensor, old_values: T.Tensor) -> tuple[T.Tensor, dict[str, float]]:
         """Compute clipped Huber value loss.
@@ -330,10 +368,9 @@ class PPOTrainer:
         
         critic_loss = T.maximum(loss_unclipped, loss_clipped).mean()
 
-        metrics = {
-            "loss/critic": critic_loss.detach().item(),
-        }
-        return critic_loss, metrics
+        return critic_loss, _tensor_metrics_to_scalars(
+            {"loss/critic": critic_loss.detach()}
+        )
 
     def _entropy_loss(self, dist: Distribution) -> tuple[T.Tensor, dict[str, float]]:
         """Compute entropy bonus (negative loss = maximize entropy).
@@ -351,15 +388,20 @@ class PPOTrainer:
         entropy: T.Tensor = dist.base_dist.entropy()
         entropy_loss = entropy.sum(dim=-1).mean()
 
-        mean_entropy = entropy.mean(0).detach()
-        metrics = {
-            f"metrics/entropy_{i}": value.item() for i, value in enumerate(mean_entropy)
-        }
-        metrics["loss/entropy"] = entropy_loss.detach().item()
-
         with T.no_grad():
             log_std = dist.base_dist.variance.pow(1/2).log().mean(0)
-        metrics.update({f"metrics/log_std_{i}": v.item() for i, v in enumerate(log_std)})
+            metric_tensors = {
+                **{
+                    f"metrics/entropy_{i}": value
+                    for i, value in enumerate(entropy.mean(0))
+                },
+                "loss/entropy": entropy_loss.detach(),
+                **{
+                    f"metrics/log_std_{i}": value
+                    for i, value in enumerate(log_std)
+                },
+            }
+        metrics = _tensor_metrics_to_scalars(metric_tensors)
 
         return entropy_loss, metrics
 

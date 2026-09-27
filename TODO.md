@@ -27,7 +27,7 @@
 
 - [ ] Profile environment stepping, device transfers, inference, PPO updates, and logging before tuning vectorization or device placement. There is no timing or `torch.profiler` instrumentation in `src/` or `scripts/` at all, so the cost split is unknown.
 - [x] Replace Python-loop minibatch assembly with batched indexing/gathering for sequence windows. `PPOTrainer._get_iid_minibatches` builds every field with a list comprehension of per-sample `T.stack`/`T.cat` calls.
-- [ ] Avoid repeated gradient-norm passes and excessive per-minibatch `.item()` synchronization; aggregate diagnostic metrics where practical. Each minibatch runs eight full gradient-norm passes (three for clipping, five for the per-module diagnostics in `Agent.get_parital_clip_grad_norms`), each ending in its own `.item()`.
+- [x] Avoid repeated gradient-norm passes and excessive per-minibatch `.item()` synchronization; aggregate diagnostic metrics where practical. Each minibatch runs eight full gradient-norm passes (three for clipping, five for the per-module diagnostics in `Agent.get_parital_clip_grad_norms`), each ending in its own `.item()`.
 - [ ] Evaluate preallocated rollout storage to reduce per-step tensor cloning and stacking overhead. `RolloutBuffer` keeps a `deque` per field, clones on every append, restacks every field in `get()`, and runs the GAE recursion as a Python loop.
 - [x] Make CPU/CUDA installation choices explicit; separate development/notebook dependencies from runtime dependencies.
 - [x] Move `pytest`, `matplotlib` and `ipykernel` out of the runtime dependencies into a `dev` extra. The CPU/GPU extras are done; the dependency split is not.

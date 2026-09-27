@@ -675,6 +675,44 @@ def test_clip_grad_norm_returns_one_norm_per_parameter_group(trainer: PPOTrainer
     assert all(isinstance(value, float) and value > 0 for value in norms.values())
 
 
+def test_combined_gradient_norm_pass_matches_torch_group_clipping(
+    trainer: PPOTrainer, rollout
+):
+    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
+    log_probs, values, _, _ = trainer._agent.evaluate_actions(
+        minibatch["observation"], minibatch["action"], minibatch["dones"]
+    )
+    (log_probs.sum() + values.sum()).backward()
+
+    modules = {
+        "backbone": list(trainer._agent.network.cnn.parameters())
+        + list(trainer._agent.network.sequence_encoder.parameters()),
+        "actor": list(trainer._agent.network.actor.parameters()),
+        "critic": list(trainer._agent.network.critic.parameters()),
+    }
+    limits = {"backbone": 0.2, "actor": 0.3, "critic": 0.4}
+    reference_grads: dict[int, T.Tensor] = {}
+    expected_norms: dict[str, float] = {}
+    for group, parameters in modules.items():
+        reference = [T.nn.Parameter(parameter.detach().clone()) for parameter in parameters]
+        for parameter, reference_parameter in zip(parameters, reference, strict=True):
+            reference_parameter.grad = parameter.grad.detach().clone()
+            reference_grads[id(parameter)] = reference_parameter.grad
+        expected_norms[group] = T.nn.utils.clip_grad_norm_(
+            reference, limits[group]
+        ).item()
+
+    actual_norms = trainer._agent.clip_grad_norms(
+        limits["backbone"], limits["actor"], limits["critic"]
+    )
+
+    for group, parameters in modules.items():
+        key = f"grad_norm/{group}_total"
+        assert actual_norms[key].item() == pytest.approx(expected_norms[group], rel=1e-5)
+        for parameter in parameters:
+            T.testing.assert_close(parameter.grad, reference_grads[id(parameter)])
+
+
 def test_act_delegates_to_the_agent(trainer: PPOTrainer, observations):
     obs = observations(NUM_ENVS)
     done = T.zeros(NUM_ENVS, dtype=T.bool)
