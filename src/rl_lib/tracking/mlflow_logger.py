@@ -14,6 +14,7 @@ import mlflow.pytorch
 import torch
 from typing import Self
 
+from rl_lib.tracking.artifacts import normalize_artifact_path
 from rl_lib.tracking.base import MetricsLogger
 
 
@@ -44,7 +45,9 @@ class MLflowLogger(MetricsLogger):
     """MLflow tracking backend for metrics, params, models, and artifacts.
 
     Creates an MLflow run on initialization. Supports context manager
-    protocol for automatic cleanup with proper status mapping.
+    protocol for automatic cleanup with proper status mapping. Artifact paths
+    have any ``step_<digits>`` segment zero-padded, so step-named artifacts
+    stay in step order.
 
     Attributes:
         _registered_model_name: Optional model registry name.
@@ -110,17 +113,21 @@ class MLflowLogger(MetricsLogger):
         """Log PyTorch model to MLflow with optional registry."""
         mlflow.pytorch.log_model(
             model,
-            artifact_path=artifact_path,
+            artifact_path=normalize_artifact_path(artifact_path),
             registered_model_name=registered_model_name or self._registered_model_name,
         )
 
     def log_state_dict(self, state_dict: dict, artifact_path: str = "checkpoints") -> None:
         """Log state dict as MLflow artifact."""
-        mlflow.pytorch.log_state_dict(state_dict, artifact_path=artifact_path)
+        mlflow.pytorch.log_state_dict(
+            state_dict, artifact_path=normalize_artifact_path(artifact_path)
+        )
 
     def log_artifact(self, local_path: str, artifact_path: str | None = None) -> None:
         """Log local file (e.g., video) as MLflow artifact."""
-        mlflow.log_artifact(local_path, artifact_path=artifact_path)
+        mlflow.log_artifact(
+            local_path, artifact_path=normalize_artifact_path(artifact_path)
+        )
 
     def close(self, status: str = "FINISHED") -> None:
         """End MLflow run with given status."""

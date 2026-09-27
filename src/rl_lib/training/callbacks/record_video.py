@@ -10,6 +10,7 @@ from rl_lib.agent import Agent
 from rl_lib.envs.make_env import make_env
 from rl_lib.training.callbacks.base import Callback
 from rl_lib.evaluation.inference import log_evaluation_results, run_inference
+from rl_lib.tracking.artifacts import step_artifact_path
 from rl_lib.tracking.base import MetricsLogger
 from rl_lib.training.callbacks.utils import stop_video_recording
 from rl_lib.run_config import VideoCallbackSettings
@@ -74,7 +75,8 @@ class RecordVideoCallback(Callback):
         log_evaluation_results(results, self._loggers, step=step, scope="video")
 
         if video_path:
-            [lgr.log_artifact(video_path, artifact_path=f"videos/step_{self._step}") for lgr in self._loggers]
+            artifact_path = step_artifact_path("videos", self._step)
+            [lgr.log_artifact(video_path, artifact_path=artifact_path) for lgr in self._loggers]
 
         self._step += 1
 

@@ -8,6 +8,7 @@ from logging import getLogger
 from typing import Iterable
 
 from rl_lib.agent import Agent
+from rl_lib.tracking.artifacts import step_artifact_path
 from rl_lib.tracking.base import MetricsLogger
 from rl_lib.training.callbacks.base import Callback
 
@@ -60,7 +61,7 @@ class ModelCheckpointCallback(Callback):
             return
 
         state_dict = self._agent.network.state_dict()
-        artifact_path = f"checkpoints/step_{completed_steps}"
+        artifact_path = step_artifact_path("checkpoints", completed_steps)
         for metrics_logger in self._metrics_loggers:
             metrics_logger.log_state_dict(state_dict, artifact_path=artifact_path)
 

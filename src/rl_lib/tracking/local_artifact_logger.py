@@ -6,6 +6,7 @@ from typing import Any
 import torch as T
 from torch import nn
 
+from rl_lib.tracking.artifacts import normalize_artifact_path
 from rl_lib.tracking.base import MetricsLogger
 
 
@@ -13,8 +14,10 @@ class LocalArtifactLogger(MetricsLogger):
     """Persist model artifacts to a run-specific local directory.
 
     Artifact paths supplied by callbacks are preserved beneath ``root`` and
-    receive a ``.pt`` suffix. Scalar metrics and other optional logger methods
-    are intentionally no-ops; use a metrics backend alongside this logger.
+    receive a ``.pt`` suffix, except that any ``step_<digits>`` segment is
+    zero-padded so artifact names sort in step order. Scalar metrics and other
+    optional logger methods are intentionally no-ops; use a metrics backend
+    alongside this logger.
 
     Attributes:
         root: Root directory for this run's artifacts.
@@ -61,7 +64,7 @@ class LocalArtifactLogger(MetricsLogger):
 
     def _artifact_file(self, artifact_path: str) -> Path:
         """Create and return the local file path for an artifact."""
-        relative_path = Path(artifact_path).with_suffix(".pt")
+        relative_path = Path(normalize_artifact_path(artifact_path)).with_suffix(".pt")
         if relative_path.is_absolute() or ".." in relative_path.parts:
             raise ValueError("artifact_path must be relative and stay within the logger root")
 

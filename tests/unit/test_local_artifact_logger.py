@@ -14,7 +14,7 @@ def test_local_logger_persists_state_dict_and_model_under_artifact_paths(tmp_pat
     logger.log_model(model, artifact_path="final_model")
 
     checkpoint = T.load(
-        tmp_path / "run" / "checkpoints" / "step_20.pt",
+        tmp_path / "run" / "checkpoints" / "step_020.pt",
         weights_only=True,
     )
     final_state_dict = T.load(

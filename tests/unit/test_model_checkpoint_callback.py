@@ -37,8 +37,8 @@ def test_periodic_checkpoint_uses_logger_and_rollout_step_interval():
         callback.on_env_step(step=step)
 
     assert logger.logged_state_dicts == [
-        (state_dict, "checkpoints/step_3"),
-        (state_dict, "checkpoints/step_6"),
+        (state_dict, "checkpoints/step_003"),
+        (state_dict, "checkpoints/step_006"),
     ]
 
 

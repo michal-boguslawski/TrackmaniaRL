@@ -324,8 +324,20 @@ def test_log_artifact(logger: MLflowLogger, fake_mlflow):
     assert fake_mlflow.calls[-1] == (
         "log_artifact",
         ("/tmp/video.mp4",),
-        {"artifact_path": "videos/step_0"},
+        {"artifact_path": "videos/step_000"},
     )
+
+
+def test_log_artifact_keeps_an_explicit_step_directory(logger: MLflowLogger, fake_mlflow):
+    logger.log_artifact("/tmp/video.mp4", artifact_path="videos/step_007")
+
+    assert fake_mlflow.calls[-1][2] == {"artifact_path": "videos/step_007"}
+
+
+def test_log_artifact_leaves_paths_without_a_step_alone(logger: MLflowLogger, fake_mlflow):
+    logger.log_artifact("/tmp/model.pt", artifact_path="final_model")
+
+    assert fake_mlflow.calls[-1][2] == {"artifact_path": "final_model"}
 
 
 def test_close_ends_the_run_with_the_given_status(logger: MLflowLogger, fake_mlflow):
