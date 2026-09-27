@@ -110,12 +110,14 @@ def vector_env():
 
 def _value(collector: RolloutCollector, key: str, step: int) -> T.Tensor:
     """Unpadded per-step field, indexed by the step that produced it."""
-    return collector.buffer._buffer[key][step]
+    return collector.buffer._ordered(key)[:, step]
 
 
 def _flag(collector: RolloutCollector, key: str, step: int) -> T.Tensor:
     """Padded per-step flag, indexed by the step that produced it."""
-    return collector.buffer._buffer[key][step + collector.trainer.stack_size - 1]
+    return collector.buffer._ordered(key, windowed=True)[
+        :, step + collector.trainer.stack_size - 1
+    ]
 
 
 def _collector(vector_env, agent, buffer_size=3, minibatch_size=2, **env_kwargs) -> RolloutCollector:

@@ -6,7 +6,6 @@ flags (marking step *end*) and returned dones (marking frame *start* of new
 episode) to align with Agent's temporal masking convention.
 """
 
-from collections import deque
 from dataclasses import dataclass
 import torch as T
 from rl_lib.run_config import RolloutSettings
@@ -38,11 +37,12 @@ class RolloutStep:
 
 
 class RolloutBuffer:
-    """Fixed-size circular buffer for PPO rollouts with GAE.
+    """Preallocated circular storage for PPO rollouts with GAE.
 
-    Stores transitions from multiple vectorized environments. When full,
-    computes returns and advantages using GAE with proper handling of
-    termination vs truncation (bootstrap through truncation, stop at either).
+    Allocates field tensors on the first step and copies subsequent transitions
+    into circular slots. When full, computes returns and advantages using GAE
+    with proper handling of termination vs truncation (bootstrap through
+    truncation, stop at either).
 
     The buffer stores done flags as produced by env.step() (marking the step
     that *ended* an episode), but get() returns dones shifted by one column
@@ -54,7 +54,7 @@ class RolloutBuffer:
         self,
         config: RolloutSettings,
         stack_size: int,
-    ):
+    ) -> None:
         """Initialize the rollout buffer.
 
         Args:
@@ -66,7 +66,11 @@ class RolloutBuffer:
         self._stack_size = stack_size
         self.gamma = config.gamma
         self.gae_lambda = config.gae_lambda
-        self._buffer: dict[str, deque[T.Tensor]] = {}
+        self._buffer: dict[str, T.Tensor] = {}
+        self._transition_index = 0
+        self._window_index = 0
+        self._transition_count = 0
+        self._window_count = 0
         self._counter: int = 0
         self.reset()
 
@@ -74,36 +78,120 @@ class RolloutBuffer:
         """Check if buffer has collected enough steps for an update."""
         return self._counter == self.size
 
-    def _append_to_buffer(self, key: str, value: T.Tensor, if_append_start: bool = False):
-        """Append tensor to buffer, optionally pre-filling with copies for padding.
+    def _allocate_storage(self, step: RolloutStep) -> None:
+        """Allocate all rollout tensors from the first step's tensor metadata."""
+        values = {
+            "observation": step.observation,
+            "action": step.action,
+            "critic_value": step.critic_value,
+            "old_log_probs": step.old_log_probs,
+            "reward": step.reward,
+            "terminated": step.terminated,
+            "truncated": step.truncated,
+            "truncated_value": (
+                T.zeros_like(step.reward)
+                if step.truncated_value is None
+                else step.truncated_value
+            ),
+        }
+        window_capacity = self.size + self._stack_size - 1
+        window_fields = {"observation", "terminated", "truncated"}
+        self._buffer = {
+            key: value.new_empty(
+                (
+                    window_capacity if key in window_fields else self.size,
+                    *value.shape,
+                )
+            )
+            for key, value in values.items()
+        }
 
-        Args:
-            key: Buffer key (e.g., "observation", "reward").
-            value: Tensor to append (will be cloned).
-            if_append_start: If True and buffer has fewer than stack_size-1
-                entries, pre-fill with copies of value. Used for observation
-                and done buffers to provide history for first steps.
-        """
-        if if_append_start and len(self._buffer[key]) < self._stack_size - 1:
-            for _ in range(self._stack_size - 1):
-                self._buffer[key].append(value.clone())
+    def _write(self, key: str, value: T.Tensor, index: int) -> None:
+        """Copy a step tensor into its preallocated circular slot."""
+        storage = self._buffer[key]
+        if value.shape != storage.shape[1:]:
+            raise ValueError(
+                f"{key} shape changed from {tuple(storage.shape[1:])} "
+                f"to {tuple(value.shape)}"
+            )
+        if value.dtype != storage.dtype or value.device != storage.device:
+            raise ValueError(
+                f"{key} dtype/device changed from {storage.dtype}/{storage.device} "
+                f"to {value.dtype}/{value.device}"
+            )
+        storage[index].copy_(value)
 
-        if key not in self._buffer:
-            self._buffer[key] = deque(maxlen=self.size)
-        self._buffer[key].append(value.clone())
+    def _ordered(self, key: str, windowed: bool = False) -> T.Tensor:
+        """Return chronological storage, concatenating only when it wraps."""
+        if windowed:
+            count = self._window_count
+            cursor = self._window_index
+            capacity = self.size + self._stack_size - 1
+        else:
+            count = self._transition_count
+            cursor = self._transition_index
+            capacity = self.size
 
-    def add(self, step: RolloutStep):
-        """Add a rollout step to the buffer.
+        start = (cursor - count) % capacity
+        end = start + count
+        storage = self._buffer[key]
+        if end <= capacity:
+            ordered = storage[start:end]
+        else:
+            ordered = T.cat((storage[start:], storage[: end - capacity]), dim=0)
+        return ordered.movedim(0, 1)
+
+    def _append_window_values(self, values: dict[str, T.Tensor]) -> None:
+        """Write one observation-aligned column and advance its shared cursor."""
+        for key in ("observation", "terminated", "truncated"):
+            self._write(key, values[key], self._window_index)
+        self._window_index = (self._window_index + 1) % (
+            self.size + self._stack_size - 1
+        )
+        self._window_count = min(
+            self._window_count + 1, self.size + self._stack_size - 1
+        )
+
+    def add(self, step: RolloutStep) -> None:
+        """Copy one vectorized environment step into the rollout storage.
 
         Args:
             step: RolloutStep containing all transition data for one env step.
         """
-        for key in self._buffer.keys():
-            if_append_start = (key in ["observation", "terminated", "truncated"])
-            value = getattr(step, key)
-            if value is None:
-                value = T.zeros_like(step.reward)
-            self._append_to_buffer(key, value, if_append_start)
+        if not self._buffer:
+            self._allocate_storage(step)
+
+        values = {
+            "observation": step.observation,
+            "action": step.action,
+            "critic_value": step.critic_value,
+            "old_log_probs": step.old_log_probs,
+            "reward": step.reward,
+            "terminated": step.terminated,
+            "truncated": step.truncated,
+            "truncated_value": (
+                T.zeros_like(step.reward)
+                if step.truncated_value is None
+                else step.truncated_value
+            ),
+        }
+
+        if self._window_count == 0:
+            for _ in range(self._stack_size - 1):
+                self._append_window_values(values)
+
+        self._append_window_values(values)
+        for key in (
+            "action",
+            "critic_value",
+            "old_log_probs",
+            "reward",
+            "truncated_value",
+        ):
+            self._write(key, values[key], self._transition_index)
+
+        self._transition_index = (self._transition_index + 1) % self.size
+        self._transition_count = min(self._transition_count + 1, self.size)
 
         self._counter += 1
 
@@ -144,20 +232,36 @@ class RolloutBuffer:
             + gamma * next_value * T.logical_not(terminated)
             - critic_value[:, :-1]
         )
-        advantages = T.zeros_like(reward)
-        last_gae_lam = 0.
-        for i in reversed(range(reward.shape[1])):
-            last_gae_lam = delta[:, i] + gamma * gae_lambda * last_gae_lam * T.logical_not(dones[:, i])
-            advantages[:, i] = last_gae_lam
+        decay = (
+            gamma
+            * gae_lambda
+            * T.logical_not(dones).to(dtype=reward.dtype)
+        )
+        advantages = delta
+        offset = 1
+        while offset < reward.shape[1]:
+            shifted_advantages = T.cat(
+                (advantages[:, offset:], T.zeros_like(advantages[:, :offset])),
+                dim=1,
+            )
+            shifted_decay = T.cat(
+                (decay[:, offset:], T.zeros_like(decay[:, :offset])),
+                dim=1,
+            )
+            advantages = advantages + decay * shifted_advantages
+            decay = decay * shifted_decay
+            offset *= 2
         returns = advantages + critic_value[:, :-1]
         return returns, advantages
 
     def get(self, gamma: float | None = None, gae_lambda: float | None = None) -> dict[str, T.Tensor]:
         """Compute returns/advantages and return flattened batch for PPO update.
 
-        Returns tensors with batch dimension (num_envs) and sequence dimension
-        flattened for minibatch sampling. The done flags are shifted so they
-        indicate "this frame starts a new episode".
+        Returns tensors with batch dimension (num_envs) and a sequence dimension
+        for minibatch sampling. The done flags are shifted so they
+        indicate "this frame starts a new episode". Stored rollout fields may
+        be views into the circular storage; callers should treat them as
+        read-only. Returns and advantages are newly computed tensors.
 
         Args:
             gamma: Override discount factor (default: config.gamma).
@@ -175,7 +279,12 @@ class RolloutBuffer:
         """
         gamma = self.gamma if gamma is None else gamma
         gae_lambda = self.gae_lambda if gae_lambda is None else gae_lambda
-        buffer = {key: T.stack(list(value), dim=1) for key, value in self._buffer.items()}
+        if not self._buffer:
+            raise ValueError("cannot compute a batch from an empty rollout buffer")
+        buffer = {
+            key: self._ordered(key, windowed=key in {"observation", "terminated", "truncated"})
+            for key in self._buffer
+        }
         returns, advantages = self.compute_returns_and_advantages(
             buffer["reward"][:, :-1],
             buffer["critic_value"],
@@ -215,27 +324,21 @@ class RolloutBuffer:
         }
         return flat
 
-    def reset_counter(self):
+    def reset_counter(self) -> None:
         """Reset step counter without clearing buffer (for multi-epoch updates)."""
         self._counter = 0
 
-    def reset(self):
+    def reset(self) -> None:
         """Clear buffer and reset counter.
 
-        Observation and done buffers have maxlen = size + stack_size - 1
-        to accommodate the initial padding copies.
+        Tensors are allocated lazily on the next ``add``. Observation and done
+        fields reserve ``size + stack_size - 1`` slots for initial padding.
         """
-        self._buffer = {
-            "observation": deque(maxlen=self.size + self._stack_size - 1),
-            "action": deque(maxlen=self.size),
-            "critic_value": deque(maxlen=self.size),
-            "old_log_probs": deque(maxlen=self.size),
-            "reward": deque(maxlen=self.size),
-            "truncated": deque(maxlen=self.size + self._stack_size - 1),
-            "terminated": deque(maxlen=self.size + self._stack_size - 1),
-            "truncated_value": deque(maxlen=self.size),
-        }
-
+        self._buffer = {}
+        self._transition_index = 0
+        self._window_index = 0
+        self._transition_count = 0
+        self._window_count = 0
         self.reset_counter()
 
     def __repr__(self) -> str:
@@ -247,7 +350,7 @@ class RolloutBuffer:
             f"is_full={self.is_full()})"
         )
 
-    def config(self) -> dict[str, int | str]:
+    def config(self) -> dict[str, int | float | str]:
         """Hyperparameters, suitable for mlflow.log_params (with a prefix)."""
         return {
             "size": self.size,
