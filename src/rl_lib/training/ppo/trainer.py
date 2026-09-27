@@ -1,43 +1,21 @@
-"""PPO Trainer: computes losses, performs optimization steps, manages callbacks.
+"""PPO trainer orchestration, optimizer management, and rollout lifecycle."""
 
-Implements the PPO clipped objective with:
-- Clipped surrogate loss for actor
-- Clipped value loss (Huber) for critic
-- Entropy bonus with decay
-- Mean action regularization (penalizes distance from neutral action)
-- KL-based early stopping (hard and soft)
-- Advantage normalization (batch or global)
-- Learning rate scheduling (cosine or linear)
-- Differential learning rates/weight decay per parameter group
-"""
-
-import numpy as np
-from numpy.typing import NDArray
 from logging import getLogger
+from numpy.typing import NDArray
 from gymnasium import Env
 import torch as T
-from torch import nn
 from torch.optim import Adam, AdamW
-from torch.distributions import Distribution
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR
-from typing import Iterator
 
 from rl_lib.agent import Agent
 from rl_lib.training.callbacks.base import Callback, CallbackList
 from rl_lib.run_config import RolloutSettings, RunSettings, TrainerSettings
+from rl_lib.training.ppo.losses import PPOLosses
+from rl_lib.training.ppo.metrics import _tensor_metrics_to_scalars
+from rl_lib.training.ppo.update_loop import run_ppo_update_loop
 
 
 logger = getLogger(__name__)
-
-
-def _tensor_metrics_to_scalars(metrics: dict[str, T.Tensor]) -> dict[str, float]:
-    """Move scalar metric tensors to Python in one device synchronization."""
-    if not metrics:
-        return {}
-    keys = tuple(metrics)
-    values = T.stack([metrics[key].detach().reshape(()) for key in keys])
-    scalars = values.cpu().tolist()
-    return dict(zip(keys, scalars, strict=True))
 
 
 class PPOTrainer:
@@ -77,9 +55,7 @@ class PPOTrainer:
         # decays every update, so its live value lives on the instance while
         # cfg.entropy_coef stays the initial coefficient.
         self._entropy_coef = self.cfg.entropy_coef
-        self._critic_loss_fn = nn.HuberLoss(
-            reduction="none", delta=self._agent.network.cfg.critic.huber_delta
-        )
+        self._losses = PPOLosses(self._agent)
         self._step = 0
         self._callbacks = CallbackList(callbacks)
         self._agent.train()
@@ -261,151 +237,6 @@ class PPOTrainer:
         }
         return _tensor_metrics_to_scalars(metric_tensors)
 
-    def _actor_loss(self, advantages: T.Tensor, log_probs: T.Tensor, old_log_probs: T.Tensor, action_mean: T.Tensor) -> tuple[T.Tensor, dict[str, float]]:
-        """Compute clipped surrogate actor loss with mean regularization.
-
-        Args:
-            advantages: GAE advantages (batch * seq,).
-            log_probs: New policy log-probs (batch * seq,).
-            old_log_probs: Old policy log-probs (batch * seq,).
-            action_mean: Mean actions from new policy (batch * seq, action_dim).
-
-        Returns:
-            Tuple of (actor_loss, metrics_dict).
-        """
-        if self.cfg.advantage_normalization_strategy and self.cfg.advantage_normalization_strategy == "batch":
-            advantages = (advantages - advantages.mean()) / (advantages.std() + self.cfg.advantage_epsilon)
-
-        assert log_probs.shape == old_log_probs.shape
-        log_ratio = (log_probs - old_log_probs).clamp(self.cfg.log_ratio_min, self.cfg.log_ratio_max)
-
-        ratio = log_ratio.sum(-1).clamp(-5, 5).exp()
-
-        clipped_ratio = ratio.clamp(
-            min=1 - self.cfg.ppo_epsilon,
-            max=1 + self.cfg.ppo_epsilon
-        )
-
-        assert advantages.shape == ratio.shape
-        surrogate_loss = -T.minimum(
-            ratio * advantages,
-            clipped_ratio * advantages
-        ).mean()
-        
-        # Penalize distance from the no-input action [steer=0, gas=0, brake=0].
-        # The midpoint of the gas/brake ranges is not neutral: it applies both.
-        mean_reg = action_mean.pow(2).mean()
-        actor_loss = surrogate_loss + self.cfg.mean_reg_coef * mean_reg
-
-        metrics = self._actor_loss_metrics(
-            log_ratio, surrogate_loss, mean_reg, action_mean, actor_loss
-        )
-
-        return actor_loss, metrics
-
-    def _actor_loss_metrics(
-        self,
-        log_ratio: T.Tensor,
-        surrogate_loss: T.Tensor,
-        mean_reg: T.Tensor,
-        action_mean: T.Tensor,
-        actor_loss: T.Tensor,
-    ) -> dict[str, float]:
-        """Compute detailed actor metrics for logging."""
-        with T.no_grad():
-            log_ratio_total = log_ratio.sum(-1)
-            ratio_total = log_ratio_total.exp()
-            approx_kl = (ratio_total - 1 - log_ratio_total).mean()
-            ratio_per_action = log_ratio.exp()
-            approx_kl_per_action = (ratio_per_action - 1 - log_ratio).mean(dim=0)
-            ratio_max = ratio_total.max()
-            clip_fraction = (T.abs(ratio_total - 1) > self.cfg.ppo_epsilon).float().mean()
-
-        with T.no_grad():
-            metric_tensors = {
-                "metrics/actor_loss": actor_loss.detach(),
-                "metrics/approx_kl": approx_kl,
-                "metrics/ratio_max": ratio_max,
-                "metrics/clip_fraction": clip_fraction,
-                "metrics/surrogate_loss": surrogate_loss.detach(),
-                "metrics/mean_reg": mean_reg.detach(),
-                "metrics/mean_abs_max": action_mean.abs().max(),
-                "metrics/tanh_saturation_frac": (
-                    action_mean.abs() > self.cfg.tanh_saturation_threshold
-                ).float().mean(),
-            }
-            metric_tensors.update(
-                {
-                    f"metrics/mean_abs_max_{i}": action_mean[:, i].abs().max()
-                    for i in range(action_mean.shape[-1])
-                }
-            )
-            metric_tensors.update(
-                {
-                    f"metrics/approx_kl_{i}": value
-                    for i, value in enumerate(approx_kl_per_action)
-                }
-            )
-
-        return _tensor_metrics_to_scalars(metric_tensors)
-
-    def _critic_loss(self, returns: T.Tensor, values: T.Tensor, old_values: T.Tensor) -> tuple[T.Tensor, dict[str, float]]:
-        """Compute clipped Huber value loss.
-
-        Args:
-            returns: GAE returns (batch * seq,).
-            values: New value estimates (batch * seq,).
-            old_values: Old value estimates (batch * seq,).
-
-        Returns:
-            Tuple of (critic_loss, metrics_dict).
-        """
-        assert values.shape == old_values.shape == returns.shape
-        value_clip_epsilon = self.cfg.value_clip_epsilon or self.cfg.ppo_epsilon
-        clipped_values = old_values + (values - old_values).clamp(-value_clip_epsilon, value_clip_epsilon)
-        loss_unclipped = self._critic_loss_fn(values, returns)
-        loss_clipped = self._critic_loss_fn(clipped_values, returns)
-        
-        critic_loss = T.maximum(loss_unclipped, loss_clipped).mean()
-
-        return critic_loss, _tensor_metrics_to_scalars(
-            {"loss/critic": critic_loss.detach()}
-        )
-
-    def _entropy_loss(self, dist: Distribution) -> tuple[T.Tensor, dict[str, float]]:
-        """Compute entropy bonus (negative loss = maximize entropy).
-
-        Uses base Beta distribution entropy (TanhTransform has no closed form).
-
-        Args:
-            dist: Actor's TransformedDistribution.
-
-        Returns:
-            Tuple of (entropy_loss, metrics_dict). entropy_loss is positive,
-            subtracted in total loss to encourage exploration.
-        """
-        # entropy of the base Normal; TanhTransform doesn't have closed-form entropy
-        entropy: T.Tensor = dist.base_dist.entropy()
-        entropy_loss = entropy.sum(dim=-1).mean()
-
-        with T.no_grad():
-            log_std = dist.base_dist.variance.pow(1/2).log().mean(0)
-            metric_tensors = {
-                **{
-                    f"metrics/entropy_{i}": value
-                    for i, value in enumerate(entropy.mean(0))
-                },
-                "loss/entropy": entropy_loss.detach(),
-                **{
-                    f"metrics/log_std_{i}": value
-                    for i, value in enumerate(log_std)
-                },
-            }
-        metrics = _tensor_metrics_to_scalars(metric_tensors)
-
-        return entropy_loss, metrics
-
-
     def calculate_losses(
         self,
         advantages: T.Tensor,
@@ -416,7 +247,7 @@ class PPOTrainer:
         action: T.Tensor,
         dones: T.Tensor | None = None
     ) -> tuple[tuple[T.Tensor, T.Tensor, T.Tensor], dict[str, float]]:
-        """Evaluate policy on batch and compute all loss components.
+        """Delegate PPO objective calculation to the loss component.
 
         Args:
             advantages: GAE advantages (batch * seq,).
@@ -430,12 +261,16 @@ class PPOTrainer:
         Returns:
             Tuple of ((actor_loss, critic_loss, entropy_loss), metrics_dict).
         """
-        log_probs, values, dist, action_mean = self._agent.evaluate_actions(observation, action, dones)
-        actor_loss, actor_metrics = self._actor_loss(advantages, log_probs, old_log_probs, action_mean)
-        critic_loss, critic_metrics = self._critic_loss(returns, values, old_values)
-        entropy_loss, entropy_metrics = self._entropy_loss(dist)
-        metrics = {**actor_metrics, **critic_metrics, **entropy_metrics}
-        return (actor_loss, critic_loss, entropy_loss), metrics
+        return self._losses.calculate_losses(
+            self.cfg,
+            advantages,
+            returns,
+            old_log_probs,
+            old_values,
+            observation,
+            action,
+            dones,
+        )
 
     def _on_start(self, *args, **kwargs):
         self._callbacks.on_start(*args, **kwargs)
@@ -448,72 +283,6 @@ class PPOTrainer:
 
     def _on_epoch(self, *args, **kwargs):
         self._callbacks.on_epoch(*args, **kwargs)
-
-    @staticmethod
-    def _get_iid_minibatches(
-        batch: dict[str, T.Tensor],
-        minibatch_size: int,
-        stack_size: int,
-        shuffle: bool,
-    ) -> Iterator[dict[str, T.Tensor]]:
-        """Iterate over minibatches from a batch of sequences.
-
-        Samples IID minibatches across (env, time) by flattening the batch
-        and randomly permuting. For each minibatch, reconstructs the
-        temporal observation/done windows of length stack_size.
-
-        Args:
-            batch: Dict from RolloutBuffer.get() with keys:
-                observation: (num_envs, seq_len + stack_size - 2, H, W, C)
-                action: (num_envs, seq_len - 1, action_dim)
-                old_log_probs: (num_envs, seq_len - 1)
-                critic_value: (num_envs, seq_len - 1)
-                returns: (num_envs, seq_len - 1)
-                advantages: (num_envs, seq_len - 1)
-                dones: (num_envs, seq_len + stack_size - 2)
-            minibatch_size: Number of transitions per minibatch.
-            stack_size: Temporal window size.
-            shuffle: Whether to shuffle indices (IID) or use sequential.
-
-        Yields:
-            Minibatch dict with same keys but flattened batch dimension
-            and observation/dones windows of length stack_size.
-        """
-        num_envs, batch_size, _ = batch["action"].shape
-        device = batch["action"].device
-        flat_order = (
-            np.random.permutation(batch_size * num_envs)
-            if shuffle
-            else np.arange(batch_size * num_envs)
-        )
-        indices = T.as_tensor(
-            flat_order,
-            dtype=T.long,
-            device=device,
-        )
-        window_offsets = T.arange(stack_size, device=device)
-        for index in range(0, batch_size * num_envs, minibatch_size):
-            flat_indices = indices[index : index + minibatch_size]
-            env_indices = flat_indices.remainder(num_envs)
-            time_indices = flat_indices.div(num_envs, rounding_mode="floor")
-            window_indices = time_indices[:, None] + window_offsets
-
-            observation_windows = batch["observation"][
-                env_indices[:, None], window_indices
-            ]
-            done_windows = batch["dones"][env_indices[:, None], window_indices]
-
-            yield {
-                "observation": observation_windows.reshape(
-                    -1, *batch["observation"].shape[2:]
-                ),
-                "action": batch["action"][env_indices, time_indices],
-                "old_log_probs": batch["old_log_probs"][env_indices, time_indices],
-                "old_values": batch["critic_value"][env_indices, time_indices],
-                "returns": batch["returns"][env_indices, time_indices],
-                "advantages": batch["advantages"][env_indices, time_indices],
-                "dones": done_windows.reshape(-1),
-            }
 
     def _get_metrics_from_batch(self, batch: T.Tensor):
         """Compute rollout-level metrics from a full batch for logging."""
@@ -549,8 +318,7 @@ class PPOTrainer:
         epochs: int,
         minibatch_size: int,
         training_step: int,
-        # rng: np.random.Generator,
-    ):
+    ) -> None:
         """Run PPO epochs over a collected batch.
 
         Args:
@@ -565,45 +333,23 @@ class PPOTrainer:
             metrics=self._get_metrics_from_batch(batch)
         )
 
-        if self.cfg.advantage_normalization_strategy and self.cfg.advantage_normalization_strategy == "global":
-            batch["advantages"] = (batch["advantages"] - batch["advantages"].mean()) / (batch["advantages"].std() + self.cfg.advantage_epsilon)
+        if self.cfg.advantage_normalization_strategy == "global":
+            batch["advantages"] = (batch["advantages"] - batch["advantages"].mean()) / (
+                batch["advantages"].std() + self.cfg.advantage_epsilon
+            )
 
-        for epoch in range(epochs):
-            epoch_kls = []
-            for minibatch in self._get_iid_minibatches(
-                batch,
-                minibatch_size,
-                self.stack_size,
-                shuffle=self.cfg.minibatch_indexing_mode == "iid",
-            ):
-                try:
-                    minibatch_metrics = self.train_step(**minibatch)
-                except Exception as e:
-                    logger.error(f"Error at training step {training_step}, epoch {epoch}: {e}")
-                    raise e
-                if not minibatch_metrics:
-                    continue
-                epoch_kls.append(minibatch_metrics["metrics/approx_kl"])
-
-                if (
-                    minibatch_metrics["metrics/approx_kl"] > self.cfg.target_kl * self.cfg.kl_stop_multiplier and
-                    training_step > self.cfg.kl_warmup_steps and
-                    self.cfg.hard_stop_kl
-                ):
-                    logger.warning(f"Hard stop mid-epoch: KL {minibatch_metrics['metrics/approx_kl']:.4f}")
-                    break
-
-                self._on_minibatch(metrics=minibatch_metrics, step=self._step)
-            mean_epoch_kl = float(np.mean(epoch_kls)) if epoch_kls else None
-            self._on_epoch()
-            if (
-                mean_epoch_kl is not None
-                and mean_epoch_kl > self.cfg.target_kl
-                and training_step > self.cfg.kl_warmup_steps
-                and self.cfg.hard_stop_kl
-            ):
-                logger.warning(f"Early stop epoch {epoch}: KL {mean_epoch_kl:.4f} > {self.cfg.target_kl}")
-                break
+        run_ppo_update_loop(
+            batch=batch,
+            epochs=epochs,
+            minibatch_size=minibatch_size,
+            stack_size=self.stack_size,
+            cfg=self.cfg,
+            training_step=training_step,
+            train_step=self.train_step,
+            current_update_step=lambda: self._step,
+            on_minibatch=self._on_minibatch,
+            on_epoch=self._on_epoch,
+        )
 
         if self._scheduler:
             self._scheduler.step()

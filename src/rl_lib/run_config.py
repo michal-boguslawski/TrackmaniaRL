@@ -14,6 +14,11 @@ class StrictModel(BaseModel):
 
 
 class RunSettings(StrictModel):
+    algorithm: str = Field(
+        default="ppo",
+        min_length=1,
+        description="Registered training algorithm used by the trainer factory.",
+    )
     name: str = "PPO"
     total_steps: PositiveInt = 3_000_000  # vector-environment steps
     seed: int = Field(default=1, ge=0, le=2**32 - 1)

@@ -1,4 +1,5 @@
 run:
+  algorithm: ppo
   name: PPO
   total_steps: 3000000 # vector-environment steps
   seed: 1

@@ -325,7 +325,7 @@ def test_evaluate_actions_reproduces_the_log_probs_from_act(agent: Agent, observ
     first_action, first_log_probs, first_value = agent.act(first_obs, first_done)
     action, log_probs, value = agent.act(second_obs, second_done)
 
-    # the minibatch layout produced by PPOTrainer._get_iid_minibatches:
+    # the minibatch layout produced by the PPO minibatch generator:
     # each sample owns `stack_size` consecutive observation rows
     obs_window = T.stack([first_obs, second_obs], dim=1).reshape(-1, *OBSERVATION_SHAPE)
     done_window = T.stack([first_done, second_done], dim=1).reshape(-1)

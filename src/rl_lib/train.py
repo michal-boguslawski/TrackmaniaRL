@@ -36,7 +36,7 @@ from rl_lib.tracking.console_logger import ConsoleMetricsLogger
 from rl_lib.tracking.local_artifact_logger import LocalArtifactLogger
 from rl_lib.tracking.mlflow_logger import MLflowLogger
 from rl_lib.training.callbacks.factory import create_callbacks
-from rl_lib.training.ppo_trainer import PPOTrainer
+from rl_lib.training.factory import create_trainer
 from rl_lib.training.rollout_collector import RolloutCollector
 
 
@@ -126,7 +126,12 @@ def run_training(config: RunConfig, config_path: str | Path | None = None) -> No
             run_config=run_config_dump,
         )
 
-        trainer = PPOTrainer(agent=agent, config=config.trainer, callbacks=callback_groups.trainer)
+        trainer = create_trainer(
+            config.run.algorithm,
+            agent=agent,
+            config=config.trainer,
+            callbacks=callback_groups.trainer,
+        )
         trainer.setup_train(config.run, config.rollout)
 
         collector = RolloutCollector(

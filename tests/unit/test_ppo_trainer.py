@@ -15,7 +15,9 @@ from rl_lib.agent import Agent
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
 from rl_lib.training.callbacks.base import Callback
 from rl_lib.run_config import RolloutSettings, RunSettings, TrainerSettings
-from rl_lib.training.ppo_trainer import PPOTrainer
+from rl_lib.training.ppo.losses import PPOLosses
+from rl_lib.training.ppo.minibatches import get_iid_minibatches
+from rl_lib.training.ppo.trainer import PPOTrainer
 
 
 NUM_ENVS = 2
@@ -51,6 +53,11 @@ def trainer_settings() -> TrainerSettings:
 @pytest.fixture
 def trainer(agent: Agent, trainer_settings: TrainerSettings) -> PPOTrainer:
     return PPOTrainer(agent, trainer_settings)
+
+
+@pytest.fixture
+def ppo_losses(agent: Agent) -> PPOLosses:
+    return PPOLosses(agent)
 
 
 @pytest.fixture
@@ -120,7 +127,7 @@ def tagged_batch() -> dict[str, T.Tensor]:
 
 
 def test_minibatch_shapes_follow_the_rollout(trainer: PPOTrainer, rollout: dict[str, T.Tensor]):
-    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
+    minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
 
     assert minibatch["observation"].shape == (4 * STACK_SIZE, *OBSERVATION_SHAPE)
     assert minibatch["dones"].shape == (4 * STACK_SIZE,)
@@ -134,7 +141,7 @@ def test_minibatch_shapes_follow_the_rollout(trainer: PPOTrainer, rollout: dict[
 def test_minibatches_cover_every_transition_exactly_once(trainer: PPOTrainer, rollout):
     expected = sorted(rollout["advantages"].flatten().tolist())
     seen: list[float] = []
-    for minibatch in trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True):
+    for minibatch in get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True):
         seen.extend(minibatch["advantages"].flatten().tolist())
 
     assert len(seen) == len(expected)
@@ -142,7 +149,7 @@ def test_minibatches_cover_every_transition_exactly_once(trainer: PPOTrainer, ro
 
 
 def test_minibatch_count_and_tail_size(trainer: PPOTrainer, rollout):
-    sizes = [mb["action"].shape[0] for mb in trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True)]
+    sizes = [mb["action"].shape[0] for mb in get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True)]
 
     assert sizes == [4, 4, 2]
     assert sum(sizes) == NUM_ENVS * (SIZE - 1)
@@ -150,7 +157,7 @@ def test_minibatch_count_and_tail_size(trainer: PPOTrainer, rollout):
 
 def test_minibatches_cover_every_tagged_transition_once(trainer: PPOTrainer, tagged_batch):
     seen: list[int] = []
-    for minibatch in trainer._get_iid_minibatches(tagged_batch, 4, STACK_SIZE, shuffle=True):
+    for minibatch in get_iid_minibatches(tagged_batch, 4, STACK_SIZE, shuffle=True):
         seen.extend(int(value) for value in minibatch["action"][:, 0].tolist())
 
     assert sorted(seen) == sorted(
@@ -235,7 +242,7 @@ def test_vectorized_minibatches_match_legacy_assembly(shuffle: bool):
         expected = legacy_minibatches()
         np.random.seed(1234)
         actual = list(
-            PPOTrainer._get_iid_minibatches(
+            get_iid_minibatches(
                 batch, minibatch_size, stack_size, shuffle
             )
         )
@@ -256,7 +263,7 @@ def test_vectorized_minibatches_match_legacy_assembly(shuffle: bool):
 
 
 def test_minibatch_observation_windows_match_their_transition(trainer: PPOTrainer, tagged_batch):
-    for minibatch in trainer._get_iid_minibatches(tagged_batch, 4, STACK_SIZE, shuffle=True):
+    for minibatch in get_iid_minibatches(tagged_batch, 4, STACK_SIZE, shuffle=True):
         window = minibatch["observation"][:, 0, 0, 0]
         for index, tag in enumerate(minibatch["action"][:, 0].tolist()):
             env, step = divmod(int(tag), ENV_STRIDE)
@@ -272,22 +279,26 @@ def test_minibatch_observation_windows_match_their_transition(trainer: PPOTraine
             ), f"window for transition (env={env}, step={step})"
 
 
-def test_minibatch_generation_is_a_static_helper_that_leaves_the_batch_alone(rollout):
+def test_minibatch_generation_leaves_the_batch_alone(rollout):
     before = {key: value.clone() for key, value in rollout.items()}
 
-    minibatch = next(PPOTrainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
+    minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
 
     assert minibatch["observation"].shape == (4 * STACK_SIZE, *OBSERVATION_SHAPE)
     for key, value in rollout.items():
         T.testing.assert_close(value, before[key], msg=lambda text, key=key: f"{key}: {text}")
 
 
-def test_actor_loss_with_an_unchanged_policy_is_the_plain_surrogate(trainer: PPOTrainer):
+def test_actor_loss_with_an_unchanged_policy_is_the_plain_surrogate(
+    trainer: PPOTrainer, ppo_losses: PPOLosses
+):
     advantages = T.tensor([2.0, -1.0])
     log_probs = T.rand(2, ACTION_DIM)
     action_mean = T.zeros(2, ACTION_DIM)
 
-    loss, metrics = trainer._actor_loss(advantages, log_probs, log_probs, action_mean)
+    loss, metrics = ppo_losses.actor_loss(
+        trainer.cfg, advantages, log_probs, log_probs, action_mean
+    )
 
     T.testing.assert_close(loss, -advantages.mean())
     assert metrics["metrics/approx_kl"] == pytest.approx(0.0, abs=1e-6)
@@ -295,19 +306,25 @@ def test_actor_loss_with_an_unchanged_policy_is_the_plain_surrogate(trainer: PPO
     assert metrics["metrics/ratio_max"] == pytest.approx(1.0, rel=1e-5)
 
 
-def test_actor_loss_normalises_advantages_per_minibatch(agent: Agent):
+def test_actor_loss_normalises_advantages_per_minibatch(
+    agent: Agent, ppo_losses: PPOLosses
+):
     trainer = PPOTrainer(agent, TrainerSettings(advantage_normalization_strategy="batch", mean_reg_coef=0.0))
     advantages = T.tensor([1.0, 2.0, 3.0])
     log_probs = T.rand(3, ACTION_DIM)
     action_mean = T.zeros(3, ACTION_DIM)
 
-    loss, _ = trainer._actor_loss(advantages, log_probs, log_probs, action_mean)
+    loss, _ = ppo_losses.actor_loss(
+        trainer.cfg, advantages, log_probs, log_probs, action_mean
+    )
 
     normalized = (advantages - advantages.mean()) / (advantages.std() + 1e-4)
     T.testing.assert_close(loss, -normalized.mean(), atol=1e-4, rtol=1e-4)
 
 
-def test_actor_loss_clips_the_importance_ratio(trainer: PPOTrainer):
+def test_actor_loss_clips_the_importance_ratio(
+    trainer: PPOTrainer, ppo_losses: PPOLosses
+):
     trainer.cfg = trainer.cfg.model_copy(update={"ppo_epsilon": 0.2})
     advantages = T.ones(4)
     old_log_probs = T.zeros(4, ACTION_DIM)
@@ -315,29 +332,41 @@ def test_actor_loss_clips_the_importance_ratio(trainer: PPOTrainer):
     log_probs = T.full((4, ACTION_DIM), math.log(1.65) / ACTION_DIM)
     action_mean = T.zeros(4, ACTION_DIM)
 
-    _, metrics = trainer._actor_loss(advantages, log_probs, old_log_probs, action_mean)
+    _, metrics = ppo_losses.actor_loss(
+        trainer.cfg, advantages, log_probs, old_log_probs, action_mean
+    )
 
     assert metrics["metrics/surrogate_loss"] == pytest.approx(-(1 + 0.2), rel=1e-4)
     assert metrics["metrics/clip_fraction"] == pytest.approx(1.0)
     assert metrics["metrics/ratio_max"] == pytest.approx(1.65, rel=1e-3)
 
 
-def test_actor_loss_regularizes_toward_no_input_not_action_range_midpoint(trainer: PPOTrainer):
+def test_actor_loss_regularizes_toward_no_input_not_action_range_midpoint(
+    trainer: PPOTrainer, ppo_losses: PPOLosses
+):
     advantages = T.zeros(2)
     log_probs = T.zeros(2, ACTION_DIM)
     # Zero is no input for all controls; gas/brake at 0.5 would apply both.
     action_mean = T.tensor([[0.0, 0.0, 0.0], [0.0, 0.5, 0.5]])
     trainer.cfg = trainer.cfg.model_copy(update={"mean_reg_coef": 0.5})
 
-    loss, metrics = trainer._actor_loss(advantages, log_probs, log_probs, action_mean)
+    loss, metrics = ppo_losses.actor_loss(
+        trainer.cfg, advantages, log_probs, log_probs, action_mean
+    )
 
     assert metrics["metrics/mean_reg"] == pytest.approx(1.0 / 12.0)
     assert loss.item() == pytest.approx(1.0 / 24.0)
 
 
-def test_actor_loss_metrics_are_reported_per_action_dim(trainer: PPOTrainer):
-    _, metrics = trainer._actor_loss(
-        T.ones(3), T.rand(3, ACTION_DIM), T.rand(3, ACTION_DIM), T.rand(3, ACTION_DIM)
+def test_actor_loss_metrics_are_reported_per_action_dim(
+    trainer: PPOTrainer, ppo_losses: PPOLosses
+):
+    _, metrics = ppo_losses.actor_loss(
+        trainer.cfg,
+        T.ones(3),
+        T.rand(3, ACTION_DIM),
+        T.rand(3, ACTION_DIM),
+        T.rand(3, ACTION_DIM),
     )
 
     for key in (
@@ -355,13 +384,15 @@ def test_actor_loss_metrics_are_reported_per_action_dim(trainer: PPOTrainer):
         assert f"metrics/mean_abs_max_{index}" in metrics
 
 
-def test_critic_loss_takes_the_worse_of_clipped_and_unclipped(trainer: PPOTrainer):
+def test_critic_loss_takes_the_worse_of_clipped_and_unclipped(
+    trainer: PPOTrainer, ppo_losses: PPOLosses
+):
     trainer.cfg = trainer.cfg.model_copy(update={"ppo_epsilon": 0.2})
     returns = T.zeros(4)
     old_values = T.zeros(4)
 
-    over, _ = trainer._critic_loss(returns, T.ones(4), old_values)
-    under, _ = trainer._critic_loss(returns, -T.ones(4), old_values)
+    over, _ = ppo_losses.critic_loss(trainer.cfg, returns, T.ones(4), old_values)
+    under, _ = ppo_losses.critic_loss(trainer.cfg, returns, -T.ones(4), old_values)
 
     # torch's Huber(delta=1) is 0.5 * x^2 inside the delta, so a residual of
     # 1.0 costs 0.5 while the clipped residual of 0.2 only costs 0.02: the
@@ -370,24 +401,30 @@ def test_critic_loss_takes_the_worse_of_clipped_and_unclipped(trainer: PPOTraine
     assert under.item() == pytest.approx(0.5)
 
 
-def test_critic_loss_ignores_the_clip_when_the_value_is_inside_it(trainer: PPOTrainer):
+def test_critic_loss_ignores_the_clip_when_the_value_is_inside_it(
+    trainer: PPOTrainer, ppo_losses: PPOLosses
+):
     trainer.cfg = trainer.cfg.model_copy(update={"ppo_epsilon": 0.5})
     returns = T.zeros(2)
 
-    loss, metrics = trainer._critic_loss(returns, T.full((2,), 0.1), T.zeros(2))
+    loss, metrics = ppo_losses.critic_loss(
+        trainer.cfg, returns, T.full((2,), 0.1), T.zeros(2)
+    )
 
     # 0.1 is inside +-0.5, so the clipped value is the value itself
     assert loss.item() == pytest.approx(0.5 * 0.01)
     assert "loss/critic" in metrics
 
 
-def test_entropy_loss_sums_the_beta_entropies(agent: Agent, trainer: PPOTrainer, observations):
+def test_entropy_loss_sums_the_beta_entropies(
+    agent: Agent, ppo_losses: PPOLosses, observations
+):
     obs = observations(4 * STACK_SIZE)
     action = T.rand(4, ACTION_DIM)
     dones = T.zeros(4 * STACK_SIZE, dtype=T.bool)
     _, _, dist, _ = agent.evaluate_actions(obs, action, dones)
 
-    entropy_loss, metrics = trainer._entropy_loss(dist)
+    entropy_loss, metrics = ppo_losses.entropy_loss(dist)
 
     T.testing.assert_close(entropy_loss, dist.base_dist.entropy().sum(-1).mean())
     for index in range(ACTION_DIM):
@@ -402,14 +439,14 @@ def test_entropy_loss_sums_the_beta_entropies(agent: Agent, trainer: PPOTrainer,
         )
 
 
-def test_entropy_loss_is_zero_for_a_uniform_beta(trainer: PPOTrainer):
+def test_entropy_loss_is_zero_for_a_uniform_beta(ppo_losses: PPOLosses):
     # the trainer reads `dist.base_dist`, i.e. the actor's transformed Beta
     dist = T.distributions.TransformedDistribution(
         T.distributions.Beta(T.ones(2, ACTION_DIM), T.ones(2, ACTION_DIM)),
         T.distributions.transforms.AffineTransform(loc=-1.0, scale=2.0),
     )
 
-    entropy_loss, metrics = trainer._entropy_loss(dist)
+    entropy_loss, metrics = ppo_losses.entropy_loss(dist)
 
     T.testing.assert_close(entropy_loss, T.tensor(0.0))
     for index in range(ACTION_DIM):
@@ -421,7 +458,7 @@ def test_entropy_loss_is_zero_for_a_uniform_beta(trainer: PPOTrainer):
 
 
 def test_calculate_losses_combines_every_term(agent: Agent, trainer: PPOTrainer, rollout):
-    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
+    minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
 
     (actor_loss, critic_loss, entropy_loss), metrics = trainer.calculate_losses(
         minibatch["advantages"],
@@ -440,7 +477,7 @@ def test_calculate_losses_combines_every_term(agent: Agent, trainer: PPOTrainer,
 
 
 def test_train_step_updates_the_parameters(trainer: PPOTrainer, rollout):
-    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
+    minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
     before = {name: param.clone() for name, param in trainer._agent._network.named_parameters()}
 
     metrics = trainer.train_step(**minibatch)
@@ -454,7 +491,7 @@ def test_train_step_updates_the_parameters(trainer: PPOTrainer, rollout):
 
 
 def test_train_step_clips_gradients(trainer: PPOTrainer, rollout):
-    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
+    minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
     trainer.train_step(**minibatch)
 
     norms = trainer._agent.get_partial_clip_grad_norms()
@@ -464,7 +501,7 @@ def test_train_step_clips_gradients(trainer: PPOTrainer, rollout):
 
 
 def test_train_step_skips_a_non_finite_loss(trainer: PPOTrainer, rollout, monkeypatch):
-    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
+    minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
     before = {name: param.clone() for name, param in trainer._agent._network.named_parameters()}
     monkeypatch.setattr(
         trainer,
@@ -659,7 +696,7 @@ def test_metrics_from_batch_summarise_the_rollout(trainer: PPOTrainer, rollout):
 
 
 def test_clip_grad_norm_returns_one_norm_per_parameter_group(trainer: PPOTrainer, rollout):
-    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
+    minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
     log_probs, values, _, _ = trainer._agent.evaluate_actions(
         minibatch["observation"], minibatch["action"], minibatch["dones"]
     )
@@ -678,7 +715,7 @@ def test_clip_grad_norm_returns_one_norm_per_parameter_group(trainer: PPOTrainer
 def test_combined_gradient_norm_pass_matches_torch_group_clipping(
     trainer: PPOTrainer, rollout
 ):
-    minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
+    minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
     log_probs, values, _, _ = trainer._agent.evaluate_actions(
         minibatch["observation"], minibatch["action"], minibatch["dones"]
     )

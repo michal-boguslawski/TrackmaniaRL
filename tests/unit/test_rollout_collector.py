@@ -18,7 +18,7 @@ from rl_lib.buffers.rollout_buffer import RolloutBuffer
 from rl_lib.training.callbacks.base import Callback
 from rl_lib.training.rollout_collector import RolloutCollector
 from rl_lib.run_config import RolloutSettings, TrainerSettings
-from rl_lib.training.ppo_trainer import PPOTrainer
+from rl_lib.training.ppo.trainer import PPOTrainer
 
 
 OBSERVATION_SHAPE = (96, 96, 1)

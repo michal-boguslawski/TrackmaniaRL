@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
 from rl_lib.run_config import RolloutSettings
-from rl_lib.training.ppo_trainer import PPOTrainer
+from rl_lib.training.factory import Trainer
 from rl_lib.training.callbacks.base import Callback, CallbackList
 
 
@@ -28,7 +28,7 @@ class RolloutCollector:
     Attributes:
         env: Vectorized Gymnasium environment.
         buffer: RolloutBuffer for storing transitions.
-        trainer: PPOTrainer for policy updates.
+        trainer: Trainer implementation for policy updates.
         cfg: RolloutSettings (buffer_size, epochs, minibatch_size, gamma, gae_lambda).
         seed: Environment seed.
         run_config: Full run config dict for MLflow logging.
@@ -38,7 +38,7 @@ class RolloutCollector:
         self,
         env: VectorEnv,
         buffer: RolloutBuffer,
-        trainer: PPOTrainer,
+        trainer: Trainer,
         config: RolloutSettings,
         callbacks: list[Callback] | None = None,
         seed: int | None = None,
@@ -49,7 +49,7 @@ class RolloutCollector:
         Args:
             env: Vectorized environment (must match buffer/trainer config).
             buffer: RolloutBuffer instance.
-            trainer: PPOTrainer instance.
+            trainer: Trainer instance created by the trainer factory.
             config: RolloutSettings shared with buffer (validated for consistency).
             callbacks: Callbacks for rollout-level events.
             seed: Random seed for environment reset.

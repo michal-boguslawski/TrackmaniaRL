@@ -3,7 +3,7 @@ from pydantic import ValidationError
 
 from rl_lib.buffers.rollout_buffer import RolloutBuffer
 from rl_lib.run_config import RolloutSettings, RunConfig, WrapperSettings, load_config
-from rl_lib.training.ppo_trainer import PPOTrainer
+from rl_lib.training.ppo.trainer import PPOTrainer
 
 
 def test_sample_yaml_loads_full_current_run_defaults():
@@ -13,6 +13,7 @@ def test_sample_yaml_loads_full_current_run_defaults():
 
     assert config.environment.id == "CarRacing-v3"
     assert config.environment.num_envs == 16
+    assert config.run.algorithm == "ppo"
     assert config.run.total_steps == 3_000_000
     assert config.rollout.gamma == pytest.approx(0.99)
     assert config.trainer.ppo_epsilon == pytest.approx(0.1)
@@ -31,6 +32,15 @@ def test_missing_yaml_sections_resolve_from_pydantic_defaults(tmp_path):
     assert config.environment.num_envs == 16
     assert config.rollout.gae_lambda == pytest.approx(0.95)
     assert config.network.actor.action_low == [-1.0, 0.0, 0.0]
+
+
+def test_run_config_accepts_a_registered_algorithm_name(tmp_path):
+    path = tmp_path / "algorithm.yaml"
+    path.write_text("run:\n  algorithm: sac\n", encoding="utf-8")
+
+    config = load_config(str(path))
+
+    assert config.run.algorithm == "sac"
 
 
 def test_loader_rejects_unknown_fields(tmp_path):
