@@ -438,29 +438,39 @@ class PPOTrainer:
             and observation/dones windows of length stack_size.
         """
         num_envs, batch_size, _ = batch["action"].shape
-        indices = (
+        device = batch["action"].device
+        flat_order = (
             np.random.permutation(batch_size * num_envs)
             if shuffle
             else np.arange(batch_size * num_envs)
         )
+        indices = T.as_tensor(
+            flat_order,
+            dtype=T.long,
+            device=device,
+        )
+        window_offsets = T.arange(stack_size, device=device)
         for index in range(0, batch_size * num_envs, minibatch_size):
-            subindices = [(ind % num_envs, ind // num_envs) for ind in indices[index:(index+minibatch_size)]]
-            
-            
+            flat_indices = indices[index : index + minibatch_size]
+            env_indices = flat_indices.remainder(num_envs)
+            time_indices = flat_indices.div(num_envs, rounding_mode="floor")
+            window_indices = time_indices[:, None] + window_offsets
+
+            observation_windows = batch["observation"][
+                env_indices[:, None], window_indices
+            ]
+            done_windows = batch["dones"][env_indices[:, None], window_indices]
+
             yield {
-                "observation": T.cat(
-                    [batch["observation"][i, k:(k+stack_size)] for i, k in subindices],
-                    dim=0,
+                "observation": observation_windows.reshape(
+                    -1, *batch["observation"].shape[2:]
                 ),
-                "action": T.stack([batch["action"][i, k] for i, k in subindices], dim=0),
-                "old_log_probs": T.stack([batch["old_log_probs"][i, k] for i, k in subindices], dim=0),
-                "old_values": T.stack([batch["critic_value"][i, k] for i, k in subindices], dim=0),
-                "returns": T.stack([batch["returns"][i, k] for i, k in subindices], dim=0),
-                "advantages": T.stack([batch["advantages"][i, k] for i, k in subindices], dim=0),
-                "dones": T.cat(
-                    [batch["dones"][i, k:(k+stack_size)] for i, k in subindices],
-                    dim=0,
-                ),
+                "action": batch["action"][env_indices, time_indices],
+                "old_log_probs": batch["old_log_probs"][env_indices, time_indices],
+                "old_values": batch["critic_value"][env_indices, time_indices],
+                "returns": batch["returns"][env_indices, time_indices],
+                "advantages": batch["advantages"][env_indices, time_indices],
+                "dones": done_windows.reshape(-1),
             }
 
     def _get_metrics_from_batch(self, batch: T.Tensor):

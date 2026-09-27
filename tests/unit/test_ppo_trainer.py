@@ -158,6 +158,103 @@ def test_minibatches_cover_every_tagged_transition_once(trainer: PPOTrainer, tag
     )
 
 
+@pytest.mark.parametrize("shuffle", [False, True])
+def test_vectorized_minibatches_match_legacy_assembly(shuffle: bool):
+    """Ensure vectorized indexing preserves the legacy minibatch contents."""
+    num_envs = 3
+    batch_size = 5
+    stack_size = 3
+    minibatch_size = 4
+    observation_length = batch_size + stack_size - 1
+    observation = T.arange(
+        num_envs * observation_length * 2 * 2,
+        dtype=T.uint8,
+    ).reshape(num_envs, observation_length, 2, 2, 1)
+    transition_indices = T.arange(num_envs * batch_size).reshape(num_envs, batch_size)
+    batch = {
+        "observation": observation,
+        "action": (transition_indices.unsqueeze(-1) * 2 + T.arange(2)).float(),
+        "old_log_probs": (transition_indices.unsqueeze(-1) * 3 + T.arange(3)).float(),
+        "critic_value": transition_indices.float() + 0.25,
+        "returns": transition_indices.float() + 10.5,
+        "advantages": transition_indices.float() - 7.25,
+        "dones": (T.arange(num_envs * observation_length).reshape(num_envs, -1) % 3) == 1,
+    }
+
+    def legacy_minibatches() -> list[dict[str, T.Tensor]]:
+        """Assemble minibatches with the former per-sample indexing logic."""
+        order = (
+            np.random.permutation(batch_size * num_envs)
+            if shuffle
+            else np.arange(batch_size * num_envs)
+        )
+        result = []
+        for start in range(0, batch_size * num_envs, minibatch_size):
+            subindices = [
+                (index % num_envs, index // num_envs)
+                for index in order[start : start + minibatch_size]
+            ]
+            result.append(
+                {
+                    "observation": T.cat(
+                        [
+                            batch["observation"][env, time : time + stack_size]
+                            for env, time in subindices
+                        ],
+                        dim=0,
+                    ),
+                    "action": T.stack(
+                        [batch["action"][env, time] for env, time in subindices]
+                    ),
+                    "old_log_probs": T.stack(
+                        [batch["old_log_probs"][env, time] for env, time in subindices]
+                    ),
+                    "old_values": T.stack(
+                        [batch["critic_value"][env, time] for env, time in subindices]
+                    ),
+                    "returns": T.stack(
+                        [batch["returns"][env, time] for env, time in subindices]
+                    ),
+                    "advantages": T.stack(
+                        [batch["advantages"][env, time] for env, time in subindices]
+                    ),
+                    "dones": T.cat(
+                        [
+                            batch["dones"][env, time : time + stack_size]
+                            for env, time in subindices
+                        ],
+                        dim=0,
+                    ),
+                }
+            )
+        return result
+
+    rng_state = np.random.get_state()
+    try:
+        np.random.seed(1234)
+        expected = legacy_minibatches()
+        np.random.seed(1234)
+        actual = list(
+            PPOTrainer._get_iid_minibatches(
+                batch, minibatch_size, stack_size, shuffle
+            )
+        )
+    finally:
+        np.random.set_state(rng_state)
+
+    assert len(actual) == len(expected)
+    for actual_minibatch, expected_minibatch in zip(actual, expected):
+        assert actual_minibatch.keys() == expected_minibatch.keys()
+        for key in actual_minibatch:
+            T.testing.assert_close(
+                actual_minibatch[key],
+                expected_minibatch[key],
+                rtol=0,
+                atol=0,
+                msg=lambda text, key=key: f"{key}: {text}",
+            )
+
+
 def test_minibatch_observation_windows_match_their_transition(trainer: PPOTrainer, tagged_batch):
     for minibatch in trainer._get_iid_minibatches(tagged_batch, 4, STACK_SIZE, shuffle=True):
         window = minibatch["observation"][:, 0, 0, 0]
