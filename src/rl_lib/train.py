@@ -1,3 +1,17 @@
+"""Main training pipeline: config loading, environment setup, training loop.
+
+Orchestrates the full PPO training run:
+1. Setup logging (console + MLflow)
+2. Resolve device (CUDA/CPU)
+3. Seed RNGs
+4. Create vectorized environment with wrappers
+5. Build Network (CNN -> Temporal -> Actor/Critic)
+6. Create Agent, RolloutBuffer, PPOTrainer, RolloutCollector
+7. Register callbacks (checkpoints, metrics, video, evaluation, etc.)
+8. Run collector loop (environment steps + PPO updates)
+9. Cleanup logging
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -26,6 +40,7 @@ from rl_lib.training.rollout_collector import RolloutCollector
 
 
 def _handle_termination(signum, frame):
+    """Signal handler: convert SIGTERM/SIGINT to KeyboardInterrupt."""
     raise KeyboardInterrupt(f"received signal {signum}")
 
 
@@ -34,6 +49,7 @@ for _signal in (signal.SIGTERM, signal.SIGINT):
 
 
 def _seed_everything(seed: int) -> None:
+    """Set all random seeds for reproducibility."""
     random.seed(seed)
     np.random.seed(seed)
     T.manual_seed(seed)
@@ -42,6 +58,12 @@ def _seed_everything(seed: int) -> None:
 
 
 def run_training(config: RunConfig, config_path: str | Path | None = None) -> None:
+    """Execute full training run from validated config.
+
+    Args:
+        config: Validated RunConfig with all settings.
+        config_path: Original config file path (for logging).
+    """
     level = getattr(logging, config.run.log_level)
     session_id = setup_logging(config.run.log_config, default_level=level) if config.run.log_config else setup_logging(default_level=level)
     logger = logging.getLogger(__name__)
@@ -120,6 +142,7 @@ def run_training(config: RunConfig, config_path: str | Path | None = None) -> No
 
 
 def main(config_path: str | Path) -> None:
+    """CLI entrypoint: load config and run training."""
     config = load_config(str(config_path))
     try:
         run_training(config, config_path=config_path)

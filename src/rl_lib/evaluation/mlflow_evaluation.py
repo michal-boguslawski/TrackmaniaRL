@@ -1,3 +1,9 @@
+"""MLflow model evaluation: discover, select, and evaluate logged models.
+
+Provides utilities to find MLflow runs with final_model artifacts,
+resolve run identifiers, and evaluate loaded models with original config.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -20,6 +26,15 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class MLflowModelRef:
+    """Reference to an MLflow run containing a final_model artifact.
+
+    Attributes:
+        run_id: Full MLflow run ID.
+        run_name: Human-readable run name.
+        experiment_name: Experiment name.
+        unique_prefix: Shortest unique prefix of run_id for CLI selection.
+        start_time: Run start timestamp (ms since epoch).
+    """
     run_id: str
     run_name: str
     experiment_name: str
@@ -28,6 +43,14 @@ class MLflowModelRef:
 
 
 def _shortest_unique_prefixes(run_ids: list[str]) -> dict[str, str]:
+    """Compute shortest unique prefix for each run ID in a list.
+
+    Args:
+        run_ids: List of full run IDs.
+
+    Returns:
+        Dict mapping run_id -> shortest unique prefix.
+    """
     prefixes: dict[str, str] = {}
     for run_id in run_ids:
         for size in range(1, len(run_id) + 1):
@@ -41,7 +64,18 @@ def _shortest_unique_prefixes(run_ids: list[str]) -> dict[str, str]:
 
 
 def discover_mlflow_models(experiment_name: str) -> list[MLflowModelRef]:
-    """Return finished MLflow runs in an experiment that logged ``final_model``."""
+    """Return finished MLflow runs in an experiment that logged ``final_model``.
+
+    Queries MLflow tracking server for runs in the experiment, filters
+    for those with a "final_model" directory artifact, and computes
+    unique prefixes for interactive selection.
+
+    Args:
+        experiment_name: MLflow experiment name.
+
+    Returns:
+        List of MLflowModelRef sorted by start_time (newest first).
+    """
     import mlflow
 
     client = mlflow.tracking.MlflowClient()
@@ -78,6 +112,17 @@ def discover_mlflow_models(experiment_name: str) -> list[MLflowModelRef]:
 
 
 def _run_id_from_identifier(identifier: str) -> str:
+    """Extract run ID from MLflow URI or prefix.
+
+    Args:
+        identifier: Run ID, "runs:/<run_id>/..." URI, or prefix.
+
+    Returns:
+        Run ID string.
+
+    Raises:
+        ValueError: If identifier is empty.
+    """
     value = identifier.strip()
     if value.startswith("runs:/"):
         value = value.removeprefix("runs:/").split("/", 1)[0]
@@ -91,7 +136,19 @@ def select_mlflow_run(
     identifier: str | None = None,
     input_fn: Callable[[str], str] | None = None,
 ) -> MLflowModelRef:
-    """Resolve a run ID/prefix, interactively listing models if none is given."""
+    """Resolve a run ID/prefix, interactively listing models if none is given.
+
+    Args:
+        experiment_name: MLflow experiment to search.
+        identifier: Run ID, prefix, or URI (optional; prompts if None).
+        input_fn: Function for reading user input (default: built-in input).
+
+    Returns:
+        MLflowModelRef for the selected run.
+
+    Raises:
+        ValueError: If no models found, identifier ambiguous, or not found.
+    """
     models = discover_mlflow_models(experiment_name)
     if not models:
         raise ValueError(f"No MLflow runs with a final_model artifact in {experiment_name!r}")
@@ -114,6 +171,17 @@ def select_mlflow_run(
 
 
 def _load_mlflow_config(run_id: str) -> RunConfig:
+    """Download and parse run_config.yaml from MLflow run artifacts.
+
+    Handles backward compatibility by cleaning wrapper/callback configs
+    to only include options supported by current wrapper versions.
+
+    Args:
+        run_id: MLflow run ID.
+
+    Returns:
+        Validated RunConfig.
+    """
     import mlflow
 
     config_path = mlflow.artifacts.download_artifacts(
@@ -179,6 +247,21 @@ def evaluate_mlflow(
     ``run_id`` may also be a ``runs:/<run_id>/...`` URI. With no identifier,
     the available model artifacts in ``experiment_name`` are listed and a
     unique run-ID prefix is requested.
+
+    Args:
+        run_id: MLflow run ID, URI, or prefix (None to list and prompt).
+        experiment_name: Required if run_id not provided (to list models).
+        episodes: Number of evaluation episodes.
+        num_envs: Parallel environments.
+        record_video: Whether to record videos.
+        metrics_loggers: Tracking backends (defaults to console).
+        input_fn: Input function for interactive selection.
+
+    Returns:
+        List of episode returns.
+
+    Raises:
+        ValueError: If episodes < 1, num_envs < 1, or experiment_name missing.
     """
     if episodes < 1:
         raise ValueError("episodes must be at least 1")

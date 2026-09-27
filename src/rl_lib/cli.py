@@ -1,3 +1,10 @@
+"""Interactive CLI for training and evaluation.
+
+Provides a text-based menu for:
+1. Training a PPO agent from config
+2. Evaluating a local checkpoint or MLflow model
+"""
+
 from importlib import resources
 import logging
 
@@ -7,12 +14,14 @@ DEFAULT_CONFIG = str(resources.files("rl_lib.config") / "ppo_carracing.yaml")
 
 
 def _ask(prompt: str, default: str | None = None) -> str:
+    """Prompt user for input with optional default."""
     suffix = f" [{default}]" if default is not None else ""
     answer = input(f"{prompt}{suffix}: ").strip()
     return answer or (default if default is not None else "")
 
 
 def _train() -> None:
+    """Run training from config path."""
     from rl_lib.train import main as train
 
     config_path = _ask("Training config", DEFAULT_CONFIG)
@@ -20,6 +29,7 @@ def _train() -> None:
 
 
 def _evaluate() -> None:
+    """Run evaluation of local checkpoint or MLflow model."""
     from rl_lib.evaluation import evaluate_checkpoint, evaluate_mlflow
     from rl_lib.run_config import load_config
     from rl_lib.tracking.console_logger import ConsoleMetricsLogger
@@ -68,6 +78,7 @@ def _evaluate() -> None:
 
 
 def _positive_int(prompt: str, default: str | None = None) -> int:
+    """Prompt for positive integer with validation."""
     while True:
         raw = _ask(prompt, default)
         try:

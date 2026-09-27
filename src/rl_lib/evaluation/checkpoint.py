@@ -1,3 +1,9 @@
+"""Local checkpoint evaluation: load config + state dict, run inference.
+
+Provides evaluate_checkpoint() for evaluating a saved model checkpoint
+against the training configuration.
+"""
+
 from __future__ import annotations
 
 from contextlib import closing
@@ -21,7 +27,23 @@ logger = logging.getLogger(__name__)
 
 
 def _load_local_network(network: Network, checkpoint_path: str | Path, device: T.device) -> Network:
-    """Load either a state-dict checkpoint or the saved full local Network."""
+    """Load either a state-dict checkpoint or the saved full local Network.
+
+    Handles two checkpoint formats:
+    1. Full Network object saved with T.save(network, path)
+    2. State dict (or dict with "state_dict" key) saved with T.save(state_dict, path)
+
+    Args:
+        network: Empty Network instance to load state into.
+        checkpoint_path: Path to checkpoint file.
+        device: Target device for loading.
+
+    Returns:
+        Network with loaded weights on device.
+
+    Raises:
+        ValueError: If checkpoint format is unrecognized.
+    """
     checkpoint = T.load(checkpoint_path, map_location=device, weights_only=False)
     if isinstance(checkpoint, Network):
         return checkpoint.to(device)
@@ -35,6 +57,7 @@ def _load_local_network(network: Network, checkpoint_path: str | Path, device: T
 
 
 def _evaluation_environment(config: RunConfig, num_envs: int, record_video: bool):
+    """Build evaluation environment from config with optional video recording."""
     environment = config.evaluation_environment(num_envs)
     if record_video:
         environment = environment.model_copy(update={
@@ -53,7 +76,25 @@ def evaluate_checkpoint(
     num_envs: int = 1,
     metrics_loggers: list[MetricsLogger] | None = None,
 ) -> list[float]:
-    """Evaluate a local network state-dict checkpoint."""
+    """Evaluate a local network state-dict checkpoint.
+
+    Loads RunConfig from config_path, builds Network from config, loads
+    checkpoint weights, and runs evaluation episodes.
+
+    Args:
+        config_path: Path to training config YAML.
+        checkpoint_path: Path to model checkpoint (.pt file).
+        episodes: Number of evaluation episodes.
+        record_video: Whether to record videos.
+        num_envs: Number of parallel environments.
+        metrics_loggers: Tracking backends (defaults to console logger).
+
+    Returns:
+        List of episode returns.
+
+    Raises:
+        ValueError: If episodes < 1 or num_envs < 1.
+    """
     if episodes < 1:
         raise ValueError("episodes must be at least 1")
     if num_envs < 1:
@@ -81,6 +122,21 @@ def _evaluate_configured_policy(
     checkpoint_path: str | Path | None = None,
     network: Network | None = None,
 ) -> list[float]:
+    """Shared evaluation logic for local and MLflow checkpoints.
+
+    Args:
+        config: RunConfig for environment and agent settings.
+        episodes: Number of episodes to run.
+        num_envs: Parallel environments.
+        metrics_loggers: Tracking backends.
+        record_video: Whether to record videos.
+        scope: Metric prefix scope ("local" or "mlflow").
+        checkpoint_path: Optional path to local checkpoint.
+        network: Optional pre-loaded Network (for MLflow models).
+
+    Returns:
+        List of episode returns.
+    """
     device = resolve_device(config)
     env_config = _evaluation_environment(config, num_envs, record_video)
 

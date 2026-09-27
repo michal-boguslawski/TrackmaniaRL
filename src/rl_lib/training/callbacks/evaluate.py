@@ -1,3 +1,10 @@
+"""Collector callback: periodic and final policy evaluation.
+
+Creates a copy of the training agent (same network, different instance)
+and runs evaluation episodes in a separate environment at configured
+intervals and at the end of training.
+"""
+
 from __future__ import annotations
 
 from rl_lib.agent import Agent
@@ -10,7 +17,21 @@ from rl_lib.training.callbacks.base import CollectorCallback
 
 
 class EvaluationCallback(CollectorCallback):
-    """Evaluate the current policy periodically and after training completes."""
+    """Evaluate the current policy periodically and after training completes.
+
+    Uses a copy of the training agent (shares network weights) to run
+    deterministic episodes in a fresh environment. Logs results with
+    'periodic' or 'final' scope to distinguish scheduled vs final eval.
+
+    Attributes:
+        agent: Copy of training agent for evaluation.
+        cfg: EvaluationCallbackSettings (interval, episodes, etc.).
+        _loggers: MetricsLogger backends.
+        env: Evaluation environment (single env, sync, no reward normalization).
+        _training_steps: Total steps from rollout config (for final eval timing).
+        _evaluation_index: Counter for seeding periodic evaluations.
+        _last_evaluation_step: Step of last periodic evaluation.
+    """
 
     def __init__(
         self,
@@ -18,6 +39,13 @@ class EvaluationCallback(CollectorCallback):
         metrics_loggers: list[MetricsLogger],
         config: EvaluationCallbackSettings,
     ):
+        """Initialize evaluation callback.
+
+        Args:
+            agent: Training agent (network weights shared, new instance created).
+            metrics_loggers: Tracking backends for result logging.
+            config: Evaluation settings including environment, interval, episodes.
+        """
         self.agent = Agent(agent.network, agent.device, agent.cfg)
         self.cfg = config
         self._loggers = metrics_loggers
@@ -27,6 +55,13 @@ class EvaluationCallback(CollectorCallback):
         self._last_evaluation_step: int | None = None
 
     def _evaluate(self, episodes: int, step: int, scope: str) -> None:
+        """Run evaluation episodes and log results.
+
+        Args:
+            episodes: Number of episodes to run.
+            step: Training step for logging.
+            scope: 'periodic' or 'final' for metric prefix.
+        """
         seed = (self.cfg.seed + self._evaluation_index) % (2**32)
         self._evaluation_index += 1
         results = run_inference(
@@ -41,10 +76,12 @@ class EvaluationCallback(CollectorCallback):
         self._last_evaluation_step = step
 
     def on_rollout_start(self, config: dict | None = None, *args, **kwargs) -> None:
+        """Capture total training steps from collector config."""
         if config:
             self._training_steps = config.get("training_steps")
 
     def on_env_step(self, step: int, *args, **kwargs) -> None:
+        """Run periodic evaluation at configured interval."""
         completed_steps = step + 1
         if completed_steps % self.cfg.interval != 0:
             return
@@ -54,6 +91,7 @@ class EvaluationCallback(CollectorCallback):
         self._evaluate(self.cfg.episodes, completed_steps, "periodic")
 
     def on_rollout_end(self, *args, **kwargs) -> None:
+        """Run final evaluation with more episodes, then close environment."""
         final_step = self._training_steps or (self._last_evaluation_step or 0)
         try:
             self._evaluate(self.cfg.final_episodes, final_step, "final")

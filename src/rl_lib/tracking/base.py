@@ -1,17 +1,46 @@
+"""Abstract base class for metrics tracking backends.
+
+Defines the interface for logging metrics, parameters, configs, models,
+and artifacts. Concrete implementations (MLflowLogger, ConsoleMetricsLogger)
+provide backend-specific storage.
+"""
+
 from abc import ABC, abstractmethod
 from typing import Any
 
 
 class MetricsLogger(ABC):
+    """Base interface for experiment tracking backends.
+
+    All methods are no-op by default; subclasses implement backend-specific
+    logging (MLflow, TensorBoard, console, etc.).
+    """
+
     @abstractmethod
-    def log_metrics(self, metrics: dict[str, float], step: int) -> None: ...
+    def log_metrics(self, metrics: dict[str, float], step: int) -> None:
+        """Log scalar metrics at a training step.
+
+        Args:
+            metrics: Dict of metric name -> value.
+            step: Global step (e.g., environment steps or minibatch count).
+        """
+        ...
 
     def log_parameters(self, parameters: dict[str, Any]) -> None:
-        """Optional parameter logging; unsupported by default."""
+        """Log hyperparameters/configuration (optional).
+
+        Args:
+            parameters: Dict of parameter name -> value.
+        """
         pass
 
     def log_config(self, config: dict, artifact_file: str = "config/run_config.yaml") -> None:
-        """Optional config artifact logging; unsupported by default."""
+        """Log full configuration as an artifact (optional).
+
+        Args:
+            config: Full configuration dict.
+            artifact_file: Path within artifact store.
+        """
         pass
 
     def log_model(
@@ -20,14 +49,29 @@ class MetricsLogger(ABC):
         artifact_path: str = "model",
         registered_model_name: str | None = None,
     ) -> None:
-        """Optional model logging; unsupported by default."""
+        """Log model artifact (optional).
+
+        Args:
+            model: Model object (e.g., nn.Module).
+            artifact_path: Path within artifact store.
+            registered_model_name: Optional name for model registry.
+        """
         pass
 
     def log_state_dict(self, state_dict: dict, artifact_path: str = "checkpoints") -> None:
-        """Optional state-dict logging; unsupported by default."""
+        """Log model state dict (optional).
+
+        Args:
+            state_dict: Model state dict.
+            artifact_path: Path within artifact store.
+        """
         pass
 
     def log_artifact(self, local_path: str, artifact_path: str | None = None) -> None:
-        """Optional: log a local file (video, image, etc.) as a run artifact.
-        No-op by default; override in loggers that support artifact storage."""
+        """Log a local file as an artifact (optional).
+
+        Args:
+            local_path: Path to local file.
+            artifact_path: Destination path in artifact store.
+        """
         pass

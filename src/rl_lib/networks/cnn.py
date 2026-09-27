@@ -1,3 +1,9 @@
+"""Convolutional encoder for image observations.
+
+Processes NCHW image tensors through configurable conv layers, adaptive pooling,
+and MLP head to produce fixed-dimensional feature vectors.
+"""
+
 import torch as T
 import json
 from torch import nn
@@ -7,6 +13,17 @@ from rl_lib.networks.utils import init_layer, make_activation
 
 
 class CNN(nn.Module):
+    """Convolutional encoder with adaptive pooling and MLP projection.
+
+    Architecture: Conv2d layers -> AdaptiveAvgPool2d -> Flatten -> MLP ->
+    Linear(out_dim). Expects NCHW input normalized to [-1, 1].
+
+    Attributes:
+        observation_dim (int): Number of input channels (e.g., 1 for grayscale,
+            3 for RGB, or stack_size for frame-stacked).
+        cfg (CNNConfig): Configuration for conv layers, pooling, MLP, and init.
+    """
+
     def __init__(
         self,
         observation_dim: int,
@@ -51,9 +68,19 @@ class CNN(nn.Module):
 
     @property
     def out_dim(self) -> int:
+        """Output feature dimension after final linear layer."""
         return self.cfg.out_dim
 
     def forward(self, x: T.Tensor) -> T.Tensor:
+        """Encode image observation to feature vector.
+
+        Args:
+            x: Tensor of shape (batch, channel, height, width), dtype float32,
+                normalized to [-1, 1] range.
+
+        Returns:
+            Tensor of shape (batch, out_dim).
+        """
         return self._network(x)
 
     def __repr__(self) -> str:
@@ -61,6 +88,7 @@ class CNN(nn.Module):
         return f"{self.__class__.__name__}(observation_dim={self.observation_dim}, out_dim={self.out_dim}, config={self.cfg.model_dump()}, params={n_params:,})"
 
     def config(self) -> dict[str, int | float | str]:
+        """Flat, MLflow-loggable hyperparameters."""
         config = {
             "observation_dim": self.observation_dim,
             "out_dim": self.out_dim,

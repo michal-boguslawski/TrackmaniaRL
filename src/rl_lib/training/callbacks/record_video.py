@@ -1,3 +1,9 @@
+"""Collector callback: records evaluation videos at regular intervals.
+
+Runs a single evaluation episode with video recording enabled in the
+environment, logs the video as an artifact, and logs episode metrics.
+"""
+
 from logging import getLogger
 
 from rl_lib.agent import Agent
@@ -9,17 +15,38 @@ from rl_lib.training.callbacks.utils import stop_video_recording
 from rl_lib.run_config import VideoCallbackSettings
 
 
-
 logger = getLogger(__name__)
 
 
 class RecordVideoCallback(CollectorCallback):
+    """Record policy evaluation videos at regular intervals.
+
+    Creates a dedicated evaluation environment with video recording wrapper.
+    At each interval (and at rollout end), runs one episode, saves the
+    video file, and logs it as an artifact to all metrics loggers.
+
+    Attributes:
+        agent: Evaluation agent (copy of training agent).
+        cfg: VideoCallbackSettings (interval, environment, seed, etc.).
+        _loggers: MetricsLogger backends for artifact/metric logging.
+        env: Video recording environment (single env, sync).
+        _step: Counter for video artifact naming.
+        _last_step: Last collector step seen (for final video timing).
+    """
+
     def __init__(
         self,
         agent: Agent,
         metrics_loggers: list[MetricsLogger],
         config: VideoCallbackSettings,
     ):
+        """Initialize video recording callback.
+
+        Args:
+            agent: Evaluation agent for recording.
+            metrics_loggers: Tracking backends for video/metric logging.
+            config: Video settings including environment, interval, seed.
+        """
         self.agent = agent
         self.cfg = config
         self._loggers = metrics_loggers
@@ -27,8 +54,12 @@ class RecordVideoCallback(CollectorCallback):
         self._step = 0
         self._last_step = 0
 
-
     def record(self, step: int):
+        """Run one episode, capture video, log metrics and video artifact.
+
+        Args:
+            step: Training step for logging context.
+        """
         logger.debug("Recording video...")
         results = run_inference(
             self.agent,
@@ -46,19 +77,19 @@ class RecordVideoCallback(CollectorCallback):
             [lgr.log_artifact(video_path, artifact_path=f"videos/step_{self._step}") for lgr in self._loggers]
 
         self._step += 1
-        return
 
     def on_rollout_start(self, *args, **kwargs):
         pass
 
     def on_env_step(self, step: int, *args, **kwargs):
+        """Record video at configured step interval."""
         self._last_step = step
         if step % self.cfg.interval == 0:
             self.record(step)
 
-
     def on_rollout_end(self, *args, **kwargs):
-        # the collector ends a rollout without a step number, so continue from
+        """Record final video, ensure agent returns to train mode."""
+        # The collector ends a rollout without a step number, so continue from
         # the last one it reported; the environment is closed either way, and a
         # failed recording must not leave the policy in eval mode
         try:

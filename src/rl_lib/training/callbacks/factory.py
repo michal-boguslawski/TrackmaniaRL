@@ -1,3 +1,9 @@
+"""Callback factory: builds TrainingCallback/CollectorCallback instances from config.
+
+Registers callback constructors in CALLBACK_FACTORIES and provides create_callbacks()
+to instantiate all configured callbacks with resolved settings.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -18,12 +24,26 @@ from rl_lib.training.callbacks.record_video import RecordVideoCallback
 
 @dataclass
 class CallbackGroups:
+    """Container for callbacks split by when they're invoked.
+
+    Attributes:
+        trainer: Callbacks invoked during PPO optimization (TrainingCallback).
+        collector: Callbacks invoked during environment rollout (CollectorCallback).
+    """
     trainer: list[TrainingCallback] = field(default_factory=list)
     collector: list[CollectorCallback] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class CallbackFactoryContext:
+    """Resolved dependencies passed to each callback builder.
+
+    Attributes:
+        config: Full RunConfig (provides access to all settings).
+        agent: Training agent (for checkpoints, evaluation).
+        video_agent: Evaluation agent with video recording setup.
+        metrics_loggers: List of MetricsLogger backends (console, MLflow).
+    """
     config: RunConfig
     agent: Agent
     video_agent: Agent
@@ -34,12 +54,14 @@ CallbackBuilder = Callable[[CallbackFactoryContext], CallbackGroups]
 
 
 def _checkpoints(context: CallbackFactoryContext) -> CallbackGroups:
+    """Build checkpoint saving callback (trainer-level)."""
     return CallbackGroups(
         trainer=[CheckpointsSaveCallback(context.agent, context.config.checkpoint_settings())]
     )
 
 
 def _metrics(context: CallbackFactoryContext) -> CallbackGroups:
+    """Build metrics logging callback (trainer-level)."""
     return CallbackGroups(
         trainer=[
             MetricsLoggingCallback(metric_logger, context.config.metrics_settings())
@@ -49,6 +71,7 @@ def _metrics(context: CallbackFactoryContext) -> CallbackGroups:
 
 
 def _episode_statistics(context: CallbackFactoryContext) -> CallbackGroups:
+    """Build episode statistics logging callback (collector-level)."""
     return CallbackGroups(
         collector=[
             RecordStatisticLoggerCallback(
@@ -60,6 +83,7 @@ def _episode_statistics(context: CallbackFactoryContext) -> CallbackGroups:
 
 
 def _record_video(context: CallbackFactoryContext) -> CallbackGroups:
+    """Build video recording callback (collector-level)."""
     return CallbackGroups(
         collector=[RecordVideoCallback(
             agent=context.video_agent,
@@ -70,6 +94,7 @@ def _record_video(context: CallbackFactoryContext) -> CallbackGroups:
 
 
 def _evaluation(context: CallbackFactoryContext) -> CallbackGroups:
+    """Build periodic evaluation callback (collector-level)."""
     return CallbackGroups(
         collector=[EvaluationCallback(
             agent=context.agent,
@@ -95,7 +120,22 @@ def create_callbacks(
     metrics_loggers: list[MetricsLogger],
     run_config: dict | None = None,
 ) -> CallbackGroups:
-    """Create configured trainer/collector callbacks through a single registry."""
+    """Create all configured trainer/collector callbacks.
+
+    Always adds ParamsLoggingCallback (logs full config at start) and
+    FinalModelSaveCallback (saves final model at end) in addition to
+    callbacks specified in config.callbacks.
+
+    Args:
+        config: Validated RunConfig with callbacks list.
+        agent: Training agent.
+        video_agent: Evaluation agent for video recording.
+        metrics_loggers: MetricsLogger backends (console, MLflow).
+        run_config: Full config dict for MLflow param logging.
+
+    Returns:
+        CallbackGroups with populated trainer and collector lists.
+    """
     context = CallbackFactoryContext(
         config=config,
         agent=agent,

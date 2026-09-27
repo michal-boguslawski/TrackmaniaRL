@@ -1,3 +1,9 @@
+"""Policy evaluation utilities: run inference and log results.
+
+Provides run_inference() for deterministic evaluation episodes and
+log_evaluation_results() for logging per-episode and aggregate metrics.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -17,11 +23,18 @@ logger = getLogger(__name__)
 
 @dataclass(frozen=True)
 class EpisodeResult:
+    """Single completed episode result.
+
+    Attributes:
+        return_: Episode return (sum of rewards).
+        length: Episode length in steps.
+    """
     return_: float
     length: int
 
 
 def _scalar(value) -> float | None:
+    """Extract first scalar from array-like value."""
     if value is None:
         return None
     try:
@@ -32,7 +45,20 @@ def _scalar(value) -> float | None:
 
 
 def _episode_return_from_info(info: dict, env_index: int, stats_key: str) -> float | None:
-    """Read the pre-transform episode reward from Gymnasium episode info."""
+    """Read the pre-transform episode reward from Gymnasium episode info.
+
+    Tries multiple locations where RecordEpisodeStatistics may store returns:
+    1. final_info[env_index][stats_key]["r"] (for autoreset)
+    2. info[stats_key]["r"][env_index] with done mask
+
+    Args:
+        info: Info dict from vector env step.
+        env_index: Environment index in vector.
+        stats_key: Episode statistics key (default "episode").
+
+    Returns:
+        Episode return if found, None otherwise.
+    """
     final_infos = info.get("final_info")
     if final_infos is not None:
         try:
@@ -72,6 +98,20 @@ def run_inference(
     original train/eval mode is restored even if stepping raises an error.
     Pre-transform episode returns are read from episode statistics in ``info``
     when present; raw step rewards are the fallback.
+
+    Args:
+        agent: Policy agent (copied to isolate temporal state).
+        env: Vectorized evaluation environment.
+        episodes: Number of episodes to run (distributed across envs).
+        seed: Random seed for environment reset.
+        temperature: Action sampling temperature (None = agent default).
+        episode_stats_key: Key for episode statistics in info dict.
+
+    Returns:
+        List of EpisodeResult with return and length for each episode.
+
+    Raises:
+        ValueError: If episodes < 1 or env.num_envs < 1.
     """
     if episodes < 1:
         raise ValueError("episodes must be at least 1")
@@ -151,7 +191,22 @@ def log_evaluation_results(
     step: int,
     scope: str = "",
 ) -> dict[str, float]:
-    """Log every completed episode and an aggregate summary to each logger."""
+    """Log every completed episode and an aggregate summary to each logger.
+
+    Metrics are prefixed with "evaluation/<scope>/" for organization.
+
+    Args:
+        results: List of EpisodeResult from run_inference.
+        metrics_loggers: List of MetricsLogger backends.
+        step: Training step for logging context.
+        scope: Optional scope suffix (e.g., "periodic", "final", "video").
+
+    Returns:
+        Summary dict with mean/std/min/max returns and lengths.
+
+    Raises:
+        ValueError: If results is empty.
+    """
     if not results:
         raise ValueError("cannot log an empty evaluation")
 

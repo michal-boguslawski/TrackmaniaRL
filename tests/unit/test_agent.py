@@ -416,7 +416,7 @@ def test_partial_grad_norms_cover_every_submodule(agent: Agent):
     )
     log_probs.sum().backward()
 
-    norms = agent.get_parital_clip_grad_norms()
+    norms = agent.get_partial_clip_grad_norms()
 
     assert set(norms) == {
         "grad_norm/cnn",

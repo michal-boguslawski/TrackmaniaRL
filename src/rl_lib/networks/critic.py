@@ -1,3 +1,8 @@
+"""Critic network: MLP value head.
+
+Maps temporal encoding features to a scalar state value estimate.
+"""
+
 import torch as T
 from torch import nn
 
@@ -6,6 +11,13 @@ from rl_lib.networks.utils import init_layer, make_activation
 
 
 class Critic(nn.Module):
+    """MLP value head producing scalar state-value estimates.
+
+    Attributes:
+        in_dim (int): Input feature dimension from temporal encoder.
+        cfg (CriticConfig): Configuration for hidden layers and initialization.
+    """
+
     def __init__(self, in_dim: int, config: CriticConfig):
         super().__init__()
         self.in_dim = in_dim
@@ -33,9 +45,18 @@ class Critic(nn.Module):
 
     @property
     def out_dim(self) -> int:
+        """Output dimension (always 1 for scalar value)."""
         return 1
 
     def forward(self, x: T.Tensor) -> T.Tensor:
+        """Compute state value from temporal encoding.
+
+        Args:
+            x: Tensor of shape (batch, in_dim).
+
+        Returns:
+            Tensor of shape (batch,) scalar value per batch item.
+        """
         return self._network(x).squeeze_(-1)
 
     def __repr__(self) -> str:

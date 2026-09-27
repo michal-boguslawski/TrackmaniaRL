@@ -1,3 +1,16 @@
+"""PPO Trainer: computes losses, performs optimization steps, manages callbacks.
+
+Implements the PPO clipped objective with:
+- Clipped surrogate loss for actor
+- Clipped value loss (Huber) for critic
+- Entropy bonus with decay
+- Mean action regularization (penalizes distance from neutral action)
+- KL-based early stopping (hard and soft)
+- Advantage normalization (batch or global)
+- Learning rate scheduling (cosine or linear)
+- Differential learning rates/weight decay per parameter group
+"""
+
 import numpy as np
 from numpy.typing import NDArray
 from logging import getLogger
@@ -18,12 +31,34 @@ logger = getLogger(__name__)
 
 
 class PPOTrainer:
+    """PPO optimization loop with callbacks and adaptive hyperparameters.
+
+    Manages the optimizer, scheduler, entropy coefficient decay, and the
+    per-update training loop (epochs x minibatches). Callbacks receive
+    metrics at start, minibatch, epoch, and end of each training call.
+
+    Attributes:
+        cfg (TrainerSettings): Training hyperparameters.
+        _agent (Agent): Policy/value network wrapper.
+        _optimizer: Adam or AdamW with parameter groups.
+        _scheduler: LR scheduler (CosineAnnealingLR, LinearLR, or None).
+        _entropy_coef: Current entropy coefficient (decays per update).
+        _step: Global training step counter (minibatches processed).
+    """
+
     def __init__(
         self,
         agent: Agent,
         config: TrainerSettings,
         callbacks: list[TrainingCallback] | None = None,
     ):
+        """Initialize the PPO trainer.
+
+        Args:
+            agent: Agent wrapping the policy/value network.
+            config: TrainerSettings with all PPO hyperparameters.
+            callbacks: List of TrainingCallbacks for training events.
+        """
         self.cfg = config
         self._agent = agent
         self._optimizer = self._build_optimizer()
@@ -40,6 +75,17 @@ class PPOTrainer:
         self._agent.train()
 
     def _build_optimizer(self) -> Adam | AdamW:
+        """Build optimizer with differential LR/weight_decay per parameter group.
+
+        Groups (from agent.network_parameter_groups):
+        - backbone_decay: CNN + temporal weights (backbone_lr, weight_decay)
+        - backbone_no_decay: CNN + temporal biases/norms (backbone_lr, no_decay_weight_decay)
+        - head_decay: Actor/critic weights (head_lr, weight_decay)
+        - head_no_decay: Actor/critic biases + log_std (head_lr, no_decay_weight_decay)
+
+        Returns:
+            Configured Adam or AdamW optimizer.
+        """
         param_groups = self._agent.network_parameter_groups()
         optimizer_type = {"Adam": Adam, "AdamW": AdamW}[self.cfg.optimizer]
         return optimizer_type(
@@ -55,6 +101,14 @@ class PPOTrainer:
         )
 
     def setup_train(self, run: RunSettings, rollout: RolloutSettings) -> None:
+        """Initialize learning rate scheduler based on total training iterations.
+
+        Called once before training starts by the entrypoint.
+
+        Args:
+            run: RunSettings with total_steps.
+            rollout: RolloutSettings with buffer_size.
+        """
         total_iters = run.total_steps // rollout.buffer_size + self.cfg.scheduler_extra_iters
         if self.cfg.scheduler == "cosine":
             self._scheduler = CosineAnnealingLR(
@@ -73,16 +127,26 @@ class PPOTrainer:
         else:
             self._scheduler = None
 
-
     @property
     def stack_size(self) -> int:
+        """Temporal window size (delegated to agent)."""
         return self._agent.stack_size
 
     @property
     def device(self) -> T.device:
+        """Compute device (delegated to agent)."""
         return self._agent.device
 
     def act(self, observation: T.Tensor, done: T.Tensor) -> tuple[T.Tensor, T.Tensor, T.Tensor]:
+        """Sample action, log-prob, and value (delegated to agent).
+
+        Args:
+            observation: NHWC uint8 tensor (batch, H, W, C).
+            done: Boolean tensor (batch,) episode termination flags.
+
+        Returns:
+            Tuple of (action, log_probs, value).
+        """
         action, log_probs, critic_value = self._agent.act(observation, done)
         return action, log_probs, critic_value
 
@@ -92,6 +156,17 @@ class PPOTrainer:
         actor_max_norm: float | None = None,
         critic_max_norm: float | None = None,
     ) -> dict[str, float]:
+        """Clip gradients per parameter group and return norms.
+
+        Args:
+            backbone_max_norm: Max norm for CNN + temporal params.
+            actor_max_norm: Max norm for actor params.
+            critic_max_norm: Max norm for critic params.
+            (Defaults from config if None)
+
+        Returns:
+            Dict with clipped norms per group.
+        """
         backbone_max_norm = self.cfg.backbone_max_grad_norm if backbone_max_norm is None else backbone_max_norm
         actor_max_norm = self.cfg.actor_max_grad_norm if actor_max_norm is None else actor_max_norm
         critic_max_norm = self.cfg.critic_max_grad_norm if critic_max_norm is None else critic_max_norm
@@ -119,6 +194,20 @@ class PPOTrainer:
         advantages: T.Tensor,
         dones: T.Tensor,
     ) -> dict[str, float]:
+        """Single minibatch gradient step.
+
+        Args:
+            observation: Flattened observations (batch * seq, H, W, C).
+            action: Actions taken (batch * seq, action_dim).
+            old_log_probs: Log-probs under old policy (batch * seq,).
+            old_values: Value estimates under old policy (batch * seq,).
+            returns: GAE returns (batch * seq,).
+            advantages: GAE advantages (batch * seq,).
+            dones: Done flags for temporal masking (batch * seq,).
+
+        Returns:
+            Dict of loss and metric scalars for logging.
+        """
 
         (actor_loss, critic_loss, entropy_loss), loss_metrics = self.calculate_losses(advantages, returns, old_log_probs, old_values, observation, action, dones)
         loss = actor_loss + self.cfg.critic_beta * critic_loss - self._entropy_coef * entropy_loss
@@ -132,9 +221,6 @@ class PPOTrainer:
         loss.backward()
 
         metrics = self._get_train_step_metrics(loss)
-        # if metrics["metrics/grad_norm/max"] > 100:
-        #     print(metrics)
-        #     raise "dupa"
         self.clip_grad_norm()
 
         self._optimizer.step()
@@ -143,14 +229,26 @@ class PPOTrainer:
         return {**loss_metrics, **metrics}
 
     def _get_train_step_metrics(self, loss: T.Tensor) -> dict[str, float]:
+        """Collect scalar metrics for this minibatch step."""
         with T.no_grad():
             metrics = {
                 "loss/total": loss.detach().item(),
-                **self._agent.get_parital_clip_grad_norms()
+                **self._agent.get_partial_clip_grad_norms()
             }
         return metrics
 
     def _actor_loss(self, advantages: T.Tensor, log_probs: T.Tensor, old_log_probs: T.Tensor, action_mean: T.Tensor) -> tuple[T.Tensor, dict[str, float]]:
+        """Compute clipped surrogate actor loss with mean regularization.
+
+        Args:
+            advantages: GAE advantages (batch * seq,).
+            log_probs: New policy log-probs (batch * seq,).
+            old_log_probs: Old policy log-probs (batch * seq,).
+            action_mean: Mean actions from new policy (batch * seq, action_dim).
+
+        Returns:
+            Tuple of (actor_loss, metrics_dict).
+        """
         if self.cfg.advantage_normalization_strategy and self.cfg.advantage_normalization_strategy == "batch":
             advantages = (advantages - advantages.mean()) / (advantages.std() + self.cfg.advantage_epsilon)
 
@@ -181,6 +279,7 @@ class PPOTrainer:
         return actor_loss, metrics
 
     def _actor_loss_metrics(self, log_ratio: T.Tensor, surrogate_loss: T.Tensor, mean_reg: T.Tensor, action_mean: T.Tensor) -> dict[str, float]:
+        """Compute detailed actor metrics for logging."""
         with T.no_grad():
             log_ratio_total = log_ratio.sum(-1)
             ratio_total = log_ratio_total.exp()
@@ -213,6 +312,16 @@ class PPOTrainer:
         return metrics
 
     def _critic_loss(self, returns: T.Tensor, values: T.Tensor, old_values: T.Tensor) -> tuple[T.Tensor, dict[str, float]]:
+        """Compute clipped Huber value loss.
+
+        Args:
+            returns: GAE returns (batch * seq,).
+            values: New value estimates (batch * seq,).
+            old_values: Old value estimates (batch * seq,).
+
+        Returns:
+            Tuple of (critic_loss, metrics_dict).
+        """
         assert values.shape == old_values.shape == returns.shape
         value_clip_epsilon = self.cfg.value_clip_epsilon or self.cfg.ppo_epsilon
         clipped_values = old_values + (values - old_values).clamp(-value_clip_epsilon, value_clip_epsilon)
@@ -227,6 +336,17 @@ class PPOTrainer:
         return critic_loss, metrics
 
     def _entropy_loss(self, dist: Distribution) -> tuple[T.Tensor, dict[str, float]]:
+        """Compute entropy bonus (negative loss = maximize entropy).
+
+        Uses base Beta distribution entropy (TanhTransform has no closed form).
+
+        Args:
+            dist: Actor's TransformedDistribution.
+
+        Returns:
+            Tuple of (entropy_loss, metrics_dict). entropy_loss is positive,
+            subtracted in total loss to encourage exploration.
+        """
         # entropy of the base Normal; TanhTransform doesn't have closed-form entropy
         entropy: T.Tensor = dist.base_dist.entropy()
         entropy_loss = entropy.sum(dim=-1).mean()
@@ -254,6 +374,20 @@ class PPOTrainer:
         action: T.Tensor,
         dones: T.Tensor | None = None
     ) -> tuple[tuple[T.Tensor, T.Tensor, T.Tensor], dict[str, float]]:
+        """Evaluate policy on batch and compute all loss components.
+
+        Args:
+            advantages: GAE advantages (batch * seq,).
+            returns: GAE returns (batch * seq,).
+            old_log_probs: Old policy log-probs (batch * seq,).
+            old_values: Old value estimates (batch * seq,).
+            observation: Flattened observations (batch * seq, H, W, C).
+            action: Actions taken (batch * seq, action_dim).
+            dones: Done flags for temporal masking (batch * seq,) or None.
+
+        Returns:
+            Tuple of ((actor_loss, critic_loss, entropy_loss), metrics_dict).
+        """
         log_probs, values, dist, action_mean = self._agent.evaluate_actions(observation, action, dones)
         actor_loss, actor_metrics = self._actor_loss(advantages, log_probs, old_log_probs, action_mean)
         critic_loss, critic_metrics = self._critic_loss(returns, values, old_values)
@@ -280,8 +414,29 @@ class PPOTrainer:
         stack_size: int,
         shuffle: bool,
     ) -> Iterator[dict[str, T.Tensor]]:
-        """Iterate over minibatches from a batch of sequences."""
+        """Iterate over minibatches from a batch of sequences.
 
+        Samples IID minibatches across (env, time) by flattening the batch
+        and randomly permuting. For each minibatch, reconstructs the
+        temporal observation/done windows of length stack_size.
+
+        Args:
+            batch: Dict from RolloutBuffer.get() with keys:
+                observation: (num_envs, seq_len + stack_size - 2, H, W, C)
+                action: (num_envs, seq_len - 1, action_dim)
+                old_log_probs: (num_envs, seq_len - 1)
+                critic_value: (num_envs, seq_len - 1)
+                returns: (num_envs, seq_len - 1)
+                advantages: (num_envs, seq_len - 1)
+                dones: (num_envs, seq_len + stack_size - 2)
+            minibatch_size: Number of transitions per minibatch.
+            stack_size: Temporal window size.
+            shuffle: Whether to shuffle indices (IID) or use sequential.
+
+        Yields:
+            Minibatch dict with same keys but flattened batch dimension
+            and observation/dones windows of length stack_size.
+        """
         num_envs, batch_size, _ = batch["action"].shape
         indices = (
             np.random.permutation(batch_size * num_envs)
@@ -309,6 +464,7 @@ class PPOTrainer:
             }
 
     def _get_metrics_from_batch(self, batch: T.Tensor):
+        """Compute rollout-level metrics from a full batch for logging."""
         metrics = {
             "rollout/returns": batch["returns"].mean().item(),
             "rollout/advantages_mean": batch["advantages"].mean().item(),
@@ -328,9 +484,11 @@ class PPOTrainer:
         return metrics
 
     def step_env(self, env: Env, state: NDArray, done: T.Tensor, temperature: float | None = None) -> tuple:
+        """Step environment using agent policy (delegated to agent)."""
         return self._agent.step_env(env, state, done, temperature)
 
     def bootstrap_value(self, observation: T.Tensor) -> T.Tensor:
+        """Bootstrap value for truncated episodes (delegated to agent)."""
         return self._agent.bootstrap_value(observation)
 
     def train(
@@ -341,6 +499,14 @@ class PPOTrainer:
         training_step: int,
         # rng: np.random.Generator,
     ):
+        """Run PPO epochs over a collected batch.
+
+        Args:
+            batch: Dict from RolloutBuffer.get().
+            epochs: Number of passes over the batch.
+            minibatch_size: Transitions per minibatch.
+            training_step: Global environment step count (for callbacks/logging).
+        """
 
         self._on_start(
             step=training_step,
@@ -433,4 +599,5 @@ class PPOTrainer:
         return config
 
     def network_config(self) -> dict[str, int | float | str]:
+        """Flat, MLflow-loggable network hyperparameters."""
         return self._agent.network_config()

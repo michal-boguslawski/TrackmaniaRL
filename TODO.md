@@ -30,5 +30,5 @@
 - [ ] Avoid repeated gradient-norm passes and excessive per-minibatch `.item()` synchronization; aggregate diagnostic metrics where practical. Each minibatch runs eight full gradient-norm passes (three for clipping, five for the per-module diagnostics in `Agent.get_parital_clip_grad_norms`), each ending in its own `.item()`.
 - [ ] Evaluate preallocated rollout storage to reduce per-step tensor cloning and stacking overhead. `RolloutBuffer` keeps a `deque` per field, clones on every append, restacks every field in `get()`, and runs the GAE recursion as a Python loop.
 - [x] Make CPU/CUDA installation choices explicit; separate development/notebook dependencies from runtime dependencies.
-- [ ] Move `pytest`, `matplotlib` and `ipykernel` out of the runtime dependencies into a `dev` extra. The CPU/GPU extras are done; the dependency split is not.
+- [x] Move `pytest`, `matplotlib` and `ipykernel` out of the runtime dependencies into a `dev` extra. The CPU/GPU extras are done; the dependency split is not.
 - [ ] Consider splitting PPO loss/metrics, minibatch generation, and update-loop responsibilities once correctness tests are in place. `PPOTrainer` is a single 434-line class covering the optimizer, clipping, three loss/metric helpers, the minibatch generator and the update loop.

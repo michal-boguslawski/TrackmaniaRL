@@ -1,3 +1,5 @@
+"""Utility for stopping video recording in Gymnasium wrapper chains."""
+
 import gymnasium as gym
 from logging import getLogger
 
@@ -6,10 +8,17 @@ logger = getLogger(__name__)
 
 
 def stop_video_recording(env: gym.Env) -> str | None:
-    """
-    Walk down the wrapper chain and stop/finalize video recording on
-    whichever wrapper is the RecordVideo instance. Returns True if a
-    recorder was found and stopped, False otherwise.
+    """Walk wrapper chain to find and stop RecordVideo, return video path.
+
+    Searches for a wrapper with stop_recording() or close_video_recorder()
+    method defined directly on its class (not inherited). Calls the method
+    and returns the constructed video file path.
+
+    Args:
+        env: Base environment (may be wrapped).
+
+    Returns:
+        Path to recorded video file, or None if no recorder found.
     """
     current = env
     while current is not None:

@@ -360,7 +360,7 @@ def test_train_step_clips_gradients(trainer: PPOTrainer, rollout):
     minibatch = next(trainer._get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
     trainer.train_step(**minibatch)
 
-    norms = trainer._agent.get_parital_clip_grad_norms()
+    norms = trainer._agent.get_partial_clip_grad_norms()
 
     for key in ("grad_norm/cnn", "grad_norm/sequence_encoder", "grad_norm/actor", "grad_norm/critic"):
         assert norms[key] <= 0.5 + 1e-4, f"{key} was not clipped to 0.5"

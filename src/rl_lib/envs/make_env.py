@@ -1,3 +1,9 @@
+"""Vectorized environment factory with configurable wrappers.
+
+Builds Gymnasium vector environments from EnvironmentSettings, applying
+wrappers in order and optionally adding reward normalization.
+"""
+
 from copy import copy
 from gymnasium import make_vec, VectorizeMode
 from gymnasium.vector import AutoresetMode, VectorEnv
@@ -7,7 +13,23 @@ from functools import partial
 from rl_lib.envs.wrappers.registry import WRAPPERS
 from rl_lib.run_config import EnvironmentSettings, WrapperSettings
 
+
 def make_env(config: EnvironmentSettings) -> VectorEnv:
+    """Create a vectorized environment with configured wrappers.
+
+    Args:
+        config: EnvironmentSettings with id, num_envs, wrappers, etc.
+
+    Returns:
+        VectorEnv with all wrappers applied and optional reward normalization.
+
+    Wrapper order:
+    1. record_video (if config.record_video or wrapper present)
+    2. All wrappers from config.wrappers in order
+    3. NormalizeReward (if config.normalize_rewards)
+
+    Video recording forces SYNC vectorization mode.
+    """
     _wrappers = copy(config.wrappers)
     configured_video = any(wrapper.name == "record_video" for wrapper in _wrappers)
     if config.record_video and not configured_video:
@@ -28,6 +50,7 @@ def make_env(config: EnvironmentSettings) -> VectorEnv:
         if settings.name == "frame_stack" and "stack_size" not in options:
             raise ValueError("frame_stack wrapper requires stack_size")
         wrappers_fn.append(partial(WRAPPERS[settings.name], **options))
+
     env = make_vec(
         config.id,
         num_envs=config.num_envs,

@@ -1,3 +1,11 @@
+"""Collector callback: logs episode statistics from vector environment info.
+
+Reads episode returns/lengths from Gymnasium's RecordEpisodeStatistics wrapper
+output in the info dict. Supports two modes:
+- step: log mean return/length per step (per batch of done episodes)
+- mean: accumulate and log running mean at flush (end of rollout)
+"""
+
 from typing import Any
 
 from rl_lib.tracking.base import MetricsLogger
@@ -6,11 +14,33 @@ from rl_lib.run_config import EpisodeStatisticsCallbackSettings
 
 
 class RecordStatisticLoggerCallback(CollectorCallback):
+    """Log episode statistics from vector environment info dict.
+
+    Extracts episode returns and lengths from the stats_key entry in info
+    (populated by RecordEpisodeStatistics wrapper). In 'step' mode, logs
+    per-step batch means; in 'mean' mode, accumulates and logs running
+    average at flush time.
+
+    Attributes:
+        _logger: MetricsLogger backend.
+        cfg: EpisodeStatisticsCallbackSettings (mode, stats_key).
+        _returns_sum: Accumulated sum of episode returns (mean mode).
+        _lengths_sum: Accumulated sum of episode lengths (mean mode).
+        _n: Total episodes accumulated (mean mode).
+        _last_step: Step of last episode batch (mean mode).
+    """
+
     def __init__(
         self,
         logger: MetricsLogger,
         config: EpisodeStatisticsCallbackSettings,
     ):
+        """Initialize statistics logging callback.
+
+        Args:
+            logger: MetricsLogger backend.
+            config: Settings with mode ('step' or 'mean') and stats_key.
+        """
         self._logger = logger
         self.cfg = config
         self._returns_sum = 0.0
@@ -18,11 +48,11 @@ class RecordStatisticLoggerCallback(CollectorCallback):
         self._n = 0
         self._last_step: int | None = None
 
-
     def on_rollout_start(self, *args, **kwargs):
         pass
 
     def on_env_step(self, step: int, info: dict[str, Any], *args, **kwargs):
+        """Process completed episodes from info dict."""
         if self.cfg.stats_key in info:
             dones = info[f"_{self.cfg.stats_key}"]
             returns = info[self.cfg.stats_key]["r"][dones]
@@ -46,6 +76,7 @@ class RecordStatisticLoggerCallback(CollectorCallback):
         self.flush()
 
     def flush(self):
+        """Log accumulated mean statistics (for 'mean' mode)."""
         if self.cfg.mode != "mean" or self._n == 0:
             return
 

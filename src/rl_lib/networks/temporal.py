@@ -1,3 +1,9 @@
+"""Temporal encoder: 1D convolution over stacked feature sequences.
+
+Reduces a (batch, stack_size, feature_dim) sequence to (batch, out_dim)
+via a single full-length Conv1d kernel, with optional LayerNorm.
+"""
+
 import torch as T
 from torch import nn
 
@@ -5,6 +11,18 @@ from rl_lib.networks.config import TemporalConfig
 
 
 class TemporalCNN1D(nn.Module):
+    """1D convolution over temporal feature sequences.
+
+    Uses a kernel of size `stack_size` to collapse the sequence dimension
+    in one step. Input normalization and output normalization are optional
+    LayerNorm layers.
+
+    Attributes:
+        stack_size (int): Number of frames in the input sequence (kernel size).
+        in_dim (int): Input feature dimension per frame.
+        cfg (TemporalConfig): Configuration for output dim, bias, normalization.
+    """
+
     def __init__(self, stack_size: int, in_dim: int, config: TemporalConfig):
         super().__init__()
         self.stack_size = stack_size
@@ -17,14 +35,23 @@ class TemporalCNN1D(nn.Module):
 
     @property
     def out_dim(self) -> int:
+        """Output feature dimension after temporal encoding."""
         return self.cfg.out_dim
 
     def forward(self, x: T.Tensor) -> T.Tensor:
+        """Encode sequence of features to fixed-size vector.
+
+        Args:
+            x: Tensor of shape (batch, stack_size, in_dim).
+
+        Returns:
+            Tensor of shape (batch, out_dim).
+        """
         x = self._norm(x)
-        x = x.permute(0, 2, 1)
+        x = x.permute(0, 2, 1)  # (batch, in_dim, stack_size) for Conv1d
         x = self._encoder(x)
-        x = x.permute(0, 2, 1)
-        x = x.squeeze(1)
+        x = x.permute(0, 2, 1)  # (batch, 1, out_dim)
+        x = x.squeeze(1)        # (batch, out_dim)
         x = self._out_norm(x)
         return x
 

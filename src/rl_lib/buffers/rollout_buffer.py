@@ -1,3 +1,11 @@
+"""Rollout buffer with GAE computation for PPO.
+
+Stores transitions from vectorized environments and computes returns/advantages
+using Generalized Advantage Estimation. Handles the shift between stored done
+flags (marking step *end*) and returned dones (marking frame *start* of new
+episode) to align with Agent's temporal masking convention.
+"""
+
 from collections import deque
 from dataclasses import dataclass
 import torch as T
@@ -6,6 +14,19 @@ from rl_lib.run_config import RolloutSettings
 
 @dataclass(slots=True, frozen=True)
 class RolloutStep:
+    """Single transition stored in the rollout buffer.
+
+    Attributes:
+        observation: Raw observation (NHWC, uint8) of shape (num_envs, H, W, C).
+        action: Action taken, shape (num_envs, action_dim).
+        critic_value: Value estimate V(s), shape (num_envs,).
+        old_log_probs: Log-prob of action under old policy, shape (num_envs,).
+        reward: Scalar reward, shape (num_envs,).
+        terminated: Boolean, true if episode terminated at this step.
+        truncated: Boolean, true if episode truncated (time limit) at this step.
+        truncated_value: Bootstrap value for truncated episodes, shape (num_envs,)
+            or None if no truncation occurred.
+    """
     observation: T.Tensor
     action: T.Tensor
     critic_value: T.Tensor
@@ -16,13 +37,30 @@ class RolloutStep:
     truncated_value: T.Tensor | None = None
 
 
-# Rollout Buffer
 class RolloutBuffer:
+    """Fixed-size circular buffer for PPO rollouts with GAE.
+
+    Stores transitions from multiple vectorized environments. When full,
+    computes returns and advantages using GAE with proper handling of
+    termination vs truncation (bootstrap through truncation, stop at either).
+
+    The buffer stores done flags as produced by env.step() (marking the step
+    that *ended* an episode), but get() returns dones shifted by one column
+    so they mean "this frame is the first of a new episode" — the convention
+    Agent._get_mask_window uses while collecting.
+    """
+
     def __init__(
         self,
         config: RolloutSettings,
         stack_size: int,
     ):
+        """Initialize the rollout buffer.
+
+        Args:
+            config: RolloutSettings with buffer_size, gamma, gae_lambda.
+            stack_size: Number of frames in temporal window (for obs/done padding).
+        """
         self.cfg = config
         self.size = config.buffer_size
         self._stack_size = stack_size
@@ -32,11 +70,20 @@ class RolloutBuffer:
         self._counter: int = 0
         self.reset()
 
-
     def is_full(self) -> bool:
+        """Check if buffer has collected enough steps for an update."""
         return self._counter == self.size
 
     def _append_to_buffer(self, key: str, value: T.Tensor, if_append_start: bool = False):
+        """Append tensor to buffer, optionally pre-filling with copies for padding.
+
+        Args:
+            key: Buffer key (e.g., "observation", "reward").
+            value: Tensor to append (will be cloned).
+            if_append_start: If True and buffer has fewer than stack_size-1
+                entries, pre-fill with copies of value. Used for observation
+                and done buffers to provide history for first steps.
+        """
         if if_append_start and len(self._buffer[key]) < self._stack_size - 1:
             for _ in range(self._stack_size - 1):
                 self._buffer[key].append(value.clone())
@@ -46,9 +93,11 @@ class RolloutBuffer:
         self._buffer[key].append(value.clone())
 
     def add(self, step: RolloutStep):
-        # if self._counter >= self.size:
-        #     raise IndexError("Rollout buffer is full")
+        """Add a rollout step to the buffer.
 
+        Args:
+            step: RolloutStep containing all transition data for one env step.
+        """
         for key in self._buffer.keys():
             if_append_start = (key in ["observation", "terminated", "truncated"])
             value = getattr(step, key)
@@ -68,10 +117,23 @@ class RolloutBuffer:
         gae_lambda: float,
         truncated_value: T.Tensor | None = None,
     ) -> tuple[T.Tensor, T.Tensor]:
-        """
-        reward shape is (batch, length - 1)
-        critic_value shape is (batch, length)
-        terminated shape is (batch, length - 1)
+        """Compute GAE returns and advantages.
+
+        Bootstraps through truncation (uses truncated_value) but stops
+        advantage recursion at either termination or truncation.
+
+        Args:
+            reward: Tensor of shape (batch, length - 1).
+            critic_value: Tensor of shape (batch, length).
+            terminated: Boolean tensor of shape (batch, length - 1).
+            truncated: Boolean tensor of shape (batch, length - 1).
+            gamma: Discount factor.
+            gae_lambda: GAE lambda parameter.
+            truncated_value: Optional bootstrap values for truncated steps,
+                shape (batch, length - 1).
+
+        Returns:
+            Tuple of (returns, advantages), each shape (batch, length - 1).
         """
         dones = T.logical_or(terminated, truncated)
         next_value = critic_value[:, 1:]
@@ -91,6 +153,26 @@ class RolloutBuffer:
         return returns, advantages
 
     def get(self, gamma: float | None = None, gae_lambda: float | None = None) -> dict[str, T.Tensor]:
+        """Compute returns/advantages and return flattened batch for PPO update.
+
+        Returns tensors with batch dimension (num_envs) and sequence dimension
+        flattened for minibatch sampling. The done flags are shifted so they
+        indicate "this frame starts a new episode".
+
+        Args:
+            gamma: Override discount factor (default: config.gamma).
+            gae_lambda: Override GAE lambda (default: config.gae_lambda).
+
+        Returns:
+            Dict with keys:
+            - observation: (batch, length + stack_size - 2, H, W, C)
+            - action: (batch, length - 1, action_dim)
+            - old_log_probs: (batch, length - 1)
+            - critic_value: (batch, length - 1)
+            - returns: (batch, length - 1)
+            - advantages: (batch, length - 1)
+            - dones: (batch, length + stack_size - 2) — shifted flags
+        """
         gamma = self.gamma if gamma is None else gamma
         gae_lambda = self.gae_lambda if gae_lambda is None else gae_lambda
         buffer = {key: T.stack(list(value), dim=1) for key, value in self._buffer.items()}
@@ -123,20 +205,26 @@ class RolloutBuffer:
         )
 
         flat = {
-            "observation": buffer["observation"][:, :-1],  # (batch, length + stack_size - 2, *obs_shape)
-            "action": buffer["action"][:, :-1],  # (batch, length-1, *action_shape)
-            "old_log_probs": buffer["old_log_probs"][:, :-1],  # (batch, length-1)
-            "critic_value": buffer["critic_value"][:, :-1],  # (batch, length-1)
-            "returns": returns,  # (batch, length - 1)
-            "advantages": advantages,  # (batch, length - 1)
-            "dones": dones[:, :-1],  # (batch, length + stack_size - 2)
+            "observation": buffer["observation"][:, :-1],
+            "action": buffer["action"][:, :-1],
+            "old_log_probs": buffer["old_log_probs"][:, :-1],
+            "critic_value": buffer["critic_value"][:, :-1],
+            "returns": returns,
+            "advantages": advantages,
+            "dones": dones[:, :-1],
         }
         return flat
 
     def reset_counter(self):
+        """Reset step counter without clearing buffer (for multi-epoch updates)."""
         self._counter = 0
 
     def reset(self):
+        """Clear buffer and reset counter.
+
+        Observation and done buffers have maxlen = size + stack_size - 1
+        to accommodate the initial padding copies.
+        """
         self._buffer = {
             "observation": deque(maxlen=self.size + self._stack_size - 1),
             "action": deque(maxlen=self.size),

@@ -1,3 +1,10 @@
+"""Logging configuration with session ID injection and queue-based async handlers.
+
+Configures Python logging from a YAML file (default: config/logging.yaml),
+injects a unique session ID into every log record, and ensures proper
+shutdown of queue listeners on exit.
+"""
+
 from __future__ import annotations
 
 import atexit
@@ -16,8 +23,14 @@ _DEFAULT_CONFIG = Path(__file__).parent / "config" / "logging.yaml"
 
 
 def _generate_session_id() -> str:
-    """<hostname>-<UTC timestamp>-<short uuid>, same scheme as MLflowLogger's
-    run name so you can correlate a log file with its MLflow run at a glance."""
+    """Generate a unique session identifier.
+
+    Format: <hostname>-<UTC timestamp>-<short uuid>, matching MLflowLogger's
+    run naming scheme for easy correlation between log files and MLflow runs.
+
+    Returns:
+        Session ID string.
+    """
     host = socket.gethostname().split(".")[0]
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     short_id = uuid.uuid4().hex[:6]
@@ -25,6 +38,11 @@ def _generate_session_id() -> str:
 
 
 def _install_session_id_factory(session_id: str) -> None:
+    """Wrap the global LogRecord factory to inject session_id into every record.
+
+    Args:
+        session_id: The session ID to attach to all log records.
+    """
     old_factory = logging.getLogRecordFactory()
 
     def record_factory(*args, **kwargs):
@@ -40,6 +58,21 @@ def setup_logging(
     default_level: int = logging.DEBUG,
     session_id: str | None = None,
 ) -> str:
+    """Configure logging from YAML, inject session ID, start queue listener.
+
+    Args:
+        config_path: Path to logging YAML config. Defaults to package config.
+        default_level: Fallback level if config file not found.
+        session_id: Explicit session ID (overrides env var and generation).
+
+    Returns:
+        The session ID used (generated or provided).
+
+    Side Effects:
+        - Modifies global logging configuration
+        - Starts queue handler listener thread
+        - Registers shutdown_logging at exit
+    """
     session_id = session_id or os.environ.get("RL_LIB_SESSION_ID") or _generate_session_id()
     _install_session_id_factory(session_id)
 
@@ -70,6 +103,10 @@ def setup_logging(
 
 
 def shutdown_logging() -> None:
+    """Stop the queue handler listener thread on process exit.
+
+    Safe to call multiple times; checks listener state before stopping.
+    """
     queue_handler = logging.getHandlerByName("queue_handler")
     if queue_handler is not None and queue_handler.listener is not None and queue_handler.listener._thread is not None:
         queue_handler.listener.stop()

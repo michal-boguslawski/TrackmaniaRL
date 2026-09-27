@@ -1,3 +1,10 @@
+"""Rollout collector: orchestrates environment steps, buffer filling, and training updates.
+
+Coordinates the interaction between vectorized environments, the agent policy,
+the rollout buffer, and the PPO trainer. Manages callbacks for logging,
+video recording, and checkpointing at the rollout level.
+"""
+
 from gymnasium.vector import VectorEnv
 import json
 import numpy as np
@@ -11,6 +18,22 @@ from rl_lib.training.callbacks.base import CollectorCallback, CallbackList
 
 
 class RolloutCollector:
+    """Collects rollouts from vectorized environments and triggers PPO updates.
+
+    Runs a loop of environment steps, storing transitions in the rollout buffer.
+    When the buffer is full, calls the trainer to perform PPO epochs over the
+    collected data. Handles truncated episode bootstrap value computation
+    using Gymnasium's final_observation from vector env info dict.
+
+    Attributes:
+        env: Vectorized Gymnasium environment.
+        buffer: RolloutBuffer for storing transitions.
+        trainer: PPOTrainer for policy updates.
+        cfg: RolloutSettings (buffer_size, epochs, minibatch_size, gamma, gae_lambda).
+        seed: Environment seed.
+        run_config: Full run config dict for MLflow logging.
+    """
+
     def __init__(
         self,
         env: VectorEnv,
@@ -21,6 +44,21 @@ class RolloutCollector:
         seed: int | None = None,
         run_config: dict | None = None,
     ):
+        """Initialize the rollout collector.
+
+        Args:
+            env: Vectorized environment (must match buffer/trainer config).
+            buffer: RolloutBuffer instance.
+            trainer: PPOTrainer instance.
+            config: RolloutSettings shared with buffer (validated for consistency).
+            callbacks: List of CollectorCallbacks for rollout-level events.
+            seed: Random seed for environment reset.
+            run_config: Full config dict for MLflow parameter logging.
+
+        Raises:
+            ValueError: If buffer.cfg != config (epochs/minibatch_size or
+                gamma/gae_lambda would disagree).
+        """
         if buffer.cfg != config:
             raise ValueError(
                 "the collector and its buffer must share one RolloutSettings; "
@@ -34,20 +72,28 @@ class RolloutCollector:
         self.run_config = run_config or {}
         self._callbacks = CallbackList(callbacks)
 
-
     def _on_rollout_start(self, *args, **kwargs):
+        """Notify callbacks that rollout collection is starting."""
         self._callbacks.on_rollout_start(*args, **kwargs)
 
     def _on_env_step(self, *args, **kwargs):
+        """Notify callbacks of each environment step."""
         self._callbacks.on_env_step(*args, **kwargs)
 
     def _on_rollout_end(self, *args, **kwargs):
+        """Notify callbacks that rollout collection has ended."""
         self._callbacks.on_rollout_end(*args, **kwargs)
 
     def _callback_flush(self, *args, **kwargs):
+        """Flush callback buffers (e.g., write metrics to MLflow)."""
         self._callbacks.flush(*args, **kwargs)
 
     def run(self, training_steps: int):
+        """Main collection loop.
+
+        Args:
+            training_steps: Total number of vector-environment steps to collect.
+        """
         state, _ = self.env.reset(seed=self.seed)
         done = T.zeros(self.env.num_envs, dtype=T.bool).to(self.trainer.device)
         self.buffer.reset()
@@ -123,7 +169,8 @@ class RolloutCollector:
 
     def config(self, training_steps: int | None = None) -> dict[str, int | float | str]:
         """Flat, MLflow-loggable config for the whole training run, merging
-        this collector's own params with buffer/trainer/network configs."""
+        this collector's own params with buffer/trainer/network configs.
+        """
         merged: dict[str, int | float | str] = {
             "epochs": self.cfg.epochs,
             "minibatch_size": self.cfg.minibatch_size,

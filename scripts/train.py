@@ -1,3 +1,9 @@
+"""Training entrypoint script.
+
+Loads configuration from YAML and runs the PPO training pipeline.
+Uses package resource to locate default config file.
+"""
+
 import argparse
 from importlib import resources
 
