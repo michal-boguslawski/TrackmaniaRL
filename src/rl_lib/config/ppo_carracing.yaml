@@ -126,6 +126,9 @@ tracking:
   mlflow: true
   experiment_name: CarRacing-v3
   log_system_metrics: true
+  # Metric detail: 0 logs nothing, 1 logs only the core training losses,
+  # 2 logs every metric.
+  verbosity: 2
 
 callbacks:
   - name: checkpoints

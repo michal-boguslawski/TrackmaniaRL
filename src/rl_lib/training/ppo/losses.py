@@ -6,6 +6,7 @@ from torch.distributions import Distribution
 
 from rl_lib.agent import Agent
 from rl_lib.run_config import TrainerSettings
+from rl_lib.tracking.verbosity import Verbosity, as_verbosity
 from rl_lib.training.ppo.metrics import _tensor_metrics_to_scalars
 
 
@@ -14,17 +15,24 @@ class PPOLosses:
 
     The settings are supplied to each calculation so replacing a trainer's
     configuration takes effect immediately rather than leaving stale settings
-    in this component.
+    in this component. The verbosity decides how much of the diagnostic
+    metrics is computed: below ``Verbosity.ALL`` the reductions behind them
+    are skipped, while the losses themselves are always produced.
     """
 
-    def __init__(self, agent: Agent):
+    def __init__(self, agent: Agent, verbosity: int | Verbosity = Verbosity.ALL):
         """Initialize loss evaluation for an agent.
 
         Args:
             agent: Agent used to evaluate actions and provide the critic Huber
                 loss delta from its network configuration.
+            verbosity: Metric detail level deciding which diagnostics to compute.
+
+        Raises:
+            ValueError: If verbosity is not one of 0, 1, or 2.
         """
         self._agent = agent
+        self._verbosity = as_verbosity(verbosity)
         self._critic_loss_fn = nn.HuberLoss(
             reduction="none", delta=agent.network.cfg.critic.huber_delta
         )
@@ -133,25 +141,33 @@ class PPOLosses:
         with T.no_grad():
             log_ratio_total = log_ratio.sum(-1)
             ratio_total = log_ratio_total.exp()
+            # The KL is the only diagnostic the update loop reads to stop an
+            # epoch early, so it is always computed.
             approx_kl = (ratio_total - 1 - log_ratio_total).mean()
+            metric_tensors = {
+                "metrics/actor_loss": actor_loss.detach(),
+                "metrics/approx_kl": approx_kl,
+            }
+            if not self._verbosity.logs_diagnostics:
+                return _tensor_metrics_to_scalars(metric_tensors)
             ratio_per_action = log_ratio.exp()
             approx_kl_per_action = (ratio_per_action - 1 - log_ratio).mean(dim=0)
             ratio_max = ratio_total.max()
             clip_fraction = (
                 T.abs(ratio_total - 1) > cfg.ppo_epsilon
             ).float().mean()
-            metric_tensors = {
-                "metrics/actor_loss": actor_loss.detach(),
-                "metrics/approx_kl": approx_kl,
-                "metrics/ratio_max": ratio_max,
-                "metrics/clip_fraction": clip_fraction,
-                "metrics/surrogate_loss": surrogate_loss.detach(),
-                "metrics/mean_reg": mean_reg.detach(),
-                "metrics/mean_abs_max": action_mean.abs().max(),
-                "metrics/tanh_saturation_frac": (
-                    action_mean.abs() > cfg.tanh_saturation_threshold
-                ).float().mean(),
-            }
+            metric_tensors.update(
+                {
+                    "metrics/ratio_max": ratio_max,
+                    "metrics/clip_fraction": clip_fraction,
+                    "metrics/surrogate_loss": surrogate_loss.detach(),
+                    "metrics/mean_reg": mean_reg.detach(),
+                    "metrics/mean_abs_max": action_mean.abs().max(),
+                    "metrics/tanh_saturation_frac": (
+                        action_mean.abs() > cfg.tanh_saturation_threshold
+                    ).float().mean(),
+                }
+            )
             metric_tensors.update(
                 {
                     f"metrics/mean_abs_max_{index}": action_mean[:, index]
@@ -212,17 +228,20 @@ class PPOLosses:
         """
         entropy: T.Tensor = dist.base_dist.entropy()
         entropy_loss = entropy.sum(dim=-1).mean()
-        with T.no_grad():
-            log_std = dist.base_dist.variance.pow(1 / 2).log().mean(0)
-            metric_tensors = {
-                **{
-                    f"metrics/entropy_{index}": value
-                    for index, value in enumerate(entropy.mean(0))
-                },
-                "loss/entropy": entropy_loss.detach(),
-                **{
-                    f"metrics/log_std_{index}": value
-                    for index, value in enumerate(log_std)
-                },
-            }
+        metric_tensors = {"loss/entropy": entropy_loss.detach()}
+        if self._verbosity.logs_diagnostics:
+            with T.no_grad():
+                log_std = dist.base_dist.variance.pow(1 / 2).log().mean(0)
+                metric_tensors.update(
+                    {
+                        f"metrics/entropy_{index}": value
+                        for index, value in enumerate(entropy.mean(0))
+                    }
+                )
+                metric_tensors.update(
+                    {
+                        f"metrics/log_std_{index}": value
+                        for index, value in enumerate(log_std)
+                    }
+                )
         return entropy_loss, _tensor_metrics_to_scalars(metric_tensors)

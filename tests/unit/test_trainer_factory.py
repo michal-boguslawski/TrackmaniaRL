@@ -6,6 +6,7 @@ from pkgutil import ModuleInfo
 import pytest
 
 from rl_lib.run_config import TrainerSettings
+from rl_lib.tracking.verbosity import Verbosity
 from rl_lib.training import factory
 from rl_lib.training.ppo.trainer import PPOTrainer
 
@@ -26,6 +27,14 @@ def test_create_trainer_builds_ppo_without_naming_it_in_the_factory(agent):
     trainer = factory.create_trainer("ppo", agent=agent, config=TrainerSettings())
 
     assert isinstance(trainer, PPOTrainer)
+
+
+def test_create_trainer_forwards_the_verbosity_to_the_algorithm(agent):
+    trainer = factory.create_trainer(
+        "ppo", agent=agent, config=TrainerSettings(), verbosity=1
+    )
+
+    assert trainer._verbosity == Verbosity.CORE
 
 
 def test_create_trainer_constructs_a_registered_trainer(monkeypatch):

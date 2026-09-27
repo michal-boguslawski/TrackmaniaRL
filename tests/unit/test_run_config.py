@@ -20,6 +20,22 @@ def test_sample_yaml_loads_full_current_run_defaults():
     assert config.network.cnn.conv_layers[0].kernel_size == 8
     assert config.callback("checkpoints").interval == 200
     assert config.callback("evaluation").final_episodes == 1_000
+    assert config.tracking.verbosity == 2
+
+
+def test_tracking_verbosity_selects_how_many_metrics_reach_the_backends(tmp_path):
+    path = tmp_path / "verbosity.yaml"
+    path.write_text("tracking:\n  verbosity: 1\n", encoding="utf-8")
+
+    assert load_config(str(path)).tracking.verbosity == 1
+
+
+def test_tracking_verbosity_rejects_an_unknown_level(tmp_path):
+    path = tmp_path / "bad_verbosity.yaml"
+    path.write_text("tracking:\n  verbosity: 3\n", encoding="utf-8")
+
+    with pytest.raises(ValidationError):
+        load_config(str(path))
 
 
 def test_missing_yaml_sections_resolve_from_pydantic_defaults(tmp_path):

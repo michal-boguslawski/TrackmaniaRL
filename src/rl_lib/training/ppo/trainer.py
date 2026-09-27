@@ -8,6 +8,7 @@ from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR
 
 from rl_lib.agent import Agent
+from rl_lib.tracking.verbosity import Verbosity, as_verbosity
 from rl_lib.training.callbacks.base import Callback, CallbackList
 from rl_lib.run_config import RolloutSettings, RunSettings, TrainerSettings
 from rl_lib.training.ppo.losses import PPOLosses
@@ -32,6 +33,8 @@ class PPOTrainer:
         _scheduler: LR scheduler (CosineAnnealingLR, LinearLR, or None).
         _entropy_coef: Current entropy coefficient (decays per update).
         _step: Global training step counter (minibatches processed).
+        _verbosity (Verbosity): Metric detail; below ALL the diagnostic
+            metrics are not computed at all.
     """
 
     def __init__(
@@ -39,6 +42,7 @@ class PPOTrainer:
         agent: Agent,
         config: TrainerSettings,
         callbacks: list[Callback] | None = None,
+        verbosity: int | Verbosity = Verbosity.ALL,
     ):
         """Initialize the PPO trainer.
 
@@ -46,6 +50,11 @@ class PPOTrainer:
             agent: Agent wrapping the policy/value network.
             config: TrainerSettings with all PPO hyperparameters.
             callbacks: Callbacks for training events.
+            verbosity: Metric detail level deciding which metrics are computed
+                and handed to the tracking backends.
+
+        Raises:
+            ValueError: If verbosity is not one of 0, 1, or 2.
         """
         self.cfg = config
         self._agent = agent
@@ -55,7 +64,8 @@ class PPOTrainer:
         # decays every update, so its live value lives on the instance while
         # cfg.entropy_coef stays the initial coefficient.
         self._entropy_coef = self.cfg.entropy_coef
-        self._losses = PPOLosses(self._agent)
+        self._verbosity = as_verbosity(verbosity)
+        self._losses = PPOLosses(self._agent, self._verbosity)
         self._step = 0
         self._callbacks = CallbackList(callbacks)
         self._agent.train()
@@ -221,7 +231,13 @@ class PPOTrainer:
     def _get_train_step_metrics(
         self, loss: T.Tensor, grad_norms: dict[str, T.Tensor]
     ) -> dict[str, float]:
-        """Collect loss and gradient diagnostics with one scalar transfer."""
+        """Collect loss and gradient diagnostics with one scalar transfer.
+
+        The gradient norms are needed for clipping regardless; only their
+        transfer to the host is skipped when the diagnostics are not logged.
+        """
+        if not self._verbosity.logs_diagnostics:
+            return {}
         metric_tensors = {
             "loss/total": loss.detach(),
             **{
@@ -285,7 +301,13 @@ class PPOTrainer:
         self._callbacks.on_epoch(*args, **kwargs)
 
     def _get_metrics_from_batch(self, batch: T.Tensor):
-        """Compute rollout-level metrics from a full batch for logging."""
+        """Compute rollout-level metrics from a full batch for logging.
+
+        The values are read with one ``.item()`` each, so the whole block is
+        skipped when the verbosity does not log them.
+        """
+        if not self._verbosity.logs_diagnostics:
+            return {}
         metrics = {
             "rollout/returns": batch["returns"].mean().item(),
             "rollout/advantages_mean": batch["advantages"].mean().item(),

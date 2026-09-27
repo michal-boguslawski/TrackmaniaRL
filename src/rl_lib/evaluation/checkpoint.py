@@ -20,6 +20,7 @@ from rl_lib.evaluation.inference import log_evaluation_results, run_inference
 from rl_lib.networks.factory import Network
 from rl_lib.run_config import RunConfig, load_config
 from rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.verbosity import filter_loggers
 from rl_lib.evaluation.runtime import _episode_stats_key, _default_metrics_loggers
 
 
@@ -128,7 +129,8 @@ def _evaluate_configured_policy(
         config: RunConfig for environment and agent settings.
         episodes: Number of episodes to run.
         num_envs: Parallel environments.
-        metrics_loggers: Tracking backends.
+        metrics_loggers: Tracking backends, filtered by the config's
+            ``tracking.verbosity`` before results are logged.
         record_video: Whether to record videos.
         scope: Metric prefix scope ("local" or "mlflow").
         checkpoint_path: Optional path to local checkpoint.
@@ -139,6 +141,7 @@ def _evaluate_configured_policy(
     """
     device = resolve_device(config)
     env_config = _evaluation_environment(config, num_envs, record_video)
+    metrics_loggers = filter_loggers(metrics_loggers, config.tracking.verbosity)
 
     with closing(make_env(env_config)) as env:
         if network is None:

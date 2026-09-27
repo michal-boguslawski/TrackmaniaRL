@@ -500,6 +500,128 @@ def test_train_step_clips_gradients(trainer: PPOTrainer, rollout):
         assert norms[key] <= 0.5 + 1e-4, f"{key} was not clipped to 0.5"
 
 
+# ------------------------------------------------------------------ verbosity
+
+CORE_LOSS_METRIC_KEYS = {
+    "loss/critic",
+    "loss/entropy",
+    "metrics/actor_loss",
+    "metrics/approx_kl",
+}
+
+
+def _uniform_beta_distribution():
+    """A transformed uniform Beta, the shape the losses expect (they read
+    ``base_dist``)."""
+    return T.distributions.TransformedDistribution(
+        T.distributions.Beta(T.ones(4, ACTION_DIM), T.ones(4, ACTION_DIM)),
+        T.distributions.transforms.AffineTransform(loc=-1.0, scale=2.0),
+    )
+
+
+def _losses_at(agent: Agent, verbosity) -> PPOLosses:
+    return PPOLosses(agent, verbosity)
+
+
+def test_core_verbosity_still_computes_the_losses_and_the_kl(
+    agent: Agent, trainer_settings: TrainerSettings, rollout
+):
+    """The update loop reads approx_kl to stop an epoch early, so verbosity can
+    never drop it without changing how training behaves."""
+    trainer = PPOTrainer(agent, trainer_settings, verbosity=1)
+    minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
+
+    metrics = trainer.train_step(**minibatch)
+
+    assert set(metrics) == CORE_LOSS_METRIC_KEYS
+
+
+def test_core_verbosity_does_not_transfer_the_diagnostics_to_the_host(
+    agent: Agent, trainer_settings: TrainerSettings, rollout
+):
+    trainer = PPOTrainer(agent, trainer_settings, verbosity=1)
+    minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
+
+    metrics = trainer.train_step(**minibatch)
+
+    for key in ("loss/total", "grad_norm/max", "metrics/clip_fraction", "metrics/log_std_0"):
+        assert key not in metrics
+
+
+def test_core_verbosity_keeps_the_losses_finite_and_updates_the_parameters(
+    agent: Agent, trainer_settings: TrainerSettings, rollout
+):
+    trainer = PPOTrainer(agent, trainer_settings, verbosity=1)
+    minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
+    before = {name: param.clone() for name, param in trainer._agent._network.named_parameters()}
+
+    metrics = trainer.train_step(**minibatch)
+
+    assert all(T.isfinite(T.tensor(value)) for value in metrics.values())
+    assert any(
+        not T.equal(param, before[name])
+        for name, param in trainer._agent._network.named_parameters()
+    )
+
+
+@pytest.mark.parametrize("verbosity", [0, 1])
+def test_low_verbosity_skips_the_rollout_batch_metrics(
+    agent: Agent, trainer_settings: TrainerSettings, rollout, verbosity
+):
+    trainer = PPOTrainer(agent, trainer_settings, verbosity=verbosity)
+
+    assert trainer._get_metrics_from_batch(rollout) == {}
+
+
+def test_full_verbosity_keeps_the_rollout_batch_metrics(
+    agent: Agent, trainer_settings: TrainerSettings, rollout
+):
+    trainer = PPOTrainer(agent, trainer_settings)
+
+    metrics = trainer._get_metrics_from_batch(rollout)
+
+    assert "rollout/explained_variance" in metrics
+    assert "rollout/action_mean_0" in metrics
+
+
+@pytest.mark.parametrize("verbosity", [0, 1])
+def test_low_verbosity_losses_omit_the_per_action_diagnostics(
+    agent: Agent, verbosity
+):
+    losses = _losses_at(agent, verbosity)
+    dist = _uniform_beta_distribution()
+
+    entropy_loss, entropy_metrics = losses.entropy_loss(dist)
+    _, actor_metrics = losses.actor_loss(
+        TrainerSettings(),
+        T.ones(4),
+        T.rand(4, ACTION_DIM),
+        T.rand(4, ACTION_DIM),
+        T.rand(4, ACTION_DIM),
+    )
+
+    assert set(entropy_metrics) == {"loss/entropy"}
+    assert T.isfinite(entropy_loss)
+    assert "metrics/entropy_0" not in entropy_metrics
+    assert "metrics/log_std_0" not in entropy_metrics
+    assert set(actor_metrics) == {"metrics/actor_loss", "metrics/approx_kl"}
+
+
+def test_full_verbosity_losses_keep_the_per_action_diagnostics(agent: Agent):
+    losses = _losses_at(agent, 2)
+
+    _, entropy_metrics = losses.entropy_loss(_uniform_beta_distribution())
+
+    for index in range(ACTION_DIM):
+        assert f"metrics/entropy_{index}" in entropy_metrics
+        assert f"metrics/log_std_{index}" in entropy_metrics
+
+
+def test_trainer_rejects_an_unknown_verbosity(agent: Agent, trainer_settings: TrainerSettings):
+    with pytest.raises(ValueError, match="verbosity must be one of"):
+        PPOTrainer(agent, trainer_settings, verbosity=7)
+
+
 def test_train_step_skips_a_non_finite_loss(trainer: PPOTrainer, rollout, monkeypatch):
     minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
     before = {name: param.clone() for name, param in trainer._agent._network.named_parameters()}

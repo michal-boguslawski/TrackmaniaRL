@@ -35,6 +35,7 @@ from rl_lib.run_config import RunConfig, load_config
 from rl_lib.tracking.console_logger import ConsoleMetricsLogger
 from rl_lib.tracking.local_artifact_logger import LocalArtifactLogger
 from rl_lib.tracking.mlflow_logger import MLflowLogger
+from rl_lib.tracking.verbosity import Verbosity, filter_loggers
 from rl_lib.training.callbacks.factory import create_callbacks
 from rl_lib.training.factory import create_trainer
 from rl_lib.training.rollout_collector import RolloutCollector
@@ -83,12 +84,17 @@ def run_training(config: RunConfig, config_path: str | Path | None = None) -> No
         T.cuda.reset_peak_memory_stats(device)
 
     console_logger = ConsoleMetricsLogger() if config.tracking.console else None
+    verbosity = config.tracking.verbosity
     with ExitStack() as stack:
         mlflow_logger = stack.enter_context(
             MLflowLogger(
                 config.experiment_name,
                 run_name=config.run_name,
-                log_system_metrics=config.tracking.log_system_metrics,
+                # Host metrics are diagnostics, so they only belong at the
+                # verbosity that logs every metric.
+                log_system_metrics=(
+                    config.tracking.log_system_metrics and verbosity == Verbosity.ALL
+                ),
             )
             if config.tracking.mlflow
             else nullcontext(None)
@@ -96,11 +102,14 @@ def run_training(config: RunConfig, config_path: str | Path | None = None) -> No
         local_artifact_logger = LocalArtifactLogger(
             Path("logs") / "artifacts" / session_id
         )
-        metrics_loggers = [
-            item
-            for item in (console_logger, mlflow_logger, local_artifact_logger)
-            if item is not None
-        ]
+        metrics_loggers = filter_loggers(
+            [
+                item
+                for item in (console_logger, mlflow_logger, local_artifact_logger)
+                if item is not None
+            ],
+            verbosity,
+        )
         env = stack.enter_context(closing(make_env(config.environment)))
         config = config.with_runtime(
             observation_shape=list(env.observation_space.shape),
@@ -131,6 +140,7 @@ def run_training(config: RunConfig, config_path: str | Path | None = None) -> No
             agent=agent,
             config=config.trainer,
             callbacks=callback_groups.trainer,
+            verbosity=verbosity,
         )
         trainer.setup_train(config.run, config.rollout)
 
