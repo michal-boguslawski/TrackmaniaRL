@@ -4,6 +4,7 @@ from logging import getLogger
 from numpy.typing import NDArray
 from gymnasium import Env
 import torch as T
+from torch.profiler import record_function
 from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR
 
@@ -205,7 +206,8 @@ class PPOTrainer:
             Dict of loss and metric scalars for logging.
         """
 
-        (actor_loss, critic_loss, entropy_loss), loss_metrics = self.calculate_losses(advantages, returns, old_log_probs, old_values, observation, action, dones)
+        with record_function("ppo/forward_and_loss"):
+            (actor_loss, critic_loss, entropy_loss), loss_metrics = self.calculate_losses(advantages, returns, old_log_probs, old_values, observation, action, dones)
         loss = actor_loss + self.cfg.critic_beta * critic_loss - self._entropy_coef * entropy_loss
 
         self._optimizer.zero_grad()
@@ -214,7 +216,8 @@ class PPOTrainer:
             logger.error(f"Non-finite loss, skipping update")
             return {}
 
-        loss.backward()
+        with record_function("ppo/backward"):
+            loss.backward()
 
         grad_norms = self._agent.clip_grad_norms(
             self.cfg.backbone_max_grad_norm,
@@ -223,7 +226,8 @@ class PPOTrainer:
         )
         metrics = self._get_train_step_metrics(loss, grad_norms)
 
-        self._optimizer.step()
+        with record_function("ppo/optimizer_step"):
+            self._optimizer.step()
         self._step += 1
 
         return {**loss_metrics, **metrics}

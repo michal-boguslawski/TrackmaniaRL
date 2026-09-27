@@ -1,0 +1,12 @@
+# Opt-in PyTorch profiler capture. Override enabled from the CLI with --profile
+# or --no-profile. The default capture aligns to the first PPO update;
+# schedule lengths count vector-environment iterations.
+enabled: false
+wait_steps: null
+warmup_steps: 1
+active_steps: 2
+repeat: 1
+output_dir: ./logs/profiles
+record_shapes: true
+profile_memory: true
+with_stack: false

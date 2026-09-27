@@ -9,6 +9,7 @@ from gymnasium.vector import VectorEnv
 import json
 import numpy as np
 import torch as T
+from torch.profiler import record_function
 from tqdm import tqdm
 
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
@@ -88,11 +89,17 @@ class RolloutCollector:
         """Flush callback buffers (e.g., write metrics to MLflow)."""
         self._callbacks.flush(*args, **kwargs)
 
-    def run(self, training_steps: int):
+    def run(
+        self,
+        training_steps: int,
+        profiler: T.profiler.profile | None = None,
+    ) -> None:
         """Main collection loop.
 
         Args:
             training_steps: Total number of vector-environment steps to collect.
+            profiler: Optional active PyTorch profiler. Its schedule advances
+                once per vector-environment iteration.
         """
         state, _ = self.env.reset(seed=self.seed)
         done = T.zeros(self.env.num_envs, dtype=T.bool).to(self.trainer.device)
@@ -100,7 +107,18 @@ class RolloutCollector:
         self._on_rollout_start(config=self.config(training_steps))
 
         for i in tqdm(range(training_steps)):
-            (next_state, state, action, log_probs, critic_value, reward, terminated, truncated, done, info) = self.trainer.step_env(self.env, state, done)
+            (
+                next_state,
+                state,
+                action,
+                log_probs,
+                critic_value,
+                reward,
+                terminated,
+                truncated,
+                done,
+                info,
+            ) = self.trainer.step_env(self.env, state, done)
 
             truncated_value = T.zeros_like(
                 truncated,
@@ -127,33 +145,39 @@ class RolloutCollector:
                 for env_index in truncated_indices:
                     bootstrap_observations[env_index] = final_observations[env_index]
                 bootstrap_tensor = T.from_numpy(bootstrap_observations).to(self.trainer.device)
-                values = self.trainer.bootstrap_value(bootstrap_tensor)
+                with record_function("rollout/truncation_bootstrap"):
+                    values = self.trainer.bootstrap_value(bootstrap_tensor)
                 truncated_value[truncated] = values[truncated]
 
-            self.buffer.add(RolloutStep(
-                observation=state,
-                action=action,
-                critic_value=critic_value,
-                old_log_probs=log_probs,
-                reward=T.from_numpy(reward).to(T.float32).to(self.trainer.device),
-                terminated=terminated,
-                truncated=truncated,
-                truncated_value=truncated_value,
-            ))
+            with record_function("rollout/buffer_add"):
+                self.buffer.add(RolloutStep(
+                    observation=state,
+                    action=action,
+                    critic_value=critic_value,
+                    old_log_probs=log_probs,
+                    reward=T.from_numpy(reward).to(T.float32).to(self.trainer.device),
+                    terminated=terminated,
+                    truncated=truncated,
+                    truncated_value=truncated_value,
+                ))
 
             state = next_state
             self._on_env_step(step=i, info=info)
 
             if self.buffer.is_full():
-                self.trainer.train(
-                    self.buffer.get(),
-                    epochs=self.cfg.epochs,
-                    minibatch_size=self.cfg.minibatch_size,
-                    training_step=i,
-                )
+                with record_function("ppo/update"):
+                    self.trainer.train(
+                        self.buffer.get(),
+                        epochs=self.cfg.epochs,
+                        minibatch_size=self.cfg.minibatch_size,
+                        training_step=i,
+                    )
 
                 self.buffer.reset_counter()
                 self._callback_flush()
+
+            if profiler is not None:
+                profiler.step()
 
         self._on_rollout_end()
 

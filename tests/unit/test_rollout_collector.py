@@ -158,6 +158,20 @@ def test_run_keeps_collecting_until_the_buffer_fills(collector: RolloutCollector
     assert collector.buffer.is_full() is False
 
 
+def test_run_advances_optional_profiler_once_per_vector_step(collector: RolloutCollector):
+    class ProfilerSpy:
+        def __init__(self):
+            self.steps = 0
+
+        def step(self):
+            self.steps += 1
+
+    profiler = ProfilerSpy()
+    collector.run(training_steps=3, profiler=profiler)
+
+    assert profiler.steps == 3
+
+
 def test_run_resets_the_environment_and_buffer(collector: RolloutCollector):
     collector.buffer.add  # sanity: the buffer API exists
     from rl_lib.buffers.rollout_buffer import RolloutStep

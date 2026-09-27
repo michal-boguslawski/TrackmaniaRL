@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from rl_lib.buffers.rollout_buffer import RolloutBuffer
+from rl_lib.profiling_config import ProfilingConfig, load_profiling_config
 from rl_lib.run_config import RolloutSettings, RunConfig, WrapperSettings, load_config
 from rl_lib.training.ppo.trainer import PPOTrainer
 
@@ -21,6 +22,35 @@ def test_sample_yaml_loads_full_current_run_defaults():
     assert config.callback("checkpoints").interval == 200
     assert config.callback("evaluation").final_episodes == 1_000
     assert config.tracking.verbosity == 2
+
+
+def test_packaged_profiling_config_is_separate_and_disabled_by_default():
+    from importlib import resources
+
+    path = resources.files("rl_lib.config") / "profiling.yaml"
+    config = load_profiling_config(path)
+
+    assert isinstance(config, ProfilingConfig)
+    assert config.enabled is False
+    assert config.wait_steps is None
+    assert (config.warmup_steps, config.active_steps) == (1, 2)
+    assert config.resolve_schedule(1024) == (1022, 1)
+    assert config.resolve_schedule(1) == (0, 0)
+
+
+def test_profiling_schedule_can_be_set_explicitly(tmp_path):
+    path = tmp_path / "profiling.yaml"
+    path.write_text("wait_steps: 10\nwarmup_steps: 3\n", encoding="utf-8")
+
+    assert load_profiling_config(path).resolve_schedule(1024) == (10, 3)
+
+
+def test_profiling_config_validates_capture_schedule(tmp_path):
+    path = tmp_path / "profiling.yaml"
+    path.write_text("enabled: true\nactive_steps: 0\n", encoding="utf-8")
+
+    with pytest.raises(ValidationError):
+        load_profiling_config(path)
 
 
 def test_tracking_verbosity_selects_how_many_metrics_reach_the_backends(tmp_path):

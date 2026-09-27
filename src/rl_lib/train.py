@@ -20,6 +20,7 @@ import gc
 import logging
 import random
 import signal
+from importlib import resources
 from pathlib import Path
 
 import numpy as np
@@ -31,6 +32,7 @@ from rl_lib.device import resolve_device
 from rl_lib.envs.make_env import make_env
 from rl_lib.logger_setup import setup_logging, shutdown_logging
 from rl_lib.networks.factory import Network
+from rl_lib.profiling_config import ProfilingConfig, load_profiling_config
 from rl_lib.run_config import RunConfig, load_config
 from rl_lib.tracking.console_logger import ConsoleMetricsLogger
 from rl_lib.tracking.local_artifact_logger import LocalArtifactLogger
@@ -59,12 +61,17 @@ def _seed_everything(seed: int) -> None:
         T.cuda.manual_seed_all(seed)
 
 
-def run_training(config: RunConfig, config_path: str | Path | None = None) -> None:
+def run_training(
+    config: RunConfig,
+    config_path: str | Path | None = None,
+    profiling_config: ProfilingConfig | None = None,
+) -> None:
     """Execute full training run from validated config.
 
     Args:
         config: Validated RunConfig with all settings.
         config_path: Original config file path (for logging).
+        profiling_config: Optional settings for a bounded PyTorch profiler trace.
     """
     level = getattr(logging, config.run.log_level)
     session_id = setup_logging(config.run.log_config, default_level=level) if config.run.log_config else setup_logging(default_level=level)
@@ -155,7 +162,32 @@ def run_training(config: RunConfig, config_path: str | Path | None = None) -> No
         )
         logger.info("Starting training with device=%s config=%s", device, config_path or "<object>")
         try:
-            collector.run(config.run.total_steps)
+            if profiling_config is None or not profiling_config.enabled:
+                collector.run(config.run.total_steps)
+            else:
+                activities = [T.profiler.ProfilerActivity.CPU]
+                if device.type == "cuda":
+                    activities.append(T.profiler.ProfilerActivity.CUDA)
+                trace_dir = Path(profiling_config.output_dir) / session_id
+                wait_steps, warmup_steps = profiling_config.resolve_schedule(
+                    config.rollout.buffer_size
+                )
+                profiler = T.profiler.profile(
+                    activities=activities,
+                    schedule=T.profiler.schedule(
+                        wait=wait_steps,
+                        warmup=warmup_steps,
+                        active=profiling_config.active_steps,
+                        repeat=profiling_config.repeat,
+                    ),
+                    on_trace_ready=T.profiler.tensorboard_trace_handler(str(trace_dir)),
+                    record_shapes=profiling_config.record_shapes,
+                    profile_memory=profiling_config.profile_memory,
+                    with_stack=profiling_config.with_stack,
+                )
+                with profiler:
+                    collector.run(config.run.total_steps, profiler=profiler)
+                logger.info("Profiler traces written to %s", trace_dir)
         except KeyboardInterrupt:
             logger.warning("Rollout interrupted; stopping training")
             raise
@@ -164,11 +196,32 @@ def run_training(config: RunConfig, config_path: str | Path | None = None) -> No
             raise
 
 
-def main(config_path: str | Path) -> None:
-    """CLI entrypoint: load config and run training."""
+def main(
+    config_path: str | Path,
+    profiling_config_path: str | Path | None = None,
+    profile: bool | None = None,
+) -> None:
+    """CLI entrypoint: load run and profiling configs, then train.
+
+    Args:
+        config_path: YAML training configuration.
+        profiling_config_path: Separate YAML profiling configuration. Defaults
+            to the packaged ``profiling.yaml``.
+        profile: Optional CLI override for the profiling config's ``enabled``
+            setting. ``None`` follows the config value.
+    """
     config = load_config(str(config_path))
+    default_profiling_config = resources.files("rl_lib.config") / "profiling.yaml"
+    profiling_path = profiling_config_path or default_profiling_config
+    profiling_settings = load_profiling_config(profiling_path)
+    profiling_enabled = profiling_settings.enabled if profile is None else profile
+    profiling_settings = profiling_settings.model_copy(update={"enabled": profiling_enabled})
     try:
-        run_training(config, config_path=config_path)
+        run_training(
+            config,
+            config_path=config_path,
+            profiling_config=profiling_settings,
+        )
     finally:
         shutdown_logging()
 
@@ -176,4 +229,8 @@ def main(config_path: str | Path) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train the PPO agent using a YAML configuration")
     parser.add_argument("--config", default="configs/ppo_carracing.yaml", help="YAML run configuration")
-    main(parser.parse_args().config)
+    parser.add_argument("--profiling-config", help="Separate YAML configuration for optional PyTorch profiling")
+    parser.add_argument("--profile", dest="profile", action="store_true", default=None)
+    parser.add_argument("--no-profile", dest="profile", action="store_false")
+    args = parser.parse_args()
+    main(args.config, profiling_config_path=args.profiling_config, profile=args.profile)

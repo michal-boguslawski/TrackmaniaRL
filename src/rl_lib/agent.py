@@ -13,6 +13,7 @@ from gymnasium import Env
 import torch as T
 from torch import nn
 from torch.distributions import Distribution
+from torch.profiler import record_function
 from torch.nn.parameter import Parameter
 from typing import Iterator
 
@@ -500,11 +501,13 @@ class Agent:
         """
         state_t = T.from_numpy(state).to(self._device)
         temperature = self.cfg.action_temperature if temperature is None else temperature
-        action, log_probs, value = self.act(state_t, done, temperature)
+        with record_function("agent/policy"):
+            action, log_probs, value = self.act(state_t, done, temperature)
 
-        next_state, reward, terminated, truncated, info = env.step(
-            action.cpu().numpy()
-        )
+        with record_function("environment/step"):
+            next_state, reward, terminated, truncated, info = env.step(
+                action.cpu().numpy()
+            )
 
         terminated_t = T.from_numpy(terminated).to(self._device)
         truncated_t = T.from_numpy(truncated).to(self._device)
