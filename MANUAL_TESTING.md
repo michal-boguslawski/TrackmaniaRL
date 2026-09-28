@@ -103,6 +103,21 @@ size (for example 128), set `minibatch_size` to 64, and set `total_steps` to at
 least 132. Automatic alignment then records the first rollout update; profiling
 adds overhead, so keep it enabled only for short diagnostic captures.
 
+`src/rl_lib/config/manual_profile.yaml` is that config, so the recipe does not
+have to be retyped:
+
+```bash
+uv run --extra cpu python scripts/train.py --config src/rl_lib/config/manual_profile.yaml --profile
+```
+
+It copies `ppo_carracing.yaml`'s network verbatim and sets a 128-step rollout, a
+minibatch of 64, and 132 total steps. The schedule resolves to 126 wait, 1
+warmup, and 2 active vector steps, so the recorded window is the first PPO
+update: 4 minibatches of forward, backward, and optimizer work, versus the single
+minibatch in the smoke trace. It omits the evaluation, video, and periodic
+checkpoint callbacks, which would otherwise add work the profiler would charge
+to the capture.
+
 ## 4. Optional artifact checks
 
 - [x] For a separate video test, add `- name: record_video` to the smoke config's

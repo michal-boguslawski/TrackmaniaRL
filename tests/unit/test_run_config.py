@@ -38,6 +38,39 @@ def test_packaged_profiling_config_is_separate_and_disabled_by_default():
     assert config.resolve_schedule(1) == (0, 0)
 
 
+def test_profile_config_matches_the_documented_capture_recipe():
+    from importlib import resources
+
+    config = load_config(str(resources.files("rl_lib.config") / "manual_profile.yaml"))
+
+    assert config.rollout.buffer_size == 128
+    assert config.rollout.minibatch_size == 64
+    assert config.run.total_steps >= 132
+    # The network is what sets the shape of the traced forward/backward.
+    production = load_config(str(resources.files("rl_lib.config") / "ppo_carracing.yaml"))
+    assert config.network == production.network
+    # Both callbacks run full episodes outside the capture and would dominate it.
+    assert config.callback("evaluation") is None
+    assert config.callback("record_video") is None
+    # state_dict() during a periodic checkpoint would land in the recorded window.
+    assert config.callback("checkpoints") is None
+
+
+def test_profile_config_schedule_covers_the_first_rollout_update():
+    from importlib import resources
+
+    config = load_config(str(resources.files("rl_lib.config") / "manual_profile.yaml"))
+    profiling = load_profiling_config(resources.files("rl_lib.config") / "profiling.yaml")
+
+    wait_steps, warmup_steps = profiling.resolve_schedule(config.rollout.buffer_size)
+
+    # RolloutCollector calls profiler.step() once per vector step and runs the
+    # update on the step that fills the buffer, so automatic alignment must put
+    # the first active step exactly there.
+    assert wait_steps + warmup_steps + 1 == config.rollout.buffer_size
+    assert config.run.total_steps >= config.rollout.buffer_size + warmup_steps + 1
+
+
 def test_profiling_schedule_can_be_set_explicitly(tmp_path):
     path = tmp_path / "profiling.yaml"
     path.write_text("wait_steps: 10\nwarmup_steps: 3\n", encoding="utf-8")

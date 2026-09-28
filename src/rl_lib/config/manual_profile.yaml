@@ -1,0 +1,92 @@
+# Informative PyTorch profiler capture: the production network with a rollout
+# large enough for the profiler to land on a real PPO update.
+#
+# manual_smoke.yaml proves the profiler wiring with 8 steps; it says nothing
+# about throughput. This config follows the recipe in MANUAL_TESTING.md
+# section 3: keep the production network, raise the rollout to 128, use a
+# minibatch of 64, and run at least 132 steps.
+#
+# Why 132 works: profiling.yaml leaves wait_steps null, so resolve_schedule(128)
+# yields 126 wait + 1 warmup + 2 active vector steps. RolloutCollector calls
+# profiler.step() once per vector step, and the buffer fills on step 128, so the
+# two active steps cover the first ppo/update in full.
+#
+# Profiling adds overhead. Keep this to short diagnostic captures.
+run:
+  name: manual-profile
+  total_steps: 132 # vector-environment steps: one full 128-step rollout plus 4
+  seed: 1
+  device: auto
+  log_level: INFO
+
+environment:
+  id: CarRacing-v3
+  # Smoke-sized stepping keeps the capture quick. Raise num_envs and switch to
+  # vectorization_mode: async to profile production-like environment stepping.
+  num_envs: 2
+  vectorization_mode: sync
+
+rollout:
+  buffer_size: 128
+  epochs: 1
+  minibatch_size: 64
+
+# Copied verbatim from ppo_carracing.yaml: the network is what sets the shape
+# of every forward and backward in the trace, so the capture must use it.
+network:
+  cnn:
+    conv_layers:
+      - {out_channels: 32, kernel_size: 8, stride: 4, padding: 0, dilation: 1, groups: 1, bias: true, padding_mode: zeros, activation: relu, init_gain: 1.41421356237, init_bias: 0.0}
+      - {out_channels: 64, kernel_size: 4, stride: 2, padding: 0, dilation: 1, groups: 1, bias: true, padding_mode: zeros, activation: relu, init_gain: 1.41421356237, init_bias: 0.0}
+      - {out_channels: 128, kernel_size: 3, stride: 1, padding: 0, dilation: 1, groups: 1, bias: true, padding_mode: zeros, activation: relu, init_gain: 1.41421356237, init_bias: 0.0}
+      - {out_channels: 128, kernel_size: 3, stride: 2, padding: 0, dilation: 1, groups: 1, bias: true, padding_mode: zeros, activation: relu, init_gain: 1.41421356237, init_bias: 0.0}
+    adaptive_pool_size: 3
+    hidden_layers:
+      - {out_dim: 256, activation: relu, init_gain: 1.41421356237, init_bias: 0.0, bias: true}
+    out_dim: 256
+    output_init_gain: 1.41421356237
+    output_init_bias: 0.0
+  temporal:
+    out_dim: 256
+    normalize_input: true
+    normalize_output: true
+    bias: true
+    norm_eps: 0.00001
+    norm_affine: true
+  actor:
+    hidden_layers:
+      - {out_dim: 256, activation: gelu, init_gain: 1.41421356237, init_bias: 0.0, bias: true}
+    output_init_gain: 0.01
+    output_init_bias: -2.0
+    output_bias: true
+    action_low: [-1.0, 0.0, 0.0]
+    action_high: [1.0, 1.0, 1.0]
+    concentration_offset: 1.0
+    softplus_beta: 1.0
+    softplus_threshold: 20.0
+    default_temperature: 1.0
+    deterministic_distribution_temperature: 1.0
+  critic:
+    hidden_layers:
+      - {out_dim: 256, activation: gelu, init_gain: 1.41421356237, init_bias: 0.0, bias: true}
+    output_init_gain: 1.0
+    output_init_bias: 0.0
+    output_bias: true
+    huber_delta: 1.0
+
+# Trainer hyperparameters are left at their defaults: they change the loss
+# values, not the compute the profiler measures.
+tracking:
+  console: true
+  # A diagnostic capture is not a result worth tracking. Metrics still go to
+  # logs/app.log and the final artifacts to logs/artifacts/<session-id>/.
+  mlflow: false
+  verbosity: 2
+
+callbacks:
+  # No periodic checkpoints: state_dict() would land inside the recorded
+  # window. create_callbacks still logs the final model at rollout end.
+  - name: metrics
+    granularity: batch
+  # No evaluation or record_video: both run full episodes outside the capture
+  # and would dominate the trace.
