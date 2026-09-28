@@ -44,20 +44,26 @@ def _scalar(value) -> float | None:
     return float(values[0]) if values.size else None
 
 
-def _episode_return_from_info(info: dict, env_index: int, stats_key: str) -> float | None:
-    """Read the pre-transform episode reward from Gymnasium episode info.
+def _episode_stat_from_info(
+    info: dict,
+    env_index: int,
+    stats_key: str,
+    stat_name: str,
+) -> float | None:
+    """Read an episode statistic from Gymnasium episode info.
 
-    Tries multiple locations where RecordEpisodeStatistics may store returns:
-    1. final_info[env_index][stats_key]["r"] (for autoreset)
-    2. info[stats_key]["r"][env_index] with done mask
+    Tries multiple locations where RecordEpisodeStatistics may store a stat:
+    1. final_info[env_index][stats_key][stat_name] (for autoreset)
+    2. info[stats_key][stat_name][env_index] with done mask
 
     Args:
         info: Info dict from vector env step.
         env_index: Environment index in vector.
         stats_key: Episode statistics key (default "episode").
+        stat_name: Name of the statistic to read (for example, "r" or "l").
 
     Returns:
-        Episode return if found, None otherwise.
+        Episode statistic if found, None otherwise.
     """
     final_infos = info.get("final_info")
     if final_infos is not None:
@@ -68,7 +74,7 @@ def _episode_return_from_info(info: dict, env_index: int, stats_key: str) -> flo
         if isinstance(final_info, Mapping):
             episode = final_info.get(stats_key)
             if isinstance(episode, Mapping):
-                value = _scalar(episode.get("r"))
+                value = _scalar(episode.get(stat_name))
                 if value is not None:
                     return value
 
@@ -76,7 +82,7 @@ def _episode_return_from_info(info: dict, env_index: int, stats_key: str) -> flo
     if isinstance(episode_stats, Mapping):
         mask = info.get(f"_{stats_key}")
         if mask is None or bool(np.asarray(mask).reshape(-1)[env_index]):
-            values = episode_stats.get("r")
+            values = episode_stats.get(stat_name)
             try:
                 return _scalar(np.asarray(values)[env_index])
             except (IndexError, TypeError, ValueError):
@@ -96,8 +102,8 @@ def run_inference(
 
     The agent's recurrent/temporal history is isolated to this run and its
     original train/eval mode is restored even if stepping raises an error.
-    Pre-transform episode returns are read from episode statistics in ``info``
-    when present; raw step rewards are the fallback.
+    Episode returns and lengths are read from episode statistics in ``info``
+    when present; accumulated step rewards and counts are the fallback.
 
     Args:
         agent: Policy agent (copied to isolate temporal state).
@@ -153,15 +159,23 @@ def run_inference(
             for env_index in np.flatnonzero(done_mask):
                 if len(results) == episodes:
                     break
+                info_return = _episode_stat_from_info(
+                    info, int(env_index), episode_stats_key, "r"
+                )
+                info_length = _episode_stat_from_info(
+                    info, int(env_index), episode_stats_key, "l"
+                )
                 result = EpisodeResult(
                     return_=(
                         info_return
-                        if (info_return := _episode_return_from_info(
-                            info, int(env_index), episode_stats_key
-                        )) is not None
+                        if info_return is not None
                         else float(episode_returns[env_index])
                     ),
-                    length=int(episode_lengths[env_index]),
+                    length=(
+                        int(info_length)
+                        if info_length is not None
+                        else int(episode_lengths[env_index])
+                    ),
                 )
                 results.append(result)
                 logger.debug(

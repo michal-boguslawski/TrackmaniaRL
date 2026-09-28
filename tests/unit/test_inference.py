@@ -117,18 +117,18 @@ def test_run_inference_preserves_eval_mode(agent):
     [
         {
             "_episode": np.array([True, True]),
-            "episode": {"r": np.array([101.0, 202.0]), "l": np.array([1, 1])},
+            "episode": {"r": np.array([101.0, 202.0]), "l": np.array([11, 22])},
         },
         {
             "_episode": np.array([True, True]),
             "final_info": [
-                {"episode": {"r": np.array([101.0]), "l": np.array([1])}},
-                {"episode": {"r": np.array([202.0]), "l": np.array([1])}},
+                {"episode": {"r": np.array([101.0]), "l": np.array([11])}},
+                {"episode": {"r": np.array([202.0]), "l": np.array([22])}},
             ],
         },
     ],
 )
-def test_run_inference_prefers_pre_transform_episode_rewards_in_info(agent, info):
+def test_run_inference_prefers_episode_statistics_in_info(agent, info):
     class InfoRewardEnv:
         num_envs = 2
 
@@ -146,7 +146,10 @@ def test_run_inference_prefers_pre_transform_episode_rewards_in_info(agent, info
 
     results = run_inference(agent, InfoRewardEnv(), episodes=2)
 
-    assert [result.return_ for result in results] == [101.0, 202.0]
+    assert [(result.return_, result.length) for result in results] == [
+        (101.0, 11),
+        (202.0, 22),
+    ]
 
 
 def test_log_evaluation_results_sends_each_episode_and_summary_to_all_loggers():
