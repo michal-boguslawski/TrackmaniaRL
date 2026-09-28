@@ -530,6 +530,25 @@ def test_video_callback_builds_its_own_single_env(video_callback: RecordVideoCal
     assert video_callback.env.num_envs == 1
 
 
+def test_video_callback_disables_same_step_autoreset(monkeypatch, agent: Agent):
+    captured = {}
+
+    def make_env(config):
+        captured["config"] = config
+        return _StubVideoEnv()
+
+    monkeypatch.setattr("rl_lib.training.callbacks.record_video.make_env", make_env)
+
+    callback = RecordVideoCallback(
+        agent=agent,
+        metrics_loggers=[],
+        config=_video_settings(),
+    )
+
+    assert captured["config"].autoreset_mode == "next_step"
+    callback.env.close()
+
+
 def test_video_callback_records_on_the_interval(video_callback: RecordVideoCallback, monkeypatch):
     recorded: list[int] = []
     monkeypatch.setattr(RecordVideoCallback, "record", lambda self, step: recorded.append(step))

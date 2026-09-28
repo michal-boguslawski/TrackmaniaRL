@@ -51,7 +51,15 @@ class RecordVideoCallback(Callback):
         self.agent = agent
         self.cfg = config
         self._loggers = metrics_loggers
-        self.env = make_env(config.environment)
+        # SAME_STEP autoreset resets the wrapped environment on the terminal
+        # step, which makes RecordVideo start the next episode before we stop
+        # the current recording. That leaves a one-frame video for the next
+        # callback invocation. NEXT_STEP lets run_inference stop at the
+        # terminal transition and the next explicit reset start the next video.
+        video_environment = config.environment.model_copy(
+            update={"autoreset_mode": "next_step"}
+        )
+        self.env = make_env(video_environment)
         self._step = 0
         self._last_step = 0
 
