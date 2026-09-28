@@ -27,15 +27,17 @@ the official PyTorch CPU wheel index.
 ## Training configuration
 
 Training is configured with a validated Pydantic model loaded from YAML. The
-sample `configs/ppo_carracing.yaml` lists the run, environment and wrappers,
-agent, rollout, network, PPO trainer, tracking, and callback settings. Missing
-fields use the defaults in `rl_lib.run_config`; unknown fields and invalid
-values are rejected.
+sample `src/rl_lib/config/ppo_carracing.yaml` lists the run, environment and
+wrappers, agent, rollout, network, PPO trainer, tracking, and callback settings.
+Missing fields use the defaults in `rl_lib.run_config`; unknown fields and
+invalid values are rejected.
 
 ```bash
-uv run --extra gpu python scripts/train.py --config configs/ppo_carracing.yaml
+uv run --extra gpu python scripts/train.py
 ```
 
 `run.total_steps` counts vector-environment steps (one call to `env.step`), not
 the aggregate number of transitions across all environments. Copy the sample
-YAML to create another run configuration.
+YAML to create another run configuration. See [MANUAL_TESTING.md](MANUAL_TESTING.md)
+for a short MLflow/profiling smoke config, manual validation checklist, and
+command cheatsheet.

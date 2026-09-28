@@ -1,0 +1,34 @@
+# Short end-to-end configuration for validating logging, artifacts, and profiling.
+# total_steps and callback intervals count vector-environment steps.
+run:
+  name: manual-smoke
+  total_steps: 8
+  seed: 1
+  device: auto
+  log_level: INFO
+
+environment:
+  id: CarRacing-v3
+  num_envs: 2
+  vectorization_mode: sync
+
+rollout:
+  buffer_size: 4
+  epochs: 1
+  minibatch_size: 4
+
+tracking:
+  console: true
+  mlflow: true
+  experiment_name: Trackmania-RL-manual-smoke
+  log_system_metrics: false
+  verbosity: 2
+
+callbacks:
+  - name: checkpoints
+    interval: 4
+  - name: metrics
+    granularity: batch
+  - name: episode_statistics
+    mode: mean
+    stats_key: episode
