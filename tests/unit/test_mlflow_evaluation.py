@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,7 +7,7 @@ import pytest
 import yaml
 
 from rl_lib.evaluation import MLflowModelRef, discover_mlflow_models, evaluate_mlflow, select_mlflow_run
-from rl_lib.evaluation.mlflow_evaluation import _shortest_unique_prefixes
+from rl_lib.evaluation.mlflow_evaluation import _load_mlflow_config, _shortest_unique_prefixes
 from rl_lib.run_config import AgentSettings, RunConfig
 from rl_lib.tracking.base import MetricsLogger
 
@@ -100,7 +99,7 @@ def test_mlflow_evaluation_loads_run_config_model_and_logs(
             ) or agent.network,
         ),
     )
-    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
+    monkeypatch.setattr("rl_lib.evaluation.mlflow_evaluation.mlflow", fake_mlflow)
     monkeypatch.setattr("rl_lib.evaluation.checkpoint.make_env", lambda config: _vector_env(config.num_envs))
     logger = _Logger()
 
@@ -127,7 +126,7 @@ def test_mlflow_run_uri_is_accepted(monkeypatch, tmp_path, network_config, agent
             load_model=lambda uri, map_location: calls.append(uri) or agent.network,
         ),
     )
-    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
+    monkeypatch.setattr("rl_lib.evaluation.mlflow_evaluation.mlflow", fake_mlflow)
     monkeypatch.setattr("rl_lib.evaluation.checkpoint.make_env", lambda config: _vector_env(config.num_envs))
 
     evaluate_mlflow(
@@ -138,6 +137,36 @@ def test_mlflow_run_uri_is_accepted(monkeypatch, tmp_path, network_config, agent
     )
 
     assert calls == ["runs:/run-xyz/final_model"]
+
+
+def test_logged_config_keeps_default_wrappers_when_the_run_omitted_them(tmp_path, monkeypatch):
+    """Runs log unset fields as absent, so defaults must survive the reload."""
+    logged = {
+        "run": {"name": "manual-smoke", "total_steps": 8, "seed": 1},
+        "environment": {"id": "CarRacing-v3", "num_envs": 2, "vectorization_mode": "sync"},
+        "rollout": {"buffer_size": 4, "epochs": 1, "minibatch_size": 4},
+        "callbacks": [
+            {"name": "checkpoints", "interval": 4},
+            {"name": "episode_statistics", "mode": "mean", "stats_key": "episode"},
+        ],
+        "runtime": {"device": "cpu", "seed": 1},
+    }
+    config_path = tmp_path / "run_config.yaml"
+    config_path.write_text(yaml.safe_dump(logged), encoding="utf-8")
+    fake_mlflow = SimpleNamespace(
+        artifacts=SimpleNamespace(download_artifacts=lambda **kwargs: str(config_path)),
+    )
+    monkeypatch.setattr("rl_lib.evaluation.mlflow_evaluation.mlflow", fake_mlflow)
+
+    config = _load_mlflow_config("run-1")
+
+    assert [wrapper.name for wrapper in config.environment.wrappers] == [
+        "record_episode_stats",
+        "grayscale",
+        "reward_on_done",
+        "max_and_skip",
+    ]
+    assert "runtime" not in config.model_fields_set
 
 
 def test_discovery_lists_only_runs_with_final_model_and_computes_prefixes(monkeypatch):
@@ -164,14 +193,82 @@ def test_discovery_lists_only_runs_with_final_model_and_computes_prefixes(monkey
                 return [SimpleNamespace(path="final_model", is_dir=True)]
             return [SimpleNamespace(path="config", is_dir=True)]
 
-    fake_mlflow = SimpleNamespace(tracking=SimpleNamespace(MlflowClient=Client))
-    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
+    monkeypatch.setattr("rl_lib.evaluation.mlflow_evaluation.MlflowClient", Client)
 
     models = discover_mlflow_models("CarRacing-v3")
 
     assert [(model.run_id, model.unique_prefix, model.run_name) for model in models] == [
         ("abc111", "a", "old"),
     ]
+
+
+def test_discovery_uses_logged_model_registry_when_run_has_no_artifact_dir(monkeypatch):
+    """MLflow 3 keeps model files out of the run's artifact directory."""
+    runs = [
+        SimpleNamespace(
+            info=SimpleNamespace(run_id="abc111", start_time=1),
+            data=SimpleNamespace(tags={"mlflow.runName": "ready"}),
+        ),
+        SimpleNamespace(
+            info=SimpleNamespace(run_id="abc222", start_time=2),
+            data=SimpleNamespace(tags={"mlflow.runName": "failed"}),
+        ),
+        SimpleNamespace(
+            info=SimpleNamespace(run_id="abc333", start_time=3),
+            data=SimpleNamespace(tags={"mlflow.runName": "no model"}),
+        ),
+    ]
+    logged_models = [
+        SimpleNamespace(name="final_model", source_run_id="abc111", status="READY"),
+        SimpleNamespace(name="final_model", source_run_id="abc222", status="FAILED"),
+    ]
+    listed = []
+
+    class Client:
+        def get_experiment_by_name(self, name):
+            return SimpleNamespace(experiment_id="experiment-id")
+
+        def search_runs(self, experiment_ids):
+            return runs
+
+        def search_logged_models(self, experiment_ids, filter_string):
+            assert experiment_ids == ["experiment-id"]
+            assert filter_string == "name = 'final_model'"
+            return logged_models
+
+        def list_artifacts(self, run_id):
+            listed.append(run_id)
+            return [SimpleNamespace(path="config", is_dir=True)]
+
+    monkeypatch.setattr("rl_lib.evaluation.mlflow_evaluation.MlflowClient", Client)
+
+    models = discover_mlflow_models("CarRacing-v3")
+
+    assert [model.run_id for model in models] == ["abc111"]
+    assert listed == ["abc222", "abc333"]
+
+
+def test_discovery_without_logged_model_registry_falls_back_to_artifacts(monkeypatch):
+    runs = [
+        SimpleNamespace(
+            info=SimpleNamespace(run_id="abc111", start_time=1),
+            data=SimpleNamespace(tags={}),
+        ),
+    ]
+
+    class Client:
+        def get_experiment_by_name(self, name):
+            return SimpleNamespace(experiment_id="experiment-id")
+
+        def search_runs(self, experiment_ids):
+            return runs
+
+        def list_artifacts(self, run_id):
+            return [SimpleNamespace(path="final_model", is_dir=True)]
+
+    monkeypatch.setattr("rl_lib.evaluation.mlflow_evaluation.MlflowClient", Client)
+
+    assert [model.run_id for model in discover_mlflow_models("CarRacing-v3")] == ["abc111"]
 
 
 def test_mlflow_unique_prefix_selection_and_ambiguity(monkeypatch):

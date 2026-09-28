@@ -11,6 +11,8 @@ import logging
 from pathlib import Path
 from typing import Callable
 
+import mlflow
+from mlflow.tracking import MlflowClient
 import yaml
 
 from rl_lib.device import resolve_device
@@ -22,6 +24,8 @@ from rl_lib.evaluation.runtime import _default_metrics_loggers
 
 
 logger = logging.getLogger(__name__)
+
+FINAL_MODEL_ARTIFACT = "final_model"
 
 
 @dataclass(frozen=True)
@@ -63,12 +67,63 @@ def _shortest_unique_prefixes(run_ids: list[str]) -> dict[str, str]:
     return prefixes
 
 
+def _runs_with_logged_final_model(client: MlflowClient, experiment_id: str) -> set[str]:
+    """Return run IDs in an experiment that logged a usable ``final_model``.
+
+    MLflow 3 stores logged-model files outside the run's artifact directory
+    (under ``<tracking_root>/models/m-<id>/artifacts``) and records the link
+    between model and run in its logged-model registry. The model is therefore
+    no longer visible when listing a run's artifacts, and the registry is the
+    only reliable source of truth.
+
+    Args:
+        client: MLflow tracking client.
+        experiment_id: Experiment to search.
+
+    Returns:
+        Set of run IDs with a usable ``final_model`` logged model. Empty when
+        the installed MLflow has no logged-model registry.
+    """
+    search_logged_models = getattr(client, "search_logged_models", None)
+    if search_logged_models is None:
+        return set()
+
+    run_ids = set()
+    for model in search_logged_models(
+        experiment_ids=[experiment_id],
+        filter_string=f"name = '{FINAL_MODEL_ARTIFACT}'",
+    ):
+        # A FAILED logged model has no loadable artifact behind it.
+        if model.source_run_id and str(model.status) != "FAILED":
+            run_ids.add(model.source_run_id)
+    return run_ids
+
+
+def _has_final_model_artifact(client: MlflowClient, run_id: str) -> bool:
+    """Check whether a run's artifact directory contains ``final_model``.
+
+    Only consulted for runs the logged-model registry does not cover, since
+    older MLflow versions materialized the model inside the run's artifacts.
+
+    Args:
+        client: MLflow tracking client.
+        run_id: MLflow run ID.
+
+    Returns:
+        True if the run has a ``final_model`` directory artifact.
+    """
+    return any(
+        artifact.path == FINAL_MODEL_ARTIFACT and artifact.is_dir
+        for artifact in client.list_artifacts(run_id)
+    )
+
+
 def discover_mlflow_models(experiment_name: str) -> list[MLflowModelRef]:
     """Return finished MLflow runs in an experiment that logged ``final_model``.
 
-    Queries MLflow tracking server for runs in the experiment, filters
-    for those with a "final_model" directory artifact, and computes
-    unique prefixes for interactive selection.
+    Queries MLflow tracking server for runs in the experiment, filters for
+    those with a ``final_model`` model logged, and computes unique prefixes
+    for interactive selection.
 
     Args:
         experiment_name: MLflow experiment name.
@@ -76,25 +131,23 @@ def discover_mlflow_models(experiment_name: str) -> list[MLflowModelRef]:
     Returns:
         List of MLflowModelRef sorted by start_time (newest first).
     """
-    import mlflow
 
-    client = mlflow.tracking.MlflowClient()
+    client = MlflowClient()
     experiment = client.get_experiment_by_name(experiment_name)
     if experiment is None:
         logger.warning("MLflow experiment %r was not found", experiment_name)
         return []
 
     runs = client.search_runs(experiment_ids=[experiment.experiment_id])
+    logged_model_runs = _runs_with_logged_final_model(client, experiment.experiment_id)
     available = []
     for run in runs:
-        if not any(
-            artifact.path == "final_model" and artifact.is_dir
-            for artifact in client.list_artifacts(run.info.run_id)
-        ):
+        run_id = run.info.run_id
+        if run_id not in logged_model_runs and not _has_final_model_artifact(client, run_id):
             continue
         available.append((
-            run.info.run_id,
-            run.data.tags.get("mlflow.runName", run.info.run_id),
+            run_id,
+            run.data.tags.get("mlflow.runName", run_id),
             run.info.start_time or 0,
         ))
 
@@ -151,7 +204,9 @@ def select_mlflow_run(
     """
     models = discover_mlflow_models(experiment_name)
     if not models:
-        raise ValueError(f"No MLflow runs with a final_model artifact in {experiment_name!r}")
+        raise ValueError(
+            f"No MLflow runs with a {FINAL_MODEL_ARTIFACT} artifact in {experiment_name!r}"
+        )
 
     if identifier is None:
         logger.info("Available MLflow models in experiment %s:", experiment_name)
@@ -182,7 +237,6 @@ def _load_mlflow_config(run_id: str) -> RunConfig:
     Returns:
         Validated RunConfig.
     """
-    import mlflow
 
     config_path = mlflow.artifacts.download_artifacts(
         run_id=run_id,
@@ -213,23 +267,29 @@ def _load_mlflow_config(run_id: str) -> RunConfig:
         allowed = wrapper_options.get(name, set())
         return {key: value for key, value in raw_wrapper.items() if key == "name" or key in allowed}
 
+    # Runs are logged with unset fields omitted, so an absent wrapper list means
+    # "use RunConfig defaults". Only rewrite lists that are actually present;
+    # writing an empty list would drop the default wrappers the run trained with.
     environment = raw_config.get("environment", {})
-    environment["wrappers"] = [clean_wrapper(item) for item in environment.get("wrappers", [])]
+    if "wrappers" in environment:
+        environment["wrappers"] = [clean_wrapper(item) for item in environment["wrappers"]]
     callbacks = raw_config.get("callbacks", {})
     if isinstance(callbacks, dict):
         if "video_recording" in callbacks:
             callbacks["video_recording"] = clean_wrapper(callbacks["video_recording"])
-        callbacks["video_wrappers"] = [
-            clean_wrapper(item) for item in callbacks.get("video_wrappers", [])
-        ]
+        if "video_wrappers" in callbacks:
+            callbacks["video_wrappers"] = [
+                clean_wrapper(item) for item in callbacks["video_wrappers"]
+            ]
     elif isinstance(callbacks, list):
         for callback in callbacks:
             if callback.get("name") == "record_video":
                 if "recording" in callback:
                     callback["recording"] = clean_wrapper(callback["recording"])
-                callback["wrappers"] = [
-                    clean_wrapper(item) for item in callback.get("wrappers", [])
-                ]
+                if "wrappers" in callback:
+                    callback["wrappers"] = [
+                        clean_wrapper(item) for item in callback["wrappers"]
+                    ]
     return RunConfig.model_validate(raw_config)
 
 
@@ -286,15 +346,15 @@ def evaluate_mlflow(
 
     config = _load_mlflow_config(model_ref.run_id)
     device = resolve_device(config)
-    import mlflow
 
     network = mlflow.pytorch.load_model(
-        f"runs:/{model_ref.run_id}/final_model",
+        f"runs:/{model_ref.run_id}/{FINAL_MODEL_ARTIFACT}",
         map_location=device,
     )
     if not isinstance(network, Network):
         raise TypeError(
-            f"MLflow artifact final_model from run {model_ref.run_id} is not an rl_lib Network"
+            f"MLflow artifact {FINAL_MODEL_ARTIFACT} from run {model_ref.run_id} "
+            "is not an rl_lib Network"
         )
 
     return _evaluate_configured_policy(
@@ -306,3 +366,7 @@ def evaluate_mlflow(
         scope="mlflow",
         network=network,
     )
+
+
+if __name__ == "__main__":
+    evaluate_mlflow(experiment_name="Trackmania-RL-manual-smoke", episodes=1, num_envs=1, record_video=False)

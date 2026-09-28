@@ -32,3 +32,5 @@ callbacks:
   - name: episode_statistics
     mode: mean
     stats_key: episode
+  - name: record_video
+    interval: 4

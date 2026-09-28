@@ -205,6 +205,10 @@ def test_shutdown_logging_without_a_queue_handler_is_a_noop(restore_logging):
 
 
 class _FakeMlflowPytorch:
+    # MLflow 3 defaults log_model to torch.export; the logger pins pickle so a
+    # custom module reloads as the same class.
+    SERIALIZATION_FORMAT_PICKLE = "pickle"
+
     def __init__(self, calls: list):
         self._calls = calls
 
@@ -296,7 +300,11 @@ def test_log_model_uses_the_registered_model_name(logger: MLflowLogger, fake_mlf
     name, args, kwargs = fake_mlflow.calls[-1]
     assert name == "log_model"
     assert args == (model,)
-    assert kwargs == {"artifact_path": "net", "registered_model_name": "policy-v1"}
+    assert kwargs == {
+        "artifact_path": "net",
+        "registered_model_name": "policy-v1",
+        "serialization_format": "pickle",
+    }
 
 
 def test_log_model_registered_name_can_be_overridden(logger: MLflowLogger, fake_mlflow):

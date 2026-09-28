@@ -8,9 +8,28 @@ Provides a text-based menu for:
 from importlib import resources
 import logging
 
+from rl_lib.logger_setup import setup_logging
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG = str(resources.files("rl_lib.config") / "ppo_carracing.yaml")
+
+
+def _flush_logs() -> None:
+    """Drain the queued log records so output is on screen before a prompt.
+
+    ``config/logging.yaml`` routes records through a QueueListener thread, so
+    records logged just before a prompt can be written after it, which reads as
+    a prompt answering itself. ``QueueHandler.flush()`` is a no-op in the
+    standard library, so the listener is stopped (which drains the queue and
+    joins the thread) and then restarted.
+    """
+    handler = logging.getHandlerByName("queue_handler")
+    listener = getattr(handler, "listener", None)
+    if listener is None or listener._thread is None:
+        return
+    listener.stop()
+    listener.start()
 
 
 def _ask(prompt: str, default: str | None = None) -> str:
@@ -18,6 +37,17 @@ def _ask(prompt: str, default: str | None = None) -> str:
     suffix = f" [{default}]" if default is not None else ""
     answer = input(f"{prompt}{suffix}: ").strip()
     return answer or (default if default is not None else "")
+
+
+def _prompt_for_input(prompt: str) -> str:
+    """Read one line for a library prompt, draining queued log output first.
+
+    Used as the ``input_fn`` for MLflow model selection, where the run list is
+    logged immediately before the prompt. The prompt string already carries its
+    own colon, so this does not go through :func:`_ask`.
+    """
+    _flush_logs()
+    return input(prompt).strip()
 
 
 def _train() -> None:
@@ -71,6 +101,7 @@ def _evaluate() -> None:
             num_envs=num_envs,
             record_video=record_video,
             metrics_loggers=metrics_loggers,
+            input_fn=_prompt_for_input,
         )
         return
 
@@ -90,10 +121,26 @@ def _positive_int(prompt: str, default: str | None = None) -> int:
             logger.warning("Enter a positive whole number for %s.", prompt.lower())
 
 
+def _configure_logging() -> None:
+    """Configure root logging for the interactive session.
+
+    Uses the project's own logging setup so the interactive prompts and the
+    training run share one configuration: the packaged ``config/logging.yaml``
+    puts a DEBUG console handler on stdout and a rotating file handler on
+    ``logs/app.log``, and injects the ``session_id`` its formatter references.
+
+    Reconfiguring is required rather than guarded on "root has no handlers
+    yet": importing ``rl_lib`` transitively imports MLflow, whose
+    PyTorch-Lightning autologging module calls ``logging.basicConfig`` at
+    import time, so root already has a WARNING-only handler by the time this
+    runs and the INFO records that list selectable runs would be dropped.
+    """
+    setup_logging()
+
+
 def main() -> None:
     """Interactive entry point for training and checkpoint evaluation."""
-    if not logging.getLogger().handlers:
-        logging.basicConfig(level=logging.DEBUG)
+    _configure_logging()
     actions = {"1": ("Train PPO", _train), "2": ("Evaluate checkpoint", _evaluate)}
     while True:
         print("\nrl-lib")

@@ -115,6 +115,7 @@ class MLflowLogger(MetricsLogger):
             model,
             artifact_path=normalize_artifact_path(artifact_path),
             registered_model_name=registered_model_name or self._registered_model_name,
+            serialization_format=mlflow.pytorch.SERIALIZATION_FORMAT_PICKLE,
         )
 
     def log_state_dict(self, state_dict: dict, artifact_path: str = "checkpoints") -> None:

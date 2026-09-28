@@ -24,16 +24,19 @@ uv run --extra cpu python scripts/train.py --config src/rl_lib/config/manual_smo
 Open <http://127.0.0.1:5000>, select the `Trackmania-RL-manual-smoke`
 experiment, and verify:
 
-- [ ] A new run appears and finishes with status **FINISHED**.
-- [ ] Parameters include the run configuration and flattened training/network
+- [x] A new run appears and finishes with status **FINISHED**.
+- [x] Parameters include the run configuration and flattened training/network
   settings; `config/run_config.yaml` is present as an artifact.
-- [ ] Training metrics appear against steps (for example PPO loss/entropy and
+- [x] Training metrics appear against steps (for example PPO loss/entropy and
   update diagnostics); there are metrics at the rollout update boundaries.
-- [ ] Artifacts include a periodic checkpoint under `checkpoints/step_...`,
-  `final_state_dict`, and the `final_model` directory.
-- [ ] Locally, `logs/artifacts/<session-id>/` also contains the `.pt` model and
+- [x] Artifacts include a periodic checkpoint under `checkpoints/step_...` and
+  `final_state_dict`. The model is logged under the run's `final_model` name in
+  the MLflow model registry (MLflow 3 stores it under
+  `mlruns/<exp>/models/m-.../artifacts`, not inside the run's artifact
+  directory).
+- [x] Locally, `logs/artifacts/<session-id>/` also contains the `.pt` model and
   state-dictionary artifacts. The session ID is printed in the application log.
-- [ ] `logs/app.log` contains the run startup and training messages.
+- [x] `logs/app.log` contains the run startup and training messages.
 
 The local MLflow UI is for inspecting metrics and downloaded artifacts. For a
 remote tracking server, set `MLFLOW_TRACKING_URI` on the training command, for
@@ -64,9 +67,9 @@ The prompt is also suitable for selecting a local checkpoint instead: choose
 source 1 and point it at
 `logs/artifacts/<session-id>/final_state_dict.pt`, using the same smoke YAML.
 
-- [ ] MLflow model discovery lists the completed run.
-- [ ] Model and saved run config load without error; inference completes.
-- [ ] Evaluation returns and `evaluation/mlflow/...` metrics are reported.
+- [x] MLflow model discovery lists the completed run.
+- [x] Model and saved run config load without error; inference completes.
+- [x] Evaluation returns and `evaluation/mlflow/...` metrics are reported.
 
 This evaluation executes a real CarRacing episode, so it takes longer than the
 8-step training smoke run.
@@ -88,9 +91,9 @@ per vector-environment step. **8 total vector steps** are sufficient to capture
 the first PPO update and write the trace. GPU profiling uses the same command
 with `--extra gpu` and also records CUDA activity when CUDA is available.
 
-- [ ] Training completes and reports the profile output directory.
-- [ ] A `.pt.trace.json` trace exists under `logs/profiles/<session-id>/`.
-- [ ] Open the trace in Perfetto or Chrome tracing and inspect CPU (and CUDA,
+- [x] Training completes and reports the profile output directory.
+- [x] A `.pt.trace.json` trace exists under `logs/profiles/<session-id>/`.
+- [x] Open the trace in Perfetto or Chrome tracing and inspect CPU (and CUDA,
   on GPU) activity. Named regions include policy inference, environment step,
   rollout buffer/update, PPO forward/backward/optimizer, and transfers.
 
@@ -102,15 +105,15 @@ adds overhead, so keep it enabled only for short diagnostic captures.
 
 ## 4. Optional artifact checks
 
-- [ ] For a separate video test, add `- name: record_video` to the smoke config's
+- [x] For a separate video test, add `- name: record_video` to the smoke config's
   callbacks and rerun it. Verify video artifacts appear under `videos/` in
   MLflow. The callback records at step 0 and again at rollout end, so this runs
   two full evaluation episodes and can take substantially longer than the smoke
   training job.
-- [ ] If using a remote tracking server, repeat sections 1–2 with
+- [x] If using a remote tracking server, repeat sections 1–2 with
   `MLFLOW_TRACKING_URI` set and verify the server can serve/download the
   `final_model` and config artifacts.
-- [ ] Try a second run and confirm it creates a distinct MLflow run while using
+- [x] Try a second run and confirm it creates a distinct MLflow run while using
   the same experiment.
 
 ## Commands
