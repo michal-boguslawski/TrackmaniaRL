@@ -389,13 +389,6 @@ def test_statistics_step_mode_flush_is_a_noop():
     assert len(logger.metrics) == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Gymnasium's SAME_STEP autoreset nests the terminal payload under "
-        'info["final_info"], but the callback only looks at info["episode"]'
-    ),
-)
 def test_statistics_reads_gymnasics_nested_final_info():
     logger = FakeLogger()
     callback = RecordStatisticLoggerCallback(logger, EpisodeStatisticsCallbackSettings(mode="step"))
@@ -403,8 +396,10 @@ def test_statistics_reads_gymnasics_nested_final_info():
     callback.on_env_step(
         step=6,
         info={
-            "_episode": np.array([True, False]),
-            "final_info": [{"episode": {"r": np.array([3.0]), "l": np.array([12])}}, {}],
+            "final_info": {
+                "_episode": np.array([True, False]),
+                "episode": {"r": np.array([3.0, 0.0]), "l": np.array([12, 0])},
+            },
         },
     )
 

@@ -6,6 +6,7 @@ output in the info dict. Supports two modes:
 - mean: accumulate and log running mean at flush (end of rollout)
 """
 
+from collections.abc import Mapping
 from typing import Any
 
 from rl_lib.tracking.base import MetricsLogger
@@ -53,10 +54,15 @@ class RecordStatisticLoggerCallback(Callback):
 
     def on_env_step(self, step: int, info: dict[str, Any], *args, **kwargs):
         """Process completed episodes from info dict."""
-        if self.cfg.stats_key in info:
-            dones = info[f"_{self.cfg.stats_key}"]
-            returns = info[self.cfg.stats_key]["r"][dones]
-            lengths = info[self.cfg.stats_key]["l"][dones]
+        episode_info = info.get("final_info")
+        if not isinstance(episode_info, Mapping) or self.cfg.stats_key not in episode_info:
+            episode_info = info
+
+        mask_key = f"_{self.cfg.stats_key}"
+        if self.cfg.stats_key in episode_info and mask_key in episode_info:
+            dones = episode_info[mask_key]
+            returns = episode_info[self.cfg.stats_key]["r"][dones]
+            lengths = episode_info[self.cfg.stats_key]["l"][dones]
             n = int(dones.sum())
 
             if self.cfg.mode == "step":
