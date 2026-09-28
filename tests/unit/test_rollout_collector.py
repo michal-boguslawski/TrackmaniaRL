@@ -172,6 +172,34 @@ def test_run_advances_optional_profiler_once_per_vector_step(collector: RolloutC
     assert profiler.steps == 3
 
 
+def test_profiled_run_records_named_compute_and_transfer_regions(
+    vector_env, agent
+):
+    """The trace is only useful if the per-step and per-update work is split
+    into named regions, including the host/device copies, so the cost split
+    between policy inference, environment waiting, transfers, and the PPO
+    update is readable in a trace viewer."""
+    collector = _collector(vector_env, agent, buffer_size=ROLLOUT_SIZE, minibatch_size=4)
+    profiler = T.profiler.profile(activities=[T.profiler.ProfilerActivity.CPU])
+    with profiler:
+        collector.run(training_steps=ROLLOUT_SIZE, profiler=profiler)
+
+    regions = {event.key for event in profiler.key_averages()}
+    assert {
+        "agent/policy",
+        "environment/step",
+        "rollout/buffer_add",
+        "ppo/update",
+        "transfer/observation_to_device",
+        "transfer/action_to_host",
+        "transfer/flags_to_device",
+        "transfer/reward_to_device",
+        "transfer/minibatch_gather",
+        "transfer/minibatch_indices_to_device",
+        "transfer/metrics_device_sync",
+    } <= regions, sorted(regions)
+
+
 def test_run_resets_the_environment_and_buffer(collector: RolloutCollector):
     collector.buffer.add  # sanity: the buffer API exists
     from rl_lib.buffers.rollout_buffer import RolloutStep

@@ -88,9 +88,11 @@ class Agent:
             normalized to [-1, 1] via (x / divisor + offset).
         """
         assert observation.dtype == T.uint8
-        observation_tensor = observation.to(self._device, T.float32) / self.cfg.observation_divisor
-        observation_tensor = observation_tensor + self.cfg.observation_offset
-        return observation_tensor.permute(0, 3, 1, 2)
+        with record_function("transfer/observation_normalize"):
+            observation_tensor = observation.to(self._device, T.float32) / self.cfg.observation_divisor
+            observation_tensor = observation_tensor + self.cfg.observation_offset
+        with record_function("agent/permute_to_nchw"):
+            return observation_tensor.permute(0, 3, 1, 2)
 
     def feature_extract(self, observation: T.Tensor) -> T.Tensor:
         """Extract CNN features from raw observation.
@@ -499,18 +501,20 @@ class Agent:
             Tuple of (next_state, state_t, action, log_probs, value, reward,
             terminated, truncated, done, info).
         """
-        state_t = T.from_numpy(state).to(self._device)
+        with record_function("transfer/observation_to_device"):
+            state_t = T.from_numpy(state).to(self._device)
         temperature = self.cfg.action_temperature if temperature is None else temperature
         with record_function("agent/policy"):
             action, log_probs, value = self.act(state_t, done, temperature)
 
+        with record_function("transfer/action_to_host"):
+            action_np = action.cpu().numpy()
         with record_function("environment/step"):
-            next_state, reward, terminated, truncated, info = env.step(
-                action.cpu().numpy()
-            )
+            next_state, reward, terminated, truncated, info = env.step(action_np)
 
-        terminated_t = T.from_numpy(terminated).to(self._device)
-        truncated_t = T.from_numpy(truncated).to(self._device)
+        with record_function("transfer/flags_to_device"):
+            terminated_t = T.from_numpy(terminated).to(self._device)
+            truncated_t = T.from_numpy(truncated).to(self._device)
         done_t = T.logical_or(terminated_t, truncated_t)
 
         return next_state, state_t, action, log_probs, value, reward, terminated_t, truncated_t, done_t, info

@@ -144,18 +144,21 @@ class RolloutCollector:
                 bootstrap_observations = next_state.copy()
                 for env_index in truncated_indices:
                     bootstrap_observations[env_index] = final_observations[env_index]
-                bootstrap_tensor = T.from_numpy(bootstrap_observations).to(self.trainer.device)
+                with record_function("transfer/bootstrap_observation_to_device"):
+                    bootstrap_tensor = T.from_numpy(bootstrap_observations).to(self.trainer.device)
                 with record_function("rollout/truncation_bootstrap"):
                     values = self.trainer.bootstrap_value(bootstrap_tensor)
                 truncated_value[truncated] = values[truncated]
 
+            with record_function("transfer/reward_to_device"):
+                reward_t = T.from_numpy(reward).to(T.float32).to(self.trainer.device)
             with record_function("rollout/buffer_add"):
                 self.buffer.add(RolloutStep(
                     observation=state,
                     action=action,
                     critic_value=critic_value,
                     old_log_probs=log_probs,
-                    reward=T.from_numpy(reward).to(T.float32).to(self.trainer.device),
+                    reward=reward_t,
                     terminated=terminated,
                     truncated=truncated,
                     truncated_value=truncated_value,

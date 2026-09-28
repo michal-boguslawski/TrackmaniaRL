@@ -4,6 +4,7 @@ from collections.abc import Iterator
 
 import numpy as np
 import torch as T
+from torch.profiler import record_function
 
 
 def get_iid_minibatches(
@@ -37,7 +38,8 @@ def get_iid_minibatches(
         if shuffle
         else np.arange(batch_size * num_envs)
     )
-    indices = T.as_tensor(flat_order, dtype=T.long, device=device)
+    with record_function("transfer/minibatch_indices_to_device"):
+        indices = T.as_tensor(flat_order, dtype=T.long, device=device)
     window_offsets = T.arange(stack_size, device=device)
     for index in range(0, batch_size * num_envs, minibatch_size):
         flat_indices = indices[index : index + minibatch_size]
@@ -45,10 +47,14 @@ def get_iid_minibatches(
         time_indices = flat_indices.div(num_envs, rounding_mode="floor")
         window_indices = time_indices[:, None] + window_offsets
 
-        observation_windows = batch["observation"][
-            env_indices[:, None], window_indices
-        ]
-        done_windows = batch["dones"][env_indices[:, None], window_indices]
+        # Advanced indexing materializes new tensors: this is a device-side
+        # copy of the whole observation stack, not a view, and it is the
+        # dominant per-minibatch memory cost of the update loop.
+        with record_function("transfer/minibatch_gather"):
+            observation_windows = batch["observation"][
+                env_indices[:, None], window_indices
+            ]
+            done_windows = batch["dones"][env_indices[:, None], window_indices]
         yield {
             "observation": observation_windows.reshape(
                 -1, *batch["observation"].shape[2:]
