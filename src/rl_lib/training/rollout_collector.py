@@ -125,7 +125,7 @@ class RolloutCollector:
                 dtype=T.float32,
                 device=self.trainer.device,
             )
-            if truncated.any():
+            if self.trainer.last_step_had_truncation:
                 final_observations = info.get("final_obs", info.get("final_observation"))
                 if final_observations is None:
                     raise RuntimeError(

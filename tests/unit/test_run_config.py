@@ -24,6 +24,20 @@ def test_sample_yaml_loads_full_current_run_defaults():
     assert config.tracking.verbosity == 2
 
 
+def test_performance_backend_defaults_and_validation():
+    from rl_lib.run_config import RunSettings, TrainerSettings
+
+    settings = RunSettings()
+    assert settings.cudnn_benchmark is True
+    assert settings.channels_last is True
+    assert settings.torch_compile is False
+    assert settings.torch_compile_mode == "reduce-overhead"
+    assert TrainerSettings().fused_optimizer is True
+
+    with pytest.raises(ValidationError):
+        RunSettings(torch_compile_mode="turbo")
+
+
 def test_packaged_profiling_config_is_separate_and_disabled_by_default():
     from importlib import resources
 

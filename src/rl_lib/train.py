@@ -86,9 +86,13 @@ def run_training(
     )
     _seed_everything(config.run.seed)
     gc.collect()
-    if device.type == "cuda" and config.run.clear_cuda_cache:
-        T.cuda.empty_cache()
-        T.cuda.reset_peak_memory_stats(device)
+    if device.type == "cuda":
+        # Convolution shapes are static across updates, so cuDNN's autotuner
+        # pays its search cost once per shape and caches the winner.
+        T.backends.cudnn.benchmark = config.run.cudnn_benchmark
+        if config.run.clear_cuda_cache:
+            T.cuda.empty_cache()
+            T.cuda.reset_peak_memory_stats(device)
 
     console_logger = ConsoleMetricsLogger() if config.tracking.console else None
     verbosity = config.tracking.verbosity
@@ -129,6 +133,14 @@ def run_training(
             stack_size=config.agent.stack_size,
             config=config.network,
         ).to(device)
+        if device.type == "cuda" and config.run.channels_last:
+            # The CNN's Conv2d layers are the only 2D operators in the network.
+            # NHWC weights match cuDNN's native kernel layout and the
+            # channels_last strides of the permuted NHWC observations, so the
+            # per-convolution NCHW<->NHWC conversion kernels disappear.
+            network.cnn.to(memory_format=T.channels_last)
+        if config.run.torch_compile:
+            network = T.compile(network, mode=config.run.torch_compile_mode)
         agent = Agent(network, device, config.agent)
         video_agent = Agent(network, device, config.agent)
         buffer = RolloutBuffer(config.rollout, stack_size=config.agent.stack_size)

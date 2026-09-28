@@ -6,6 +6,13 @@ run:
   device: auto
   clear_cuda_cache: true
   log_level: DEBUG
+  # Performance backends (CUDA-gated where noted). torch_compile adds a
+  # one-time compilation stall per input shape; reduce-overhead additionally
+  # captures CUDA graphs for the static minibatch shapes.
+  cudnn_benchmark: true
+  channels_last: true
+  torch_compile: true
+  torch_compile_mode: reduce-overhead
 
 environment:
   id: CarRacing-v3

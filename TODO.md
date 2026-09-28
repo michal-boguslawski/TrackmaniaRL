@@ -32,3 +32,9 @@
 - [x] Make CPU/CUDA installation choices explicit; separate development/notebook dependencies from runtime dependencies.
 - [x] Move `pytest`, `matplotlib` and `ipykernel` out of the runtime dependencies into a `dev` extra. The CPU/GPU extras are done; the dependency split is not.
 - [x] Consider splitting PPO loss/metrics, minibatch generation, and update-loop responsibilities once correctness tests are in place. `PPOTrainer` is a single 434-line class covering the optimizer, clipping, three loss/metric helpers, the minibatch generator and the update loop.
+
+
+5. Remove hidden per-step synchronizations:
+- trainer.py:222 — if not T.isfinite(loss) forces a device sync before backward, every minibatch (skip_nonfinite_updates: true). The finiteness check could ride along with the metrics sync that already happens, or scale the loss on-device instead of branching.
+- agent.py:223 — T.isfinite(log_probs).all() in an if syncs on every env step during rollout collection. Should be debug-only or folded into the batched transfer.
+- _actor_loss_metrics / _entropy_loss compute ~20 diagnostic reductions per minibatch at verbosity: 2, including Python for index in ... loops that launch one kernel per action dim per metric. These could be vectorized (one mean(dim=0)/max(dim=0) each) and the KL early-stop needs only one scalar synced per minibatch — the rest could transfer once per epoch.

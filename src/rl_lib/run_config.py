@@ -26,6 +26,36 @@ class RunSettings(StrictModel):
     clear_cuda_cache: bool = True
     log_config: str | None = None
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "DEBUG"
+    cudnn_benchmark: bool = Field(
+        default=True,
+        description=(
+            "Enable cuDNN's autotuner for convolution algorithms (CUDA only). "
+            "Convolution shapes are static across PPO updates, so the cached "
+            "algorithm choice amortizes over the whole run."
+        ),
+    )
+    channels_last: bool = Field(
+        default=True,
+        description=(
+            "Store CNN convolution weights in channels_last (NHWC) memory "
+            "format (CUDA only). cuDNN's fastest kernels are NHWC-native; this "
+            "removes the per-call NCHW<->NHWC conversion kernels. The permuted "
+            "NHWC observations already arrive with channels_last strides."
+        ),
+    )
+    torch_compile: bool = Field(
+        default=False,
+        description=(
+            "Wrap the policy/value Network in torch.compile. Fuses elementwise "
+            "chains and reduces kernel-launch overhead; with mode "
+            "'reduce-overhead' on CUDA it also captures CUDA graphs. Adds a "
+            "one-time compilation cost per input shape."
+        ),
+    )
+    torch_compile_mode: Literal["default", "reduce-overhead", "max-autotune"] = Field(
+        default="reduce-overhead",
+        description="Mode passed to torch.compile when torch_compile is enabled.",
+    )
 
 
 class RuntimeSettings(StrictModel):
@@ -145,6 +175,14 @@ class TrainerSettings(StrictModel):
     optimizer_beta1: float = Field(default=0.9, ge=0, lt=1)
     optimizer_beta2: float = Field(default=0.999, ge=0, lt=1)
     optimizer_amsgrad: bool = False
+    fused_optimizer: bool = Field(
+        default=True,
+        description=(
+            "Use the fused CUDA implementation of Adam/AdamW when the agent "
+            "runs on a CUDA device. Collapses the per-parameter foreach kernel "
+            "sequence into a single kernel per step. Ignored on CPU."
+        ),
+    )
     no_decay_weight_decay: float = Field(default=0.0, ge=0)
     scheduler: Literal["cosine", "linear", "none"] = "cosine"
     scheduler_min_lr: float = Field(default=1e-8, ge=0)

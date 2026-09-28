@@ -786,6 +786,13 @@ def test_optimizer_groups_use_the_configured_learning_rates(agent: Agent):
     assert trainer.config()["optimizer_eps"] == 1e-6
 
 
+def test_fused_optimizer_is_requested_but_cuda_only(agent: Agent):
+    trainer = PPOTrainer(agent, TrainerSettings(fused_optimizer=True))
+    # The fixture agent lives on CPU, so the fused CUDA kernel must not be
+    # selected; on a CUDA agent the same flag passes fused=True instead.
+    assert trainer._optimizer.defaults.get("fused") in (None, False)
+
+
 def test_config_reports_the_hyperparameters(trainer: PPOTrainer):
     config = trainer.config()
 

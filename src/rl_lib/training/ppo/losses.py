@@ -65,16 +65,40 @@ class PPOLosses:
         Returns:
             Tuple of actor, critic, and entropy losses, plus scalar metrics.
         """
+        losses, metric_tensors = self._calculate_losses(
+            cfg,
+            advantages,
+            returns,
+            old_log_probs,
+            old_values,
+            observation,
+            action,
+            dones,
+        )
+        return losses, _tensor_metrics_to_scalars(metric_tensors)
+
+    def _calculate_losses(
+        self,
+        cfg: TrainerSettings,
+        advantages: T.Tensor,
+        returns: T.Tensor,
+        old_log_probs: T.Tensor,
+        old_values: T.Tensor,
+        observation: T.Tensor,
+        action: T.Tensor,
+        dones: T.Tensor | None = None,
+    ) -> tuple[tuple[T.Tensor, T.Tensor, T.Tensor], dict[str, T.Tensor]]:
+        """Compute PPO losses while retaining metrics as device tensors."""
         log_probs, values, dist, action_mean = self._agent.evaluate_actions(
             observation, action, dones
         )
-        actor_loss, actor_metrics = self.actor_loss(
+        actor_loss, actor_metrics = self._actor_loss(
             cfg, advantages, log_probs, old_log_probs, action_mean
         )
-        critic_loss, critic_metrics = self.critic_loss(
+        critic_loss, critic_metrics = self._critic_loss(
             cfg, returns, values, old_values
         )
-        entropy_loss, entropy_metrics = self.entropy_loss(dist)
+        entropy_loss, entropy_metrics = self._entropy_loss(dist)
         metrics = {**actor_metrics, **critic_metrics, **entropy_metrics}
         return (actor_loss, critic_loss, entropy_loss), metrics
 
@@ -101,6 +125,20 @@ class PPOLosses:
         Returns:
             Actor loss tensor and scalar diagnostics.
         """
+        loss, metric_tensors = self._actor_loss(
+            cfg, advantages, log_probs, old_log_probs, action_mean
+        )
+        return loss, _tensor_metrics_to_scalars(metric_tensors)
+
+    def _actor_loss(
+        self,
+        cfg: TrainerSettings,
+        advantages: T.Tensor,
+        log_probs: T.Tensor,
+        old_log_probs: T.Tensor,
+        action_mean: T.Tensor,
+    ) -> tuple[T.Tensor, dict[str, T.Tensor]]:
+        """Compute actor loss and leave diagnostic tensors on their device."""
         if cfg.advantage_normalization_strategy == "batch":
             advantages = (advantages - advantages.mean()) / (
                 advantages.std() + cfg.advantage_epsilon
@@ -136,7 +174,7 @@ class PPOLosses:
         mean_reg: T.Tensor,
         action_mean: T.Tensor,
         actor_loss: T.Tensor,
-    ) -> dict[str, float]:
+    ) -> dict[str, T.Tensor]:
         """Compute diagnostics for the actor objective."""
         with T.no_grad():
             log_ratio_total = log_ratio.sum(-1)
@@ -149,7 +187,7 @@ class PPOLosses:
                 "metrics/approx_kl": approx_kl,
             }
             if not self._verbosity.logs_diagnostics:
-                return _tensor_metrics_to_scalars(metric_tensors)
+                return metric_tensors
             ratio_per_action = log_ratio.exp()
             approx_kl_per_action = (ratio_per_action - 1 - log_ratio).mean(dim=0)
             ratio_max = ratio_total.max()
@@ -182,7 +220,7 @@ class PPOLosses:
                     for index, value in enumerate(approx_kl_per_action)
                 }
             )
-        return _tensor_metrics_to_scalars(metric_tensors)
+        return metric_tensors
 
     def critic_loss(
         self,
@@ -202,6 +240,17 @@ class PPOLosses:
         Returns:
             Critic loss tensor and scalar metrics.
         """
+        loss, metric_tensors = self._critic_loss(cfg, returns, values, old_values)
+        return loss, _tensor_metrics_to_scalars(metric_tensors)
+
+    def _critic_loss(
+        self,
+        cfg: TrainerSettings,
+        returns: T.Tensor,
+        values: T.Tensor,
+        old_values: T.Tensor,
+    ) -> tuple[T.Tensor, dict[str, T.Tensor]]:
+        """Compute critic loss and leave its diagnostic tensor on-device."""
         assert values.shape == old_values.shape == returns.shape
         value_clip_epsilon = cfg.value_clip_epsilon or cfg.ppo_epsilon
         clipped_values = old_values + (values - old_values).clamp(
@@ -210,9 +259,7 @@ class PPOLosses:
         loss_unclipped = self._critic_loss_fn(values, returns)
         loss_clipped = self._critic_loss_fn(clipped_values, returns)
         critic_loss = T.maximum(loss_unclipped, loss_clipped).mean()
-        return critic_loss, _tensor_metrics_to_scalars(
-            {"loss/critic": critic_loss.detach()}
-        )
+        return critic_loss, {"loss/critic": critic_loss.detach()}
 
     def entropy_loss(
         self, dist: Distribution
@@ -226,6 +273,13 @@ class PPOLosses:
         Returns:
             Positive entropy bonus tensor and scalar metrics.
         """
+        entropy_loss, metric_tensors = self._entropy_loss(dist)
+        return entropy_loss, _tensor_metrics_to_scalars(metric_tensors)
+
+    def _entropy_loss(
+        self, dist: Distribution
+    ) -> tuple[T.Tensor, dict[str, T.Tensor]]:
+        """Compute entropy and leave diagnostics on-device."""
         entropy: T.Tensor = dist.base_dist.entropy()
         entropy_loss = entropy.sum(dim=-1).mean()
         metric_tensors = {"loss/entropy": entropy_loss.detach()}
@@ -244,4 +298,4 @@ class PPOLosses:
                         for index, value in enumerate(log_std)
                     }
                 )
-        return entropy_loss, _tensor_metrics_to_scalars(metric_tensors)
+        return entropy_loss, metric_tensors

@@ -74,6 +74,18 @@ def test_preprocess_observation_requires_uint8(agent: Agent):
         agent._preprocess_observation(T.zeros(BATCH, 1, 96, 96))
 
 
+def test_preprocess_observation_normalisation_is_bitwise_identical_to_div_add(agent: Agent, observations):
+    # The fused addcdiv kernel must round exactly like the previous
+    # x / divisor + offset sequence; anything else silently perturbs every
+    # observation the policy sees.
+    obs = observations(BATCH)
+
+    result = agent._preprocess_observation(obs)
+
+    reference = obs.to(T.float32) / agent.cfg.observation_divisor + agent.cfg.observation_offset
+    T.testing.assert_close(result, reference.permute(0, 3, 1, 2), atol=0, rtol=0)
+
+
 def test_feature_extract_maps_observations_to_features(agent: Agent):
     obs = T.randint(0, 256, (BATCH, *OBSERVATION_SHAPE), dtype=T.uint8)
 
@@ -490,6 +502,7 @@ def test_step_env_owns_the_numpy_conversion_and_done_logic(agent: Agent, observa
     T.testing.assert_close(returned_terminated, T.tensor([True, False]))
     T.testing.assert_close(returned_truncated, T.tensor([False, True]))
     T.testing.assert_close(new_done, T.tensor([True, True]))
+    assert agent.last_step_had_truncation
     assert info == {"info": 1}
     # the numpy action handed to the environment matches the sampled one
     assert env.action.shape == (BATCH, ACTION_DIM)

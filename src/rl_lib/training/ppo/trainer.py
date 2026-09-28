@@ -36,6 +36,8 @@ class PPOTrainer:
         _step: Global training step counter (minibatches processed).
         _verbosity (Verbosity): Metric detail; below ALL the diagnostic
             metrics are not computed at all.
+        last_step_had_truncation (bool): Whether the latest environment step
+            truncated at least one environment.
     """
 
     def __init__(
@@ -81,10 +83,15 @@ class PPOTrainer:
         - head_no_decay: Actor/critic biases + log_std (head_lr, no_decay_weight_decay)
 
         Returns:
-            Configured Adam or AdamW optimizer.
+            Configured Adam or AdamW optimizer. Uses the fused CUDA kernel when
+            trainer.fused_optimizer is set and the agent runs on CUDA, which
+            replaces the per-parameter foreach kernel sequence with one launch.
         """
         param_groups = self._agent.network_parameter_groups()
         optimizer_type = {"Adam": Adam, "AdamW": AdamW}[self.cfg.optimizer]
+        implementation_kwargs = {}
+        if self.cfg.fused_optimizer and self._agent.device.type == "cuda":
+            implementation_kwargs["fused"] = True
         return optimizer_type(
             [
                 {"params": param_groups["backbone_decay"], "lr": self.cfg.backbone_lr, "weight_decay": self.cfg.weight_decay},
@@ -95,6 +102,7 @@ class PPOTrainer:
             eps=self.cfg.optimizer_eps,
             betas=(self.cfg.optimizer_beta1, self.cfg.optimizer_beta2),
             amsgrad=self.cfg.optimizer_amsgrad,
+            **implementation_kwargs,
         )
 
     def setup_train(self, run: RunSettings, rollout: RolloutSettings) -> None:
@@ -133,6 +141,11 @@ class PPOTrainer:
     def device(self) -> T.device:
         """Compute device (delegated to agent)."""
         return self._agent.device
+
+    @property
+    def last_step_had_truncation(self) -> bool:
+        """Whether the most recent environment step truncated any environment."""
+        return self._agent.last_step_had_truncation
 
     def act(self, observation: T.Tensor, done: T.Tensor) -> tuple[T.Tensor, T.Tensor, T.Tensor]:
         """Sample action, log-prob, and value (delegated to agent).

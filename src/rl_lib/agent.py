@@ -7,6 +7,7 @@ and action sampling from the Beta-distribution actor.
 """
 
 from collections import deque
+import numpy as np
 from numpy.typing import NDArray
 from logging import getLogger
 from gymnasium import Env
@@ -37,6 +38,8 @@ class Agent:
         network (Network): The underlying policy/value network.
         device (torch.device): Compute device for tensors.
         stack_size (int): Number of frames in the temporal window.
+        last_step_had_truncation (bool): Whether the latest environment step
+            truncated at least one environment.
     """
 
     def __init__(
@@ -65,6 +68,15 @@ class Agent:
         self._obs_window: deque[T.Tensor] = deque(maxlen=self._stack_size)
         self._done_window: deque[T.Tensor] = deque(maxlen=self._stack_size)
         self._network = network
+        self._last_step_had_truncation = False
+        # Cached 0-dim tensors so observation normalization is one addcdiv
+        # kernel (offset + x / divisor) instead of separate div and add.
+        self._observation_divisor = T.tensor(
+            config.observation_divisor, device=self._device, dtype=T.float32
+        )
+        self._observation_offset = T.tensor(
+            config.observation_offset, device=self._device, dtype=T.float32
+        )
 
     @property
     def network(self) -> Network:
@@ -75,6 +87,11 @@ class Agent:
     def device(self) -> T.device:
         """Compute device for tensor operations."""
         return self._device
+
+    @property
+    def last_step_had_truncation(self) -> bool:
+        """Whether the most recent environment step truncated any environment."""
+        return self._last_step_had_truncation
 
 
     def _preprocess_observation(self, observation: T.Tensor) -> T.Tensor:
@@ -89,8 +106,12 @@ class Agent:
         """
         assert observation.dtype == T.uint8
         with record_function("transfer/observation_normalize"):
-            observation_tensor = observation.to(self._device, T.float32) / self.cfg.observation_divisor
-            observation_tensor = observation_tensor + self.cfg.observation_offset
+            observation_tensor = observation.to(self._device, T.float32)
+            # addcdiv computes offset + observation / divisor elementwise with
+            # the same rounding as the previous separate div/add kernels.
+            observation_tensor = T.addcdiv(
+                self._observation_offset, observation_tensor, self._observation_divisor
+            )
         with record_function("agent/permute_to_nchw"):
             return observation_tensor.permute(0, 3, 1, 2)
 
@@ -512,6 +533,7 @@ class Agent:
         with record_function("environment/step"):
             next_state, reward, terminated, truncated, info = env.step(action_np)
 
+        self._last_step_had_truncation = bool(np.any(truncated))
         with record_function("transfer/flags_to_device"):
             terminated_t = T.from_numpy(terminated).to(self._device)
             truncated_t = T.from_numpy(truncated).to(self._device)
