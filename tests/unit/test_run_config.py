@@ -16,7 +16,7 @@ def test_sample_yaml_loads_full_current_run_defaults():
     assert config.environment.num_envs == 16
     assert config.run.algorithm == "ppo"
     assert config.run.total_steps == 3_000_000
-    assert config.run.cnn_autocast == "none"
+    assert config.run.cnn_autocast == "bf16"
     assert config.rollout.gamma == pytest.approx(0.99)
     assert config.trainer.ppo_epsilon == pytest.approx(0.1)
     assert config.network.cnn.conv_layers[0].kernel_size == 8

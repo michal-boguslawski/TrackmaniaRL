@@ -13,7 +13,10 @@ run:
   channels_last: true
   torch_compile: true
   torch_compile_mode: reduce-overhead
-  cnn_autocast: none # opt in to bf16 on CUDA for CNN-only autocast
+  # BF16 for the CNN feature extractor only; temporal, actor/critic heads,
+  # distribution math, and the PPO losses stay FP32. CUDA-only: this raises on
+  # a CPU device, so a CPU run of this config needs cnn_autocast: none.
+  cnn_autocast: bf16
 
 environment:
   id: CarRacing-v3
