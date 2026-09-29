@@ -206,14 +206,11 @@ class PPOLosses:
                     ).float().mean(),
                 }
             )
-            metric_tensors.update(
-                {
-                    f"metrics/mean_abs_max_{index}": action_mean[:, index]
-                    .abs()
-                    .max()
-                    for index in range(action_mean.shape[-1])
-                }
-            )
+            mean_abs_max_by_action = action_mean.abs().amax(dim=0)
+            metric_tensors.update({
+                f"metrics/mean_abs_max_{index}": value
+                for index, value in enumerate(mean_abs_max_by_action)
+            })
             metric_tensors.update(
                 {
                     f"metrics/approx_kl_{index}": value

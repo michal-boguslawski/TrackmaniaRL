@@ -242,6 +242,20 @@ def test_epoch_granularity_averages_the_minibatches_of_an_epoch():
     ]
 
 
+def test_epoch_granularity_includes_deferred_diagnostics():
+    logger = FakeLogger()
+    callback = MetricsLoggingCallback(logger, MetricsCallbackSettings(granularity="epoch"))
+
+    callback.on_minibatch(metrics={"loss/total": 1.0})
+    callback.on_minibatch(metrics={"loss/total": 3.0})
+    callback.on_epoch(metrics={"metrics/ratio_max": 2.0})
+    callback.on_end(step=0, metrics=None)
+
+    assert logger.metrics == [
+        ({"loss/total": 2.0, "metrics/ratio_max": 2.0}, 1)
+    ]
+
+
 def test_epoch_granularity_does_not_average_empty_epochs():
     logger = FakeLogger()
     callback = MetricsLoggingCallback(logger, MetricsCallbackSettings(granularity="epoch"))

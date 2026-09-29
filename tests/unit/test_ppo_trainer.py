@@ -490,6 +490,36 @@ def test_train_step_updates_the_parameters(trainer: PPOTrainer, rollout):
     assert "grad_norm/max" in metrics
 
 
+def test_diagnostics_are_deferred_and_emitted_as_epoch_metrics(
+    trainer: PPOTrainer, rollout
+):
+    class _EpochMetricCapture(Callback):
+        metrics: dict[str, float] = {}
+
+        def on_epoch(self, metrics=None, **kwargs):
+            self.metrics = metrics or {}
+
+    capture = _EpochMetricCapture()
+    trainer._callbacks._callbacks.append(capture)
+    trainer._defer_diagnostics = True
+    minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
+
+    minibatch_metrics = trainer.train_step(**minibatch)
+
+    assert "metrics/approx_kl" in minibatch_metrics
+    assert "grad_norm/max" not in minibatch_metrics
+    assert trainer._pending_diagnostics
+
+    trainer._on_epoch()
+
+    assert "grad_norm/max" in capture.metrics
+    assert "metrics/ratio_max" in capture.metrics
+    assert "metrics/approx_kl_0" in capture.metrics
+    assert "loss/total" in capture.metrics
+    assert not trainer._pending_diagnostics
+    trainer._defer_diagnostics = False
+
+
 def test_train_step_clips_gradients(trainer: PPOTrainer, rollout):
     minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
     trainer.train_step(**minibatch)

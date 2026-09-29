@@ -9,7 +9,7 @@ from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR
 
 from rl_lib.agent import Agent
-from rl_lib.tracking.verbosity import Verbosity, as_verbosity
+from rl_lib.tracking.verbosity import Verbosity, as_verbosity, is_core_loss
 from rl_lib.training.callbacks.base import Callback, CallbackList
 from rl_lib.run_config import RolloutSettings, RunSettings, TrainerSettings
 from rl_lib.training.ppo.losses import PPOLosses
@@ -71,6 +71,8 @@ class PPOTrainer:
         self._losses = PPOLosses(self._agent, self._verbosity)
         self._step = 0
         self._callbacks = CallbackList(callbacks)
+        self._defer_diagnostics = False
+        self._pending_diagnostics: list[tuple[dict[str, T.Tensor], int]] = []
         self._agent.train()
 
     def _build_optimizer(self) -> Adam | AdamW:
@@ -220,13 +222,39 @@ class PPOTrainer:
         """
 
         with record_function("ppo/forward_and_loss"):
-            (actor_loss, critic_loss, entropy_loss), loss_metrics = self.calculate_losses(advantages, returns, old_log_probs, old_values, observation, action, dones)
+            (actor_loss, critic_loss, entropy_loss), loss_metric_tensors = (
+                self.calculate_losses(
+                    advantages,
+                    returns,
+                    old_log_probs,
+                    old_values,
+                    observation,
+                    action,
+                    dones,
+                    return_tensors=True,
+                )
+            )
         loss = actor_loss + self.cfg.critic_beta * critic_loss - self._entropy_coef * entropy_loss
 
         self._optimizer.zero_grad()
 
-        if self.cfg.skip_nonfinite_updates and not T.isfinite(loss):
-            logger.error(f"Non-finite loss, skipping update")
+        # KL is required by the update loop, and the finite flag is required to
+        # preserve safe skipping. Transfer both with the core losses in one go.
+        essential_tensors = {
+            key: value
+            for key, value in loss_metric_tensors.items()
+            if key == "metrics/approx_kl"
+            or (self._verbosity.logs_core_losses and is_core_loss(key))
+        }
+        if self.cfg.skip_nonfinite_updates:
+            essential_tensors["_control/loss_is_finite"] = T.isfinite(loss).to(
+                dtype=T.float32
+            )
+        essential_metrics = _tensor_metrics_to_scalars(essential_tensors)
+        if self.cfg.skip_nonfinite_updates and not essential_metrics.pop(
+            "_control/loss_is_finite"
+        ):
+            logger.error("Non-finite loss, skipping update")
             return {}
 
         with record_function("ppo/backward"):
@@ -237,38 +265,37 @@ class PPOTrainer:
             self.cfg.actor_max_grad_norm,
             self.cfg.critic_max_grad_norm,
         )
-        metrics = self._get_train_step_metrics(loss, grad_norms)
+        diagnostics: dict[str, T.Tensor] = {}
+        if self._verbosity.logs_diagnostics:
+            diagnostics = {
+                key: value
+                for key, value in loss_metric_tensors.items()
+                if key not in essential_tensors
+            }
+            diagnostics["loss/total"] = loss.detach()
+            diagnostics.update(
+                {
+                    key: grad_norms[key]
+                    for key in (
+                        "grad_norm/cnn",
+                        "grad_norm/sequence_encoder",
+                        "grad_norm/actor",
+                        "grad_norm/critic",
+                        "grad_norm/max",
+                    )
+                }
+            )
+        if diagnostics:
+            if self._defer_diagnostics:
+                self._pending_diagnostics.append((diagnostics, action.shape[0]))
+            else:
+                essential_metrics.update(_tensor_metrics_to_scalars(diagnostics))
 
         with record_function("ppo/optimizer_step"):
             self._optimizer.step()
         self._step += 1
 
-        return {**loss_metrics, **metrics}
-
-    def _get_train_step_metrics(
-        self, loss: T.Tensor, grad_norms: dict[str, T.Tensor]
-    ) -> dict[str, float]:
-        """Collect loss and gradient diagnostics with one scalar transfer.
-
-        The gradient norms are needed for clipping regardless; only their
-        transfer to the host is skipped when the diagnostics are not logged.
-        """
-        if not self._verbosity.logs_diagnostics:
-            return {}
-        metric_tensors = {
-            "loss/total": loss.detach(),
-            **{
-                key: grad_norms[key]
-                for key in (
-                    "grad_norm/cnn",
-                    "grad_norm/sequence_encoder",
-                    "grad_norm/actor",
-                    "grad_norm/critic",
-                    "grad_norm/max",
-                )
-            },
-        }
-        return _tensor_metrics_to_scalars(metric_tensors)
+        return essential_metrics
 
     def calculate_losses(
         self,
@@ -278,8 +305,11 @@ class PPOTrainer:
         old_values: T.Tensor,
         observation: T.Tensor,
         action: T.Tensor,
-        dones: T.Tensor | None = None
-    ) -> tuple[tuple[T.Tensor, T.Tensor, T.Tensor], dict[str, float]]:
+        dones: T.Tensor | None = None,
+        return_tensors: bool = False,
+    ) -> tuple[
+        tuple[T.Tensor, T.Tensor, T.Tensor], dict[str, float] | dict[str, T.Tensor]
+    ]:
         """Delegate PPO objective calculation to the loss component.
 
         Args:
@@ -290,10 +320,22 @@ class PPOTrainer:
             observation: Flattened observations (batch * seq, H, W, C).
             action: Actions taken (batch * seq, action_dim).
             dones: Done flags for temporal masking (batch * seq,) or None.
+            return_tensors: Keep scalar metrics on-device for the optimizer path.
 
         Returns:
             Tuple of ((actor_loss, critic_loss, entropy_loss), metrics_dict).
         """
+        if return_tensors:
+            return self._losses._calculate_losses(
+                self.cfg,
+                advantages,
+                returns,
+                old_log_probs,
+                old_values,
+                observation,
+                action,
+                dones,
+            )
         return self._losses.calculate_losses(
             self.cfg,
             advantages,
@@ -315,33 +357,58 @@ class PPOTrainer:
         self._callbacks.on_end(*args, **kwargs)
 
     def _on_epoch(self, *args, **kwargs):
-        self._callbacks.on_epoch(*args, **kwargs)
+        metrics: dict[str, float] = {}
+        if self._pending_diagnostics:
+            entries, weights = zip(*self._pending_diagnostics, strict=True)
+            weight_tensors = [
+                T.as_tensor(weight, device=next(iter(entry.values())).device)
+                for entry, weight in zip(entries, weights, strict=True)
+            ]
+            total_weight = T.stack(weight_tensors).sum()
+            aggregate_tensors = {
+                key: sum(
+                    entry[key] * weight
+                    for entry, weight in zip(entries, weight_tensors, strict=True)
+                )
+                / total_weight
+                for key in entries[0]
+            }
+            metrics = _tensor_metrics_to_scalars(aggregate_tensors)
+            self._pending_diagnostics.clear()
+        self._callbacks.on_epoch(*args, metrics=metrics, **kwargs)
 
     def _get_metrics_from_batch(self, batch: T.Tensor):
         """Compute rollout-level metrics from a full batch for logging.
 
-        The values are read with one ``.item()`` each, so the whole block is
-        skipped when the verbosity does not log them.
+        Scalar tensors are stacked for a single host transfer, and the whole
+        block is skipped when the verbosity does not log diagnostics.
         """
         if not self._verbosity.logs_diagnostics:
             return {}
-        metrics = {
-            "rollout/returns": batch["returns"].mean().item(),
-            "rollout/advantages_mean": batch["advantages"].mean().item(),
-            "rollout/advantages_std": batch["advantages"].std().item(),
-            "rollout/critic_values": batch["critic_value"].mean().item(),
-            "rollout/old_log_probs" : batch["old_log_probs"].sum(-1).mean().item(),
+        metric_tensors = {
+            "rollout/returns": batch["returns"].mean(),
+            "rollout/advantages_mean": batch["advantages"].mean(),
+            "rollout/advantages_std": batch["advantages"].std(),
+            "rollout/critic_values": batch["critic_value"].mean(),
+            "rollout/old_log_probs": batch["old_log_probs"].sum(-1).mean(),
         }
         action_means = batch["action"].mean((0, 1))
-        for i, mean in enumerate(action_means):
-            metrics[f"rollout/action_mean_{i}"] = mean.item()
         action_stds = batch["action"].std((0, 1), unbiased=True)
-        for i, std in enumerate(action_stds):
-            metrics[f"rollout/action_std_{i}"] = std.item()
-
+        metric_tensors.update(
+            {
+                **{
+                    f"rollout/action_mean_{i}": value
+                    for i, value in enumerate(action_means)
+                },
+                **{
+                    f"rollout/action_std_{i}": value
+                    for i, value in enumerate(action_stds)
+                },
+            }
+        )
         explained_variance = 1 - (batch["returns"] - batch["critic_value"]).var() / (batch["returns"].var() + self.cfg.explained_variance_epsilon)
-        metrics["rollout/explained_variance"] = explained_variance
-        return metrics
+        metric_tensors["rollout/explained_variance"] = explained_variance
+        return _tensor_metrics_to_scalars(metric_tensors)
 
     def step_env(self, env: Env, state: NDArray, done: T.Tensor, temperature: float | None = None) -> tuple:
         """Step environment using agent policy (delegated to agent)."""
@@ -377,18 +444,23 @@ class PPOTrainer:
                 batch["advantages"].std() + self.cfg.advantage_epsilon
             )
 
-        run_ppo_update_loop(
-            batch=batch,
-            epochs=epochs,
-            minibatch_size=minibatch_size,
-            stack_size=self.stack_size,
-            cfg=self.cfg,
-            training_step=training_step,
-            train_step=self.train_step,
-            current_update_step=lambda: self._step,
-            on_minibatch=self._on_minibatch,
-            on_epoch=self._on_epoch,
-        )
+        self._pending_diagnostics.clear()
+        self._defer_diagnostics = self._verbosity.logs_diagnostics
+        try:
+            run_ppo_update_loop(
+                batch=batch,
+                epochs=epochs,
+                minibatch_size=minibatch_size,
+                stack_size=self.stack_size,
+                cfg=self.cfg,
+                training_step=training_step,
+                train_step=self.train_step,
+                current_update_step=lambda: self._step,
+                on_minibatch=self._on_minibatch,
+                on_epoch=self._on_epoch,
+            )
+        finally:
+            self._defer_diagnostics = False
 
         if self._scheduler:
             self._scheduler.step()

@@ -256,12 +256,41 @@ def test_act_raises_when_log_probs_are_not_finite(agent: Agent, monkeypatch):
             return T.full((BATCH, ACTION_DIM), float("nan"))
 
     monkeypatch.setattr(
-        agent, "heads", lambda *args, **kwargs: (_NaNDistribution(), T.zeros(BATCH, ACTION_DIM), T.zeros(BATCH))
+        agent,
+        "heads",
+        lambda *args, **kwargs: (
+            _NaNDistribution(),
+            T.zeros(BATCH, ACTION_DIM),
+            T.zeros(BATCH),
+        ),
     )
 
     with pytest.raises(ValueError, match="log_probs are not finite"):
         agent.act(
             T.randint(0, 256, (BATCH, *OBSERVATION_SHAPE), dtype=T.uint8),
+            T.zeros(BATCH, dtype=T.bool),
+        )
+
+
+def test_step_env_checks_log_probs_with_the_action_transfer(agent: Agent, monkeypatch):
+    class _NeverStepEnvironment:
+        def step(self, action):
+            pytest.fail("non-finite log-probabilities must stop collection")
+
+    monkeypatch.setattr(
+        agent,
+        "act",
+        lambda observation, done, temperature, *, check_finite: (
+            T.zeros(BATCH, ACTION_DIM),
+            T.full((BATCH, ACTION_DIM), float("nan")),
+            T.zeros(BATCH),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="log_probs are not finite"):
+        agent.step_env(
+            _NeverStepEnvironment(),
+            np.zeros((BATCH, *OBSERVATION_SHAPE), dtype=np.uint8),
             T.zeros(BATCH, dtype=T.bool),
         )
 

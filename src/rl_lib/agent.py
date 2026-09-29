@@ -200,7 +200,9 @@ class Agent:
         self,
         observation: T.Tensor,
         done: T.Tensor,
-        temperature: float | None = None
+        temperature: float | None = None,
+        *,
+        check_finite: bool = True,
     ) -> tuple[T.Tensor, T.Tensor, T.Tensor]:
         """Sample action, log-prob, and value for a batch of observations.
 
@@ -209,6 +211,8 @@ class Agent:
             done: Boolean tensor of shape (batch,) indicating episode termination.
             temperature: Sampling temperature. Defaults to config.action_temperature.
                 Use 0.0 for deterministic (mean) action.
+            check_finite: Validate log-probabilities immediately. Collection
+                disables this check and batches it with the action host copy.
 
         Returns:
             Tuple of:
@@ -232,7 +236,7 @@ class Agent:
 
             log_probs = action_dist.log_prob(action)
 
-            if not T.isfinite(log_probs).all():
+            if check_finite and not T.isfinite(log_probs).all():
                 logger.error(
                     "log_probs are not finite: action=%s, alpha=%s, beta=%s",
                     action,
@@ -526,10 +530,23 @@ class Agent:
             state_t = T.from_numpy(state).to(self._device)
         temperature = self.cfg.action_temperature if temperature is None else temperature
         with record_function("agent/policy"):
-            action, log_probs, value = self.act(state_t, done, temperature)
+            action, log_probs, value = self.act(
+                state_t, done, temperature, check_finite=False
+            )
 
         with record_function("transfer/action_to_host"):
-            action_np = action.cpu().numpy()
+            finite = T.isfinite(log_probs).all().to(dtype=action.dtype)
+            action_size = action.numel()
+            action_payload = T.cat((action.reshape(-1), finite.reshape(1)))
+            payload_np = action_payload.cpu().numpy()
+            action_np = payload_np[:action_size].reshape(action.shape)
+        if not payload_np[-1]:
+            logger.error(
+                "log_probs are not finite: action=%s, log_probs=%s",
+                action,
+                log_probs,
+            )
+            raise ValueError("log_probs are not finite")
         with record_function("environment/step"):
             next_state, reward, terminated, truncated, info = env.step(action_np)
 

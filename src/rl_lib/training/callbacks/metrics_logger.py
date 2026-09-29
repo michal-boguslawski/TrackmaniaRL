@@ -60,11 +60,21 @@ class MetricsLoggingCallback(Callback):
         else:
             self._epoch_buffer.append(metrics)
 
-    def on_epoch(self, *args, **kwargs):
+    def on_epoch(self, metrics: dict[str, float] | None = None, *args, **kwargs):
         """Called after each epoch: log epoch-averaged metrics if configured."""
+        if metrics:
+            if self.cfg.granularity == "minibatch":
+                # Diagnostics are transferred once per epoch and share the
+                # final minibatch's step without incurring per-minibatch copies.
+                self._add_to_buffer(metrics, self._step)
+            else:
+                self._epoch_buffer.append(metrics)
         if self.cfg.granularity == "epoch" and self._epoch_buffer:
-            keys = self._epoch_buffer[0].keys()
-            aggregated = {k: float(np.mean([m[k] for m in self._epoch_buffer])) for k in keys}
+            keys = set().union(*(entry.keys() for entry in self._epoch_buffer))
+            aggregated = {
+                key: float(np.mean([entry[key] for entry in self._epoch_buffer if key in entry]))
+                for key in keys
+            }
             self._step += 1
             self._add_to_buffer(aggregated, self._step)
             self._epoch_buffer.clear()
@@ -75,8 +85,11 @@ class MetricsLoggingCallback(Callback):
             self._add_to_buffer(metrics, step)
 
         if self.cfg.granularity == "batch" and self._epoch_buffer:
-            keys = self._epoch_buffer[0].keys()
-            aggregated = {k: float(np.mean([m[k] for m in self._epoch_buffer])) for k in keys}
+            keys = set().union(*(entry.keys() for entry in self._epoch_buffer))
+            aggregated = {
+                key: float(np.mean([entry[key] for entry in self._epoch_buffer if key in entry]))
+                for key in keys
+            }
             self._step += 1
             self._add_to_buffer(aggregated, step)
             self._epoch_buffer.clear()
