@@ -40,6 +40,7 @@ class Network(nn.Module):
         config: NetworkConfig,
         action_low: list[float] | None = None,
         action_high: list[float] | None = None,
+        cnn_autocast_dtype: T.dtype | None = None,
     ):
         """Initialize the composed network.
 
@@ -50,6 +51,9 @@ class Network(nn.Module):
             config: NetworkConfig containing CNN, temporal, actor, critic configs.
             action_low: Optional override for actor action_low.
             action_high: Optional override for actor action_high.
+            cnn_autocast_dtype: Optional autocast dtype used only by the CNN
+                feature extractor. CNN features are converted back to float32
+                before temporal encoding.
 
         Raises:
             ValueError: If action_low provided without action_high or vice versa.
@@ -59,6 +63,7 @@ class Network(nn.Module):
         self.stack_size = stack_size
         self.observation_dim = observation_dim
         self.action_dim = action_dim
+        self.cnn_autocast_dtype = cnn_autocast_dtype
 
         self.cnn = CNN(observation_dim, self.cfg.cnn)
 
@@ -86,7 +91,12 @@ class Network(nn.Module):
         Returns:
             Tensor of shape (batch, cnn_out_dim).
         """
-        return self.cnn(x)
+        autocast_dtype = getattr(self, "cnn_autocast_dtype", None)
+        if autocast_dtype is None:
+            return self.cnn(x).float()
+        with T.autocast(device_type="cuda", dtype=autocast_dtype):
+            features = self.cnn(x)
+        return features.float()
 
     def temporal_encode(self, x: T.Tensor) -> T.Tensor:
         """Encode temporal sequence of CNN features.

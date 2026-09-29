@@ -32,6 +32,7 @@ from rl_lib.device import resolve_device
 from rl_lib.envs.make_env import make_env
 from rl_lib.logger_setup import setup_logging, shutdown_logging
 from rl_lib.networks.factory import Network
+from rl_lib.networks.mixed_precision import resolve_cnn_autocast_dtype
 from rl_lib.profiling_config import ProfilingConfig, load_profiling_config
 from rl_lib.run_config import RunConfig, load_config
 from rl_lib.tracking.console_logger import ConsoleMetricsLogger
@@ -132,6 +133,9 @@ def run_training(
             action_dim=config.runtime.action_shape[-1],
             stack_size=config.agent.stack_size,
             config=config.network,
+            cnn_autocast_dtype=resolve_cnn_autocast_dtype(
+                config.run.cnn_autocast, device
+            ),
         ).to(device)
         if device.type == "cuda" and config.run.channels_last:
             # The CNN's Conv2d layers are the only 2D operators in the network.

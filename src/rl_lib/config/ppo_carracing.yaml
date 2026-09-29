@@ -13,6 +13,7 @@ run:
   channels_last: true
   torch_compile: true
   torch_compile_mode: reduce-overhead
+  cnn_autocast: none # opt in to bf16 on CUDA for CNN-only autocast
 
 environment:
   id: CarRacing-v3

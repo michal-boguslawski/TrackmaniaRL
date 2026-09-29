@@ -16,6 +16,7 @@ def test_sample_yaml_loads_full_current_run_defaults():
     assert config.environment.num_envs == 16
     assert config.run.algorithm == "ppo"
     assert config.run.total_steps == 3_000_000
+    assert config.run.cnn_autocast == "none"
     assert config.rollout.gamma == pytest.approx(0.99)
     assert config.trainer.ppo_epsilon == pytest.approx(0.1)
     assert config.network.cnn.conv_layers[0].kernel_size == 8
@@ -32,10 +33,13 @@ def test_performance_backend_defaults_and_validation():
     assert settings.channels_last is True
     assert settings.torch_compile is False
     assert settings.torch_compile_mode == "reduce-overhead"
+    assert settings.cnn_autocast == "none"
     assert TrainerSettings().fused_optimizer is True
 
     with pytest.raises(ValidationError):
         RunSettings(torch_compile_mode="turbo")
+    with pytest.raises(ValidationError):
+        RunSettings(cnn_autocast="fp16")
 
 
 def test_packaged_profiling_config_is_separate_and_disabled_by_default():

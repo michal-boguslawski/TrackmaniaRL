@@ -18,6 +18,7 @@ from rl_lib.device import resolve_device
 from rl_lib.envs.make_env import make_env
 from rl_lib.evaluation.inference import log_evaluation_results, run_inference
 from rl_lib.networks.factory import Network
+from rl_lib.networks.mixed_precision import resolve_cnn_autocast_dtype
 from rl_lib.run_config import RunConfig, load_config
 from rl_lib.tracking.base import MetricsLogger
 from rl_lib.tracking.verbosity import filter_loggers
@@ -150,6 +151,9 @@ def _evaluate_configured_policy(
                 action_dim=env.action_space.shape[-1],
                 stack_size=config.agent.stack_size,
                 config=config.network,
+                cnn_autocast_dtype=resolve_cnn_autocast_dtype(
+                    config.run.cnn_autocast, device
+                ),
             ).to(device)
         else:
             network = network.to(device)

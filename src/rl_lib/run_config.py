@@ -56,6 +56,14 @@ class RunSettings(StrictModel):
         default="reduce-overhead",
         description="Mode passed to torch.compile when torch_compile is enabled.",
     )
+    cnn_autocast: Literal["none", "bf16"] = Field(
+        default="none",
+        description=(
+            "Autocast only the CNN feature extractor to BF16 on CUDA. Temporal, "
+            "actor/critic heads, distribution math, and PPO losses remain FP32. "
+            "Requires a CUDA GPU with BF16 support."
+        ),
+    )
 
 
 class RuntimeSettings(StrictModel):
