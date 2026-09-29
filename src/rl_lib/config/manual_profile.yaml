@@ -2,9 +2,8 @@
 # large enough for the profiler to land on a real PPO update.
 #
 # manual_smoke.yaml proves the profiler wiring with 8 steps; it says nothing
-# about throughput. This config follows the recipe in MANUAL_TESTING.md
-# section 3: keep the production network, raise the rollout to 128, use a
-# minibatch of 64, and run at least 132 steps.
+# about throughput. This config instead keeps the production network, raises the
+# rollout to 128, and uses a minibatch of 64.
 #
 # Why 132 works: profiling.yaml leaves wait_steps null, so resolve_schedule(128)
 # yields 126 wait + 1 warmup + 2 active vector steps. RolloutCollector calls
@@ -14,7 +13,7 @@
 # Profiling adds overhead. Keep this to short diagnostic captures.
 run:
   name: manual-profile
-  total_steps: 132 # vector-environment steps: one full 128-step rollout plus 4
+  total_steps: 10000 # vector-environment steps: one full 128-step rollout plus 4
   seed: 1
   device: auto
   log_level: INFO
@@ -28,7 +27,7 @@ environment:
 
 rollout:
   buffer_size: 128
-  epochs: 1
+  epochs: 4
   minibatch_size: 64
 
 # Copied verbatim from ppo_carracing.yaml: the network is what sets the shape
