@@ -20,7 +20,7 @@ run:
 
 environment:
   id: CarRacing-v3
-  num_envs: 16
+  num_envs: 8
   skip: 2
   continuous: true
   normalize_rewards: true
@@ -36,7 +36,7 @@ environment:
       keep_dim: true
     - name: reward_on_done
       on_terminated: null
-      on_truncated: -10.0
+      on_truncated: 0.0
       on_win: 100.0
     - name: max_and_skip
 
@@ -49,7 +49,7 @@ agent:
 
 rollout:
   buffer_size: 1024
-  epochs: 3
+  epochs: 4
   minibatch_size: 512
   gamma: 0.99
   gae_lambda: 0.95
@@ -143,18 +143,18 @@ tracking:
 
 callbacks:
   - name: checkpoints
-    interval: 200
+    interval: 100_000
   - name: metrics
     granularity: batch
   - name: episode_statistics
     mode: mean
     stats_key: episode
   - name: evaluation
-    interval: 50000
+    interval: 100_000
     episodes: 10
     final_episodes: 1000
   - name: record_video
-    interval: 50000
+    interval: 100_000
     folder: ./logs/videos
     skip: null
     normalize_rewards: false
