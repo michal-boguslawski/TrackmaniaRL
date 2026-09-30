@@ -31,6 +31,16 @@ class StableTanhTransform(TanhTransform):
         return 0.5 * (T.log1p(y_clamped) - T.log1p(-y_clamped))
 
 
+class _StableAffineTransform(AffineTransform):
+    """Keep rounded affine-boundary actions inside the base distribution support."""
+
+    def _inverse(self, y: T.Tensor) -> T.Tensor:
+        """Clamp inverse values to avoid Beta log-probs of negative infinity."""
+        unit = super()._inverse(y)
+        epsilon = max(1e-6, T.finfo(unit.dtype).eps)
+        return unit.clamp(min=epsilon, max=1.0 - epsilon)
+
+
 class Actor(nn.Module):
     """MLP actor head producing Beta distribution parameters per action dimension.
 
@@ -113,7 +123,9 @@ class Actor(nn.Module):
         alpha = alpha + self.cfg.concentration_offset
         beta = beta + self.cfg.concentration_offset
         base_dist = Beta(alpha, beta)
-        transform = AffineTransform(loc=self._affine_loc, scale=self._affine_scale)
+        # A Beta sample can round to 0/1 after the affine map in float32. Clamp
+        # the inverse in that case so replayed log-probs stay finite.
+        transform = _StableAffineTransform(loc=self._affine_loc, scale=self._affine_scale)
         return TransformedDistribution(base_dist, transform), transform(base_dist.mean)
 
     def forward(self, x: T.Tensor, temperature: float | None = None) -> tuple[Distribution, T.Tensor]:

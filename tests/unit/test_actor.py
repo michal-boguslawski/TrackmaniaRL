@@ -167,6 +167,16 @@ def test_log_prob_is_finite_near_the_support_boundary(actor: Actor):
     assert T.isfinite(dist.log_prob(edge)).all()
 
 
+def test_log_prob_is_finite_when_affine_rounding_hits_action_bounds(actor: Actor):
+    """Float32 affine sampling can round a mathematically interior action to a bound."""
+    dist, _ = actor(T.randn(BATCH, IN_DIM))
+    low_log_probs = dist.log_prob(ACTION_LOW.expand(BATCH, -1))
+    high_log_probs = dist.log_prob(ACTION_HIGH.expand(BATCH, -1))
+
+    assert T.isfinite(low_log_probs).all()
+    assert T.isfinite(high_log_probs).all()
+
+
 def test_single_sample_forward(actor: Actor):
     dist, action_mean = actor(T.randn(1, IN_DIM))
 
