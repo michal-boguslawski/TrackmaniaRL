@@ -457,6 +457,53 @@ def test_entropy_loss_is_zero_for_a_uniform_beta(ppo_losses: PPOLosses):
         )
 
 
+def test_entropy_loss_reports_the_average_beta_concentrations(ppo_losses: PPOLosses):
+    """Concentrations are what set the policy's peakedness, so they are logged
+    per action dimension and as a batch average."""
+    alpha = T.tensor([[2.0, 4.0, 1.0], [6.0, 8.0, 3.0]])
+    beta = T.tensor([[1.0, 1.0, 1.0], [1.0, 1.0, 5.0]])
+    dist = _transformed_beta(alpha, beta)
+
+    _, metrics = ppo_losses.entropy_loss(dist)
+
+    assert metrics["metrics/alpha"] == pytest.approx(alpha.mean().item(), rel=1e-6)
+    assert metrics["metrics/beta"] == pytest.approx(beta.mean().item(), rel=1e-6)
+    for index in range(ACTION_DIM):
+        assert metrics[f"metrics/alpha_{index}"] == pytest.approx(
+            alpha[:, index].mean().item(), rel=1e-6
+        )
+        assert metrics[f"metrics/beta_{index}"] == pytest.approx(
+            beta[:, index].mean().item(), rel=1e-6
+        )
+
+
+def test_beta_concentration_max_spans_both_parameters(ppo_losses: PPOLosses):
+    """kappa_max has to catch a confident `beta` too, not only a confident
+    `alpha`, otherwise the state about to produce a non-finite log-prob stays
+    invisible."""
+    alpha = T.tensor([[2.0, 4.0], [6.0, 8.0]])
+    beta = T.tensor([[1.0, 1.0], [1.0, 500.0]])
+
+    _, metrics = ppo_losses.entropy_loss(_transformed_beta(alpha, beta))
+
+    assert metrics["metrics/concentration_max"] == pytest.approx(500.0)
+    # well above the 3.25 average, which is the gap the diagnostic exists to show
+    assert metrics["metrics/concentration_max"] > metrics["metrics/alpha"]
+
+
+def test_beta_mean_reports_support_saturation_per_action(ppo_losses: PPOLosses):
+    """beta_mean lives in the Beta's [0, 1] support, so values pinned near 0 or 1
+    mean the action is saturated at a boundary such as full gas."""
+    alpha = T.tensor([[900.0, 0.002], [900.0, 0.002]])
+    beta = T.tensor([[1.0, 1.0], [1.0, 1.0]])
+    dist = _transformed_beta(alpha, beta)
+
+    _, metrics = ppo_losses.entropy_loss(dist)
+
+    assert metrics["metrics/beta_mean_0"] == pytest.approx(1.0, abs=1e-2)
+    assert metrics["metrics/beta_mean_1"] == pytest.approx(0.002, abs=1e-4)
+
+
 def test_calculate_losses_combines_every_term(agent: Agent, trainer: PPOTrainer, rollout):
     minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
 
@@ -520,6 +567,42 @@ def test_diagnostics_are_deferred_and_emitted_as_epoch_metrics(
     trainer._defer_diagnostics = False
 
 
+def test_beta_concentrations_reach_the_metrics_backend(
+    trainer: PPOTrainer, rollout
+):
+    """The concentrations are deferred diagnostics, so they only surface on an
+    epoch boundary; this checks the whole path to the logging backend rather
+    than the losses alone."""
+    class _EpochMetricCapture(Callback):
+        metrics: dict[str, float] = {}
+
+        def on_epoch(self, metrics=None, **kwargs):
+            self.metrics = metrics or {}
+
+    capture = _EpochMetricCapture()
+    trainer._callbacks._callbacks.append(capture)
+    trainer._defer_diagnostics = True
+    minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
+
+    trainer.train_step(**minibatch)
+    trainer._on_epoch()
+
+    for index in range(ACTION_DIM):
+        for prefix in ("alpha", "beta", "beta_mean"):
+            assert f"metrics/{prefix}_{index}" in capture.metrics
+    for key in ("metrics/alpha", "metrics/beta", "metrics/concentration_max"):
+        assert T.isfinite(T.tensor(capture.metrics[key]))
+        # the actor offsets concentrations to >= 1, so the averages must too
+        assert capture.metrics[key] >= 1.0
+    # the aggregate has to be the mean of the per-dimension averages
+    assert capture.metrics["metrics/alpha"] == pytest.approx(
+        np.mean([capture.metrics[f"metrics/alpha_{i}"] for i in range(ACTION_DIM)]),
+        rel=1e-4,
+    )
+    assert capture.metrics["metrics/concentration_max"] >= capture.metrics["metrics/alpha"]
+    trainer._defer_diagnostics = False
+
+
 def test_train_step_clips_gradients(trainer: PPOTrainer, rollout):
     minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
     trainer.train_step(**minibatch)
@@ -540,13 +623,19 @@ CORE_LOSS_METRIC_KEYS = {
 }
 
 
+def _transformed_beta(alpha: T.Tensor, beta: T.Tensor):
+    """Wrap a Beta in the affine transform the losses expect (they read
+    ``base_dist``)."""
+    return T.distributions.TransformedDistribution(
+        T.distributions.Beta(alpha, beta),
+        T.distributions.transforms.AffineTransform(loc=-1.0, scale=2.0),
+    )
+
+
 def _uniform_beta_distribution():
     """A transformed uniform Beta, the shape the losses expect (they read
     ``base_dist``)."""
-    return T.distributions.TransformedDistribution(
-        T.distributions.Beta(T.ones(4, ACTION_DIM), T.ones(4, ACTION_DIM)),
-        T.distributions.transforms.AffineTransform(loc=-1.0, scale=2.0),
-    )
+    return _transformed_beta(T.ones(4, ACTION_DIM), T.ones(4, ACTION_DIM))
 
 
 def _losses_at(agent: Agent, verbosity) -> PPOLosses:
@@ -634,6 +723,8 @@ def test_low_verbosity_losses_omit_the_per_action_diagnostics(
     assert T.isfinite(entropy_loss)
     assert "metrics/entropy_0" not in entropy_metrics
     assert "metrics/log_std_0" not in entropy_metrics
+    assert "metrics/alpha" not in entropy_metrics
+    assert "metrics/beta_mean_0" not in entropy_metrics
     assert set(actor_metrics) == {"metrics/actor_loss", "metrics/approx_kl"}
 
 
@@ -645,6 +736,17 @@ def test_full_verbosity_losses_keep_the_per_action_diagnostics(agent: Agent):
     for index in range(ACTION_DIM):
         assert f"metrics/entropy_{index}" in entropy_metrics
         assert f"metrics/log_std_{index}" in entropy_metrics
+        assert f"metrics/alpha_{index}" in entropy_metrics
+        assert f"metrics/beta_{index}" in entropy_metrics
+        assert f"metrics/beta_mean_{index}" in entropy_metrics
+    assert "metrics/alpha" in entropy_metrics
+    assert "metrics/beta" in entropy_metrics
+    assert "metrics/concentration_max" in entropy_metrics
+    # a uniform Beta has unit concentrations and a mean at the support midpoint
+    for key in ("metrics/alpha", "metrics/beta", "metrics/concentration_max"):
+        assert entropy_metrics[key] == pytest.approx(1.0)
+    for index in range(ACTION_DIM):
+        assert entropy_metrics[f"metrics/beta_mean_{index}"] == pytest.approx(0.5)
 
 
 def test_trainer_rejects_an_unknown_verbosity(agent: Agent, trainer_settings: TrainerSettings):

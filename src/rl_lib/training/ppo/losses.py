@@ -295,4 +295,71 @@ class PPOLosses:
                         for index, value in enumerate(log_std)
                     }
                 )
+                metric_tensors.update(self._beta_concentration_metrics(dist))
         return entropy_loss, metric_tensors
+
+    def _beta_concentration_metrics(self, dist: Distribution) -> dict[str, T.Tensor]:
+        """Build diagnostics describing the actor's Beta concentrations.
+
+        The actor parameterizes every action dimension with ``Beta(alpha, beta)``,
+        so ``alpha`` and ``beta`` are its concentration parameters, not its mean
+        and variance. They set how peaked each action distribution is, which
+        makes them the first thing to inspect when the policy collapses or when
+        log-probabilities turn non-finite.
+
+        The metrics, each reduced over the minibatch:
+
+        - ``metrics/alpha``, ``metrics/beta``: average concentration over all
+          action dimensions. A steady rise means the policy is becoming
+          deterministic; read it against the ``metrics/entropy_*`` decay and any
+          ``metrics/approx_kl`` spikes.
+        - ``metrics/alpha_{i}``, ``metrics/beta_{i}``: the same averages split
+          per action dimension, which localizes the drift to steering, gas, or
+          brake. Both moving together points at an unstable update, and should
+          line up with ``metrics/ratio_max`` and ``metrics/approx_kl``.
+        - ``metrics/concentration_max``: the largest concentration anywhere in
+          the batch. A large gap to the averages marks the handful of states
+          that are extremely confident, which is where non-finite
+          log-probabilities originate.
+        - ``metrics/beta_mean_{i}``: mean of the untransformed Beta, which lives
+          in the ``[0, 1]`` support. A value near 0 or 1 is the distribution
+          saturating against a support boundary, pinning the action at its
+          extreme such as full brake or full gas.
+
+        ``metrics/log_std_{i}`` is retained for compatibility with Gaussian
+        policies, but it is a poor dispersion proxy here: the Beta support is
+        fixed and its width is governed by the concentrations above.
+
+        Args:
+            dist: Actor's transformed distribution, read through ``base_dist``.
+
+        Returns:
+            Mapping of metric names to 0-dim or (action_dim,) tensors.
+        """
+        base_dist = dist.base_dist
+        alpha_by_action = base_dist.concentration1.mean(0)
+        beta_by_action = base_dist.concentration0.mean(0)
+        # Every action dimension carries the same number of samples, so the mean
+        # of the per-dimension means is the batch mean, and reusing them keeps
+        # the overall average off the critical path.
+        metric_tensors = {
+            "metrics/alpha": alpha_by_action.mean(),
+            "metrics/beta": beta_by_action.mean(),
+            # Two reductions rather than an elementwise maximum over a temporary.
+            "metrics/concentration_max": base_dist.concentration1.max().maximum(
+                base_dist.concentration0.max()
+            ),
+        }
+        metric_tensors.update({
+            f"metrics/alpha_{index}": value
+            for index, value in enumerate(alpha_by_action)
+        })
+        metric_tensors.update({
+            f"metrics/beta_{index}": value
+            for index, value in enumerate(beta_by_action)
+        })
+        metric_tensors.update({
+            f"metrics/beta_mean_{index}": value
+            for index, value in enumerate(base_dist.mean.mean(0))
+        })
+        return metric_tensors
