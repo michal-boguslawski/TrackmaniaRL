@@ -33,17 +33,6 @@ class EpisodeResult:
     length: int
 
 
-def _scalar(value) -> float | None:
-    """Extract first scalar from array-like value."""
-    if value is None:
-        return None
-    try:
-        values = np.asarray(value).reshape(-1)
-    except (TypeError, ValueError):
-        return None
-    return float(values[0]) if values.size else None
-
-
 def _episode_stat_from_info(
     info: dict,
     env_index: int,
@@ -52,9 +41,15 @@ def _episode_stat_from_info(
 ) -> float | None:
     """Read an episode statistic from Gymnasium episode info.
 
-    Tries multiple locations where RecordEpisodeStatistics may store a stat:
-    1. final_info[env_index][stats_key][stat_name] (for autoreset)
-    2. info[stats_key][stat_name][env_index] with done mask
+    Tries the locations where RecordEpisodeStatistics may store a stat, in
+    decreasing specificity:
+
+    1. ``final_info[env_index][stats_key][stat_name]`` (NEXT_STEP autoreset,
+       which keeps terminal infos nested per env)
+    2. ``final_info[stats_key][stat_name][env_index]`` gated by
+       ``final_info[f"_{stats_key}"]`` (SAME_STEP autoreset, which aggregates
+       the terminal infos across envs instead of nesting them)
+    3. ``info[stats_key][stat_name][env_index]`` gated by ``info[f"_{stats_key}"]``
 
     Args:
         info: Info dict from vector env step.
@@ -63,30 +58,48 @@ def _episode_stat_from_info(
         stat_name: Name of the statistic to read (for example, "r" or "l").
 
     Returns:
-        Episode statistic if found, None otherwise.
+        Episode statistic if found, None otherwise. None means the caller
+        should fall back to accumulating rewards and step counts itself.
     """
     final_infos = info.get("final_info")
-    if final_infos is not None:
-        try:
-            final_info = final_infos[env_index]
-        except (IndexError, KeyError, TypeError):
-            final_info = None
-        if isinstance(final_info, Mapping):
-            episode = final_info.get(stats_key)
-            if isinstance(episode, Mapping):
-                value = _scalar(episode.get(stat_name))
-                if value is not None:
-                    return value
+    try:
+        nested_info = final_infos[env_index]
+    except (IndexError, KeyError, TypeError):
+        nested_info = None
 
-    episode_stats = info.get(stats_key)
-    if isinstance(episode_stats, Mapping):
-        mask = info.get(f"_{stats_key}")
-        if mask is None or bool(np.asarray(mask).reshape(-1)[env_index]):
-            values = episode_stats.get(stat_name)
-            try:
-                return _scalar(np.asarray(values)[env_index])
-            except (IndexError, TypeError, ValueError):
-                return _scalar(values)
+    # Nested stats are unmasked; aggregated final_info requires a mask.
+    sources = (
+        (nested_info.get(stats_key) if isinstance(nested_info, Mapping) else None, None, False),
+        (final_infos, f"_{stats_key}", True),
+        (info, f"_{stats_key}", False),
+    )
+    for source, mask_key, require_mask in sources:
+        if mask_key is None:
+            stats, index = source, 0
+        else:
+            if not isinstance(source, Mapping):
+                continue
+            mask = source.get(mask_key)
+            if mask is None:
+                if require_mask:
+                    continue
+            else:
+                try:
+                    flags = np.asarray(mask).reshape(-1)
+                    if not 0 <= env_index < flags.size or not bool(flags[env_index]):
+                        continue
+                except (IndexError, TypeError, ValueError):
+                    continue
+            stats, index = source.get(stats_key), env_index
+
+        if not isinstance(stats, Mapping):
+            continue
+        try:
+            values = np.asarray(stats.get(stat_name)).reshape(-1)
+            if 0 <= index < values.size:
+                return float(values[index])
+        except (TypeError, ValueError):
+            continue
     return None
 
 

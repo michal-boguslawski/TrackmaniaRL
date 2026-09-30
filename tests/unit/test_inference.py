@@ -11,7 +11,11 @@ import yaml
 from gymnasium import spaces
 from gymnasium.vector import AutoresetMode
 
-from rl_lib.evaluation.inference import log_evaluation_results, run_inference
+from rl_lib.evaluation.inference import (
+    _episode_stat_from_info,
+    log_evaluation_results,
+    run_inference,
+)
 from rl_lib.run_config import (
     AgentSettings,
     EnvironmentSettings,
@@ -126,6 +130,17 @@ def test_run_inference_preserves_eval_mode(agent):
                 {"episode": {"r": np.array([202.0]), "l": np.array([22])}},
             ],
         },
+        {
+            # SAME_STEP autoreset aggregates terminal infos across envs in
+            # final_info instead of nesting them per env.
+            "final_info": {
+                "episode": {
+                    "r": np.array([101.0, 202.0]),
+                    "l": np.array([11, 22]),
+                },
+                "_episode": np.array([True, True]),
+            },
+        },
     ],
 )
 def test_run_inference_prefers_episode_statistics_in_info(agent, info):
@@ -150,6 +165,103 @@ def test_run_inference_prefers_episode_statistics_in_info(agent, info):
         (101.0, 11),
         (202.0, 22),
     ]
+
+
+@pytest.mark.parametrize(
+    "info",
+    [
+        # No mask at all: the aggregated stats are unusable, so the caller must
+        # fall back to accumulating steps and rewards itself.
+        {"final_info": {"episode": {"r": np.array([101.0, 202.0]), "l": np.array([11, 22])}}},
+        # Mask false for both envs.
+        {
+            "final_info": {
+                "episode": {"r": np.array([0.0, 0.0]), "l": np.array([0, 0])},
+                "_episode": np.array([False, False]),
+            },
+        },
+        # stats_key absent entirely.
+        {"final_info": {"other": {}, "_other": np.array([True, True])}},
+    ],
+)
+def test_run_inference_ignores_unusable_aggregated_final_info(agent, info):
+    class InfoRewardEnv:
+        num_envs = 2
+
+        def reset(self, seed=None):
+            return np.zeros((2, *OBSERVATION_SHAPE), dtype=np.uint8), {}
+
+        def step(self, action):
+            return (
+                np.zeros((2, *OBSERVATION_SHAPE), dtype=np.uint8),
+                np.array([3.0, 4.0], dtype=np.float32),
+                np.ones(2, dtype=np.bool_),
+                np.zeros(2, dtype=np.bool_),
+                info,
+            )
+
+    results = run_inference(agent, InfoRewardEnv(), episodes=2)
+
+    # Fallback: one step, so length 1 and the raw step reward.
+    assert [(result.return_, result.length) for result in results] == [(3.0, 1), (4.0, 1)]
+
+
+def test_run_inference_reads_aggregated_final_info_per_env(agent):
+    """SAME_STEP autoreset masks select which env's stats are valid."""
+
+    class InfoRewardEnv:
+        num_envs = 2
+
+        def reset(self, seed=None):
+            return np.zeros((2, *OBSERVATION_SHAPE), dtype=np.uint8), {}
+
+        def step(self, action):
+            return (
+                np.zeros((2, *OBSERVATION_SHAPE), dtype=np.uint8),
+                np.array([-5.0, -7.0], dtype=np.float32),
+                np.ones(2, dtype=np.bool_),
+                np.zeros(2, dtype=np.bool_),
+                {
+                    "final_info": {
+                        "episode": {
+                            "r": np.array([101.0, 0.0]),
+                            "l": np.array([11, 0]),
+                        },
+                        "_episode": np.array([True, False]),
+                    },
+                },
+            )
+
+    results = run_inference(agent, InfoRewardEnv(), episodes=1)
+
+    assert [(result.return_, result.length) for result in results] == [(101.0, 11)]
+
+
+def test_episode_stat_from_info_prefers_nested_final_info_over_aggregated():
+    """A per-env nested entry wins over the aggregated mapping."""
+    info = {
+        "final_info": {
+            1: {"episode": {"l": 7}},
+            "episode": {"l": np.array([0, 0, 0, 0])},
+            "_episode": np.array([False, False, False, True]),
+        },
+    }
+
+    assert _episode_stat_from_info(info, 1, "episode", "l") == 7.0
+
+
+def test_episode_stat_from_info_out_of_range_index_returns_none():
+    info = {
+        "final_info": {
+            "episode": {"l": np.array([11, 22])},
+            "_episode": np.array([True, True]),
+        },
+    }
+
+    assert _episode_stat_from_info(info, 5, "episode", "l") is None
+
+
+
 
 
 def test_log_evaluation_results_sends_each_episode_and_summary_to_all_loggers():
