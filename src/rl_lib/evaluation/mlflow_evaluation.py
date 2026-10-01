@@ -21,6 +21,7 @@ from rl_lib.networks.factory import Network
 from rl_lib.run_config import RunConfig
 from rl_lib.tracking.base import MetricsLogger
 from rl_lib.evaluation.runtime import _default_metrics_loggers
+from rl_lib.tracking.artifacts import step_artifact_path
 
 
 logger = logging.getLogger(__name__)
@@ -301,16 +302,21 @@ def evaluate_mlflow(
     record_video: bool = False,
     metrics_loggers: list[MetricsLogger] | None = None,
     input_fn: Callable[[str], str] | None = None,
+    checkpoint_step: int | None = None,
 ) -> list[float]:
-    """Evaluate the ``final_model`` artifact for an MLflow run.
+    """Evaluate a final model or selected checkpoint from an MLflow run.
 
     ``run_id`` may also be a ``runs:/<run_id>/...`` URI. With no identifier,
     the available model artifacts in ``experiment_name`` are listed and a
-    unique run-ID prefix is requested.
+    unique run-ID prefix is requested. If ``checkpoint_step`` is provided,
+    that run's periodic state-dict checkpoint is evaluated instead of its
+    ``final_model`` artifact.
 
     Args:
         run_id: MLflow run ID, URI, or prefix (None to list and prompt).
         experiment_name: Required if run_id not provided (to list models).
+        checkpoint_step: Optional rollout step of a checkpoint logged under
+            ``checkpoints/step_<step>/state_dict.pth``.
         episodes: Number of evaluation episodes.
         num_envs: Parallel environments.
         record_video: Whether to record videos.
@@ -321,12 +327,15 @@ def evaluate_mlflow(
         List of episode returns.
 
     Raises:
-        ValueError: If episodes < 1, num_envs < 1, or experiment_name missing.
+        ValueError: If episodes < 1, num_envs < 1, checkpoint_step is negative,
+            or experiment_name is missing when model selection is required.
     """
     if episodes < 1:
         raise ValueError("episodes must be at least 1")
     if num_envs < 1:
         raise ValueError("num_envs must be at least 1")
+    if checkpoint_step is not None and checkpoint_step < 0:
+        raise ValueError("checkpoint_step must be non-negative")
 
     if run_id is None or run_id.strip() == "":
         if not experiment_name:
@@ -347,15 +356,26 @@ def evaluate_mlflow(
     config = _load_mlflow_config(model_ref.run_id)
     device = resolve_device(config)
 
-    network = mlflow.pytorch.load_model(
-        f"runs:/{model_ref.run_id}/{FINAL_MODEL_ARTIFACT}",
-        map_location=device,
-    )
-    if not isinstance(network, Network):
-        raise TypeError(
-            f"MLflow artifact {FINAL_MODEL_ARTIFACT} from run {model_ref.run_id} "
-            "is not an rl_lib Network"
+    if checkpoint_step is None:
+        network = mlflow.pytorch.load_model(
+            f"runs:/{model_ref.run_id}/{FINAL_MODEL_ARTIFACT}",
+            map_location=device,
         )
+        if not isinstance(network, Network):
+            raise TypeError(
+                f"MLflow artifact {FINAL_MODEL_ARTIFACT} from run {model_ref.run_id} "
+                "is not an rl_lib Network"
+            )
+        checkpoint_path = None
+    else:
+        checkpoint_artifact = (
+            f"{step_artifact_path('checkpoints', checkpoint_step)}/state_dict.pth"
+        )
+        checkpoint_path = mlflow.artifacts.download_artifacts(
+            run_id=model_ref.run_id,
+            artifact_path=checkpoint_artifact,
+        )
+        network = None
 
     return _evaluate_configured_policy(
         config,
@@ -365,6 +385,7 @@ def evaluate_mlflow(
         record_video=record_video,
         scope="mlflow",
         network=network,
+        checkpoint_path=checkpoint_path,
     )
 
 

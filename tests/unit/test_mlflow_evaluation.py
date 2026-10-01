@@ -139,6 +139,54 @@ def test_mlflow_run_uri_is_accepted(monkeypatch, tmp_path, network_config, agent
     assert calls == ["runs:/run-xyz/final_model"]
 
 
+def test_mlflow_evaluation_loads_selected_checkpoint(
+    monkeypatch, tmp_path, network_config
+):
+    config_path = tmp_path / "run_config.yaml"
+    _save_config(_config(network_config), config_path)
+    artifact_calls = []
+    evaluated = {}
+
+    def download_artifacts(*, run_id, artifact_path):
+        artifact_calls.append((run_id, artifact_path))
+        path = config_path if artifact_path == "config/run_config.yaml" else tmp_path / "state_dict.pth"
+        return str(path)
+
+    fake_mlflow = SimpleNamespace(
+        artifacts=SimpleNamespace(download_artifacts=download_artifacts),
+        pytorch=SimpleNamespace(
+            load_model=lambda *args, **kwargs: pytest.fail(
+                "selected state-dict checkpoint should not load final_model"
+            ),
+        ),
+    )
+    monkeypatch.setattr("rl_lib.evaluation.mlflow_evaluation.mlflow", fake_mlflow)
+    monkeypatch.setattr(
+        "rl_lib.evaluation.mlflow_evaluation._evaluate_configured_policy",
+        lambda config, **kwargs: evaluated.update(config=config, **kwargs) or [12.0],
+    )
+
+    returns = evaluate_mlflow(
+        run_id="run-checkpoint",
+        checkpoint_step=500_000,
+        episodes=1,
+        metrics_loggers=[],
+    )
+
+    assert returns == [12.0]
+    assert artifact_calls == [
+        ("run-checkpoint", "config/run_config.yaml"),
+        ("run-checkpoint", "checkpoints/step_500000/state_dict.pth"),
+    ]
+    assert evaluated["checkpoint_path"] == str(tmp_path / "state_dict.pth")
+    assert evaluated["network"] is None
+
+
+def test_mlflow_evaluation_rejects_negative_checkpoint_step():
+    with pytest.raises(ValueError, match="checkpoint_step must be non-negative"):
+        evaluate_mlflow(run_id="run-checkpoint", checkpoint_step=-1)
+
+
 def test_logged_config_keeps_default_wrappers_when_the_run_omitted_them(tmp_path, monkeypatch):
     """Runs log unset fields as absent, so defaults must survive the reload."""
     logged = {
