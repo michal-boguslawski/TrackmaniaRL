@@ -43,6 +43,25 @@ class MetricsLogger(ABC):
         """
         pass
 
+    def log_evaluation(
+        self,
+        episodes: list[dict[str, float | int]],
+        summary: dict[str, float],
+        step: int,
+        scope: str,
+        config_artifact: str = "config/run_config.yaml",
+    ) -> None:
+        """Persist evaluation details when supported by the backend.
+
+        Args:
+            episodes: Per-episode returns and lengths.
+            summary: Aggregate evaluation metrics.
+            step: Training step at which the evaluation ran.
+            scope: Evaluation scope, such as ``final`` or ``periodic``.
+            config_artifact: Run-relative path to the config used for evaluation.
+        """
+        pass
+
     def log_model(
         self,
         model: Any,

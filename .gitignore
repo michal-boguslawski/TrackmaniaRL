@@ -1,6 +1,22 @@
 __pycache__
 
-logs
+# Keep generated logs and large artifacts out of Git, while allowing small,
+# reproducibility-focused metadata for each local training run.
+logs/
+!logs/
+logs/*
+!logs/artifacts/
+logs/artifacts/*
+!logs/artifacts/*/
+logs/artifacts/*/*
+!logs/artifacts/*/config/
+!logs/artifacts/*/evaluation/
+logs/artifacts/*/config/*
+!logs/artifacts/*/config/run_config.yaml
+!logs/artifacts/*/config/parameters.json
+logs/artifacts/*/evaluation/*
+!logs/artifacts/*/evaluation/final_results.json
+
 mlruns
 
 nohup.out

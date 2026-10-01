@@ -58,12 +58,25 @@ class _Logger(MetricsLogger):
     def __init__(self):
         self.metrics: list[tuple[dict[str, float], int]] = []
         self.artifacts: list[tuple[str, str | None]] = []
+        self.evaluations: list[
+            tuple[list[dict[str, float | int]], dict[str, float], int, str]
+        ] = []
 
     def log_metrics(self, metrics: dict[str, float], step: int) -> None:
         self.metrics.append((dict(metrics), step))
 
     def log_artifact(self, local_path: str, artifact_path: str | None = None) -> None:
         self.artifacts.append((local_path, artifact_path))
+
+    def log_evaluation(
+        self,
+        episodes: list[dict[str, float | int]],
+        summary: dict[str, float],
+        step: int,
+        scope: str,
+        config_artifact: str = "config/run_config.yaml",
+    ) -> None:
+        self.evaluations.append((episodes, summary, step, scope))
 
 
 def _config(network_config, num_envs: int = 2) -> RunConfig:
@@ -133,6 +146,12 @@ def test_evaluation_callback_runs_on_vector_step_intervals_and_at_end(
         (4, 1.0),
         (5, 3.0),
     ]
+    assert len(logger.evaluations) == 1
+    episodes, summary, step, scope = logger.evaluations[0]
+    assert len(episodes) == 3
+    assert summary["evaluation/final/episodes"] == 3.0
+    assert step == 5
+    assert scope == "final"
     assert env.closed
 
 

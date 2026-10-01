@@ -72,7 +72,19 @@ class EvaluationCallback(Callback):
             temperature=self.agent.cfg.deterministic_temperature,
             episode_stats_key=_episode_stats_key(self.cfg.environment),
         )
-        log_evaluation_results(results, self._loggers, step=step, scope=scope)
+        summary = log_evaluation_results(results, self._loggers, step=step, scope=scope)
+        if scope == "final":
+            episode_records = [
+                {"return": result.return_, "length": result.length}
+                for result in results
+            ]
+            for metrics_logger in self._loggers:
+                metrics_logger.log_evaluation(
+                    episode_records,
+                    summary,
+                    step,
+                    scope,
+                )
         self._last_evaluation_step = step
 
     def on_rollout_start(self, config: dict | None = None, *args, **kwargs) -> None:

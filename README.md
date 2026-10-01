@@ -69,7 +69,7 @@ extra as the environment you trained in; a CUDA benchmark needs `--extra gpu`.
 ### Train and profile
 
 ```bash
-# Default production config (3,000,000 vector-environment steps, 16 envs); profiler off by default.
+# Default production config; profiler off by default.
 uv run --extra gpu python scripts/train.py --no-profile
 
 # Explicit config and profiler overrides.
@@ -135,7 +135,12 @@ runs real episodes, so it takes longer than a smoke training run.
 
 Locally, `logs/artifacts/<session-id>/` receives the `.pt` model and
 state-dictionary artifacts and `logs/app.log` records run startup and training
-messages. The session ID is printed in the application log.
+messages. Small run metadata is saved alongside them:
+`config/run_config.yaml`, `config/parameters.json`, and, after final evaluation,
+`evaluation/final_results.json` (including a reference to the saved config).
+These metadata files are visible to Git; model artifacts, videos, application
+logs, and the `mlruns` store remain ignored. The session ID is printed in the
+application log.
 
 ### Performance benchmark scripts
 

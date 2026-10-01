@@ -179,6 +179,17 @@ class VerbosityMetricsLogger(MetricsLogger):
         """Delegate config artifact logging; configs are not metrics."""
         self.logger.log_config(config, artifact_file)
 
+    def log_evaluation(
+        self,
+        episodes: list[dict[str, float | int]],
+        summary: dict[str, float],
+        step: int,
+        scope: str,
+        config_artifact: str = "config/run_config.yaml",
+    ) -> None:
+        """Delegate evaluation persistence; evaluation files are not metrics."""
+        self.logger.log_evaluation(episodes, summary, step, scope, config_artifact)
+
     def log_model(
         self,
         model: Any,
