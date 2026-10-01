@@ -362,6 +362,9 @@ def evaluate_mlflow(
             map_location=device,
         )
         if not isinstance(network, Network):
+            # torch.compile serializes an OptimizedModule around the original model.
+            network = getattr(network, "_orig_mod", network)
+        if not isinstance(network, Network):
             raise TypeError(
                 f"MLflow artifact {FINAL_MODEL_ARTIFACT} from run {model_ref.run_id} "
                 "is not an rl_lib Network"

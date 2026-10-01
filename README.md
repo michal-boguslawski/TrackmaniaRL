@@ -112,6 +112,13 @@ uv run --extra cpu mlflow server --host 127.0.0.1 --port 5000
 
 # Interactive checkpoint evaluation.
 uv run --extra cpu rl-lib
+
+# Evaluate a selected checkpoint directly, without creating a script.
+uv run --extra gpu python scripts/evaluate.py --run-id RUN_ID \
+  --checkpoint-step 2200000 --episodes 10
+
+# Evaluate the MLflow final_model artifact instead of a periodic checkpoint.
+uv run --extra gpu python scripts/evaluate.py --run-id RUN_ID --episodes 10
 ```
 
 Set `MLFLOW_TRACKING_URI=http://127.0.0.1:5000` before training or evaluating to
@@ -120,8 +127,11 @@ use an HTTP tracking server.
 `rl-lib` offers checkpoint evaluation. Choose MLflow as the source and enter the
 experiment name and run ID, or choose a local checkpoint and point it at
 `logs/artifacts/<session-id>/final_state_dict.pt` together with the YAML config
-that produced it. Evaluation runs a real CarRacing episode, so it takes longer
-than a smoke training run.
+that produced it. For MLflow evaluation, the interactive prompt accepts a
+checkpoint step; leave it blank to evaluate `final_model`. The standalone
+`scripts/evaluate.py` command supports both MLflow and local checkpoints; run
+`uv run --extra gpu python scripts/evaluate.py --help` for its options. Evaluation
+runs real episodes, so it takes longer than a smoke training run.
 
 Locally, `logs/artifacts/<session-id>/` receives the `.pt` model and
 state-dictionary artifacts and `logs/app.log` records run startup and training

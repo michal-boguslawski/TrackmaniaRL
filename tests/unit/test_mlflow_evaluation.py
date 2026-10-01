@@ -182,6 +182,35 @@ def test_mlflow_evaluation_loads_selected_checkpoint(
     assert evaluated["network"] is None
 
 
+def test_mlflow_evaluation_unwraps_compiled_final_model(
+    monkeypatch, tmp_path, network_config, agent
+):
+    config_path = tmp_path / "run_config.yaml"
+    _save_config(_config(network_config), config_path)
+    evaluated = {}
+    fake_mlflow = SimpleNamespace(
+        artifacts=SimpleNamespace(
+            download_artifacts=lambda **kwargs: str(config_path),
+        ),
+        pytorch=SimpleNamespace(
+            load_model=lambda uri, map_location: SimpleNamespace(
+                _orig_mod=agent.network
+            ),
+        ),
+    )
+    monkeypatch.setattr("rl_lib.evaluation.mlflow_evaluation.mlflow", fake_mlflow)
+    monkeypatch.setattr(
+        "rl_lib.evaluation.mlflow_evaluation._evaluate_configured_policy",
+        lambda config, **kwargs: evaluated.update(config=config, **kwargs) or [1.0],
+    )
+
+    returns = evaluate_mlflow(run_id="compiled-run", episodes=1)
+
+    assert returns == [1.0]
+    assert evaluated["network"] is agent.network
+    assert evaluated["checkpoint_path"] is None
+
+
 def test_mlflow_evaluation_rejects_negative_checkpoint_step():
     with pytest.raises(ValueError, match="checkpoint_step must be non-negative"):
         evaluate_mlflow(run_id="run-checkpoint", checkpoint_step=-1)

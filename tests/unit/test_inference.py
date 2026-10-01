@@ -15,6 +15,7 @@ from rl_lib.evaluation.inference import (
     _episode_stat_from_info,
     log_evaluation_results,
     run_inference,
+    summarize_returns,
 )
 from rl_lib.run_config import (
     AgentSettings,
@@ -26,6 +27,22 @@ from rl_lib.tracking.base import MetricsLogger
 
 
 OBSERVATION_SHAPE = (96, 96, 1)
+
+
+def test_summarize_returns_calculates_descriptive_statistics():
+    assert summarize_returns([1.0, 2.0, 3.0, 10.0]) == {
+        "episodes": 4.0,
+        "mean": 4.0,
+        "std": pytest.approx(3.535533906),
+        "min": 1.0,
+        "median": 2.5,
+        "max": 10.0,
+    }
+
+
+def test_summarize_returns_rejects_empty_input():
+    with pytest.raises(ValueError, match="empty return list"):
+        summarize_returns([])
 
 
 class _EpisodeEnv(gym.Env):
@@ -114,6 +131,34 @@ def test_run_inference_preserves_eval_mode(agent):
         env.close()
 
     assert agent.network.training is False
+
+
+def test_run_inference_progress_updates_for_each_completed_episode(agent, monkeypatch):
+    progress = SimpleNamespace(updates=0, closed=False)
+
+    class _ProgressBar:
+        def __init__(self, total, desc, unit):
+            assert (total, desc, unit) == (3, "Evaluation", "episode")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            progress.closed = True
+
+        def update(self, amount=1):
+            progress.updates += amount
+
+    monkeypatch.setattr("rl_lib.evaluation.inference.tqdm", _ProgressBar)
+    env = _vector_env(num_envs=2, horizon=1)
+    try:
+        results = run_inference(agent, env, episodes=3)
+    finally:
+        env.close()
+
+    assert len(results) == 3
+    assert progress.updates == 3
+    assert progress.closed
 
 
 @pytest.mark.parametrize(

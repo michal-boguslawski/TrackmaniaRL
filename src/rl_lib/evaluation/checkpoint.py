@@ -53,6 +53,12 @@ def _load_local_network(network: Network, checkpoint_path: str | Path, device: T
         state_dict = checkpoint.get("state_dict", checkpoint)
         if not isinstance(state_dict, Mapping):
             raise ValueError(f"Checkpoint {checkpoint_path} does not contain a model state dict")
+        if state_dict and all(key.startswith("_orig_mod.") for key in state_dict):
+            # torch.compile wraps modules and prefixes their state-dict keys.
+            state_dict = {
+                key.removeprefix("_orig_mod."): value
+                for key, value in state_dict.items()
+            }
         T.nn.Module.load_state_dict(network, state_dict)
         return network
     raise ValueError(f"Checkpoint {checkpoint_path} is neither a Network nor a state dict")

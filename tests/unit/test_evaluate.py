@@ -159,6 +159,33 @@ def test_local_checkpoint_evaluation_uses_shared_inference(
     assert logger.metrics[-1][0]["evaluation/local/episodes"] == 3.0
 
 
+def test_local_checkpoint_evaluation_loads_torch_compile_state_dict(
+    tmp_path, monkeypatch, network_config, agent
+):
+    config_path = tmp_path / "run.yaml"
+    _save_config(_config(network_config), config_path)
+    checkpoint_path = tmp_path / "compiled-checkpoint.pt"
+    compiled_state_dict = {
+        f"_orig_mod.{key}": value
+        for key, value in agent.network.state_dict().items()
+    }
+    T.save(compiled_state_dict, checkpoint_path)
+    monkeypatch.setattr(
+        "rl_lib.evaluation.checkpoint.make_env",
+        lambda config: _vector_env(config.num_envs),
+    )
+
+    returns = evaluate_checkpoint(
+        config_path,
+        checkpoint_path,
+        episodes=1,
+        num_envs=1,
+        metrics_loggers=[],
+    )
+
+    assert returns == [2.0]
+
+
 def test_local_evaluation_accepts_the_full_model_saved_at_training_end(
     tmp_path, monkeypatch, network_config, agent
 ):

@@ -8,11 +8,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from logging import getLogger
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 import torch as T
 from gymnasium.vector import VectorEnv
+from tqdm import tqdm
 
 from rl_lib.agent import Agent
 from rl_lib.tracking.base import MetricsLogger
@@ -103,6 +104,32 @@ def _episode_stat_from_info(
     return None
 
 
+def summarize_returns(returns: Sequence[float]) -> dict[str, float]:
+    """Calculate descriptive statistics for episode returns.
+
+    Args:
+        returns: Episode return values.
+
+    Returns:
+        Summary containing episode count, mean, population standard deviation,
+        minimum, median, and maximum return.
+
+    Raises:
+        ValueError: If ``returns`` is empty.
+    """
+    values = np.asarray(returns, dtype=np.float64)
+    if values.size == 0:
+        raise ValueError("cannot summarize an empty return list")
+    return {
+        "episodes": float(values.size),
+        "mean": float(values.mean()),
+        "std": float(values.std()),
+        "min": float(values.min()),
+        "median": float(np.median(values)),
+        "max": float(values.max()),
+    }
+
+
 def run_inference(
     agent: Agent,
     env: VectorEnv,
@@ -147,61 +174,63 @@ def run_inference(
         episode_lengths = np.zeros(env.num_envs, dtype=np.int64)
         results: list[EpisodeResult] = []
 
-        while len(results) < episodes:
-            (
-                next_observation,
-                _,
-                _,
-                _,
-                _,
-                reward,
-                _,
-                _,
-                done,
-                info,
-            ) = agent.step_env(
-                env,
-                observation,
-                done,
-                temperature=temperature,
-            )
-            episode_returns += np.asarray(reward, dtype=np.float64).reshape(env.num_envs)
-            episode_lengths += 1
-            done_mask = done.detach().cpu().numpy().astype(np.bool_, copy=False)
+        with tqdm(total=episodes, desc="Evaluation", unit="episode") as progress:
+            while len(results) < episodes:
+                (
+                    next_observation,
+                    _,
+                    _,
+                    _,
+                    _,
+                    reward,
+                    _,
+                    _,
+                    done,
+                    info,
+                ) = agent.step_env(
+                    env,
+                    observation,
+                    done,
+                    temperature=temperature,
+                )
+                episode_returns += np.asarray(reward, dtype=np.float64).reshape(env.num_envs)
+                episode_lengths += 1
+                done_mask = done.detach().cpu().numpy().astype(np.bool_, copy=False)
 
-            for env_index in np.flatnonzero(done_mask):
-                if len(results) == episodes:
-                    break
-                info_return = _episode_stat_from_info(
-                    info, int(env_index), episode_stats_key, "r"
-                )
-                info_length = _episode_stat_from_info(
-                    info, int(env_index), episode_stats_key, "l"
-                )
-                result = EpisodeResult(
-                    return_=(
-                        info_return
-                        if info_return is not None
-                        else float(episode_returns[env_index])
-                    ),
-                    length=(
-                        int(info_length)
-                        if info_length is not None
-                        else int(episode_lengths[env_index])
-                    ),
-                )
-                results.append(result)
-                logger.debug(
-                    "Inference episode %d/%d: return=%.3f length=%d",
-                    len(results),
-                    episodes,
-                    result.return_,
-                    result.length,
-                )
-                episode_returns[env_index] = 0.0
-                episode_lengths[env_index] = 0
+                for env_index in np.flatnonzero(done_mask):
+                    if len(results) == episodes:
+                        break
+                    info_return = _episode_stat_from_info(
+                        info, int(env_index), episode_stats_key, "r"
+                    )
+                    info_length = _episode_stat_from_info(
+                        info, int(env_index), episode_stats_key, "l"
+                    )
+                    result = EpisodeResult(
+                        return_=(
+                            info_return
+                            if info_return is not None
+                            else float(episode_returns[env_index])
+                        ),
+                        length=(
+                            int(info_length)
+                            if info_length is not None
+                            else int(episode_lengths[env_index])
+                        ),
+                    )
+                    results.append(result)
+                    progress.update()
+                    logger.debug(
+                        "Inference episode %d/%d: return=%.3f length=%d",
+                        len(results),
+                        episodes,
+                        result.return_,
+                        result.length,
+                    )
+                    episode_returns[env_index] = 0.0
+                    episode_lengths[env_index] = 0
 
-            observation = next_observation
+                observation = next_observation
 
         return results
     finally:

@@ -94,9 +94,13 @@ def _evaluate() -> None:
             logger.debug("Default config unavailable; using the default experiment name")
         experiment_name = _ask("MLflow experiment", experiment_default)
         run_id = _ask("MLflow run ID / URI (blank to choose from available models)") or None
+        checkpoint_step = _nonnegative_int(
+            "Checkpoint step (blank to evaluate final model)", allow_blank=True
+        )
         evaluate_mlflow(
             run_id=run_id,
             experiment_name=experiment_name,
+            checkpoint_step=checkpoint_step,
             episodes=episodes,
             num_envs=num_envs,
             record_video=record_video,
@@ -119,6 +123,21 @@ def _positive_int(prompt: str, default: str | None = None) -> int:
             return value
         except ValueError:
             logger.warning("Enter a positive whole number for %s.", prompt.lower())
+
+
+def _nonnegative_int(prompt: str, allow_blank: bool = False) -> int | None:
+    """Prompt for a non-negative integer, optionally accepting blank input."""
+    while True:
+        raw = _ask(prompt)
+        if allow_blank and not raw:
+            return None
+        try:
+            value = int(raw)
+            if value < 0:
+                raise ValueError
+            return value
+        except ValueError:
+            logger.warning("Enter a non-negative whole number for %s.", prompt.lower())
 
 
 def _configure_logging() -> None:
