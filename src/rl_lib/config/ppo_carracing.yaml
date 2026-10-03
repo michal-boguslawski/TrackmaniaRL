@@ -16,7 +16,7 @@ run:
   # BF16 for the CNN feature extractor only; temporal, actor/critic heads,
   # distribution math, and the PPO losses stay FP32. CUDA-only: this raises on
   # a CPU device, so a CPU run of this config needs cnn_autocast: none.
-  cnn_autocast: bf16
+  cnn_autocast: none
 
 environment:
   id: CarRacing-v3
@@ -76,7 +76,7 @@ network:
     norm_affine: true
   actor:
     hidden_layers:
-      - {out_dim: 256, activation: gelu, init_gain: 1.41421356237, init_bias: 0.0, bias: true}
+      - {out_dim: 1024, activation: gelu, init_gain: 1.41421356237, init_bias: 0.0, bias: true}
     output_init_gain: 0.01
     output_init_bias: -2.0
     output_bias: true
@@ -99,11 +99,11 @@ trainer:
   ppo_epsilon: 0.1
   critic_beta: 0.8
   entropy_coef: 0.01
-  entropy_decay: 0.999
+  entropy_decay: 0.9999
   entropy_coef_min: 0.0001
   mean_reg_coef: 0.001
   advantage_normalization_strategy: global
-  target_kl: 0.03
+  target_kl: 0.015
   kl_warmup_steps: 20000
   kl_stop_multiplier: 3.0
   hard_stop_kl: true
