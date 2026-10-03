@@ -71,6 +71,30 @@ class CNN(nn.Module):
         """Output feature dimension after final linear layer."""
         return self.cfg.out_dim
 
+    def layer_parameter_groups(self) -> dict[str, list[nn.Parameter]]:
+        """Group parameters per weighted layer, for layer-wise diagnostics.
+
+        Layers are keyed by type and position in the stack, so the naming is
+        unique and stays stable for a fixed configuration.
+
+        Returns:
+            Mapping from layer name (``conv_{i}`` / ``linear_{i}``) to that
+            layer's parameters, weight first then bias.
+        """
+        groups: dict[str, list[nn.Parameter]] = {}
+        indices = {"conv": 0, "linear": 0}
+        for module in self._network:
+            if isinstance(module, nn.Conv2d):
+                prefix = "conv"
+            elif isinstance(module, nn.Linear):
+                prefix = "linear"
+            else:
+                continue
+            name = f"{prefix}_{indices[prefix]}"
+            indices[prefix] += 1
+            groups[name] = list(module.parameters())
+        return groups
+
     def forward(self, x: T.Tensor) -> T.Tensor:
         """Encode image observation to feature vector.
 

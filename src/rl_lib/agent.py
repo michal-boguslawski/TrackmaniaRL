@@ -411,7 +411,7 @@ class Agent:
             "grad_norm/critic_total": norms["grad_norm/critic"],
         }
 
-        self._clip_gradient_group(
+        backbone_scale = self._clip_gradient_group(
             gradients["backbone"], group_norms["grad_norm/backbone_total"], backbone_max_norm
         )
         self._clip_gradient_group(
@@ -420,13 +420,18 @@ class Agent:
         self._clip_gradient_group(
             gradients["critic"], group_norms["grad_norm/critic_total"], critic_max_norm
         )
-        return {**norms, **group_norms}
+        return {
+            **norms,
+            **group_norms,
+            "grad_clip/backbone_scale": backbone_scale,
+            "grad_clip/backbone_clipped": (backbone_scale < 1.0).to(dtype=T.float32),
+        }
 
     def get_partial_clip_grad_norms(self) -> dict[str, float]:
         """Get per-module gradient norms for monitoring (no clipping).
 
         Returns:
-            Dict with keys: cnn, sequence_encoder, actor, critic, max.
+            Dict with module norms, global norm, and per-layer CNN norms.
         """
         norm_tensors, _ = self._get_gradient_norm_tensors()
         keys = tuple(norm_tensors)
@@ -447,11 +452,23 @@ class Agent:
             name: [parameter.grad for parameter in parameters if parameter.grad is not None]
             for name, parameters in modules.items()
         }
-        active_names = [name for name, grads in gradients.items() for _ in grads]
-        all_gradients = [grad for grads in gradients.values() for grad in grads]
+        active_parameters = [
+            (name, parameter)
+            for name, parameters in modules.items()
+            for parameter in parameters
+            if parameter.grad is not None
+        ]
+        active_names = [name for name, _ in active_parameters]
+        all_gradients = [parameter.grad for _, parameter in active_parameters]
 
         if all_gradients:
             per_parameter_norms = T._foreach_norm(all_gradients, 2)
+            parameter_norms = {
+                id(parameter): norm
+                for (_, parameter), norm in zip(
+                    active_parameters, per_parameter_norms, strict=True
+                )
+            }
             module_norms: dict[str, list[T.Tensor]] = {name: [] for name in modules}
             for name, norm in zip(active_names, per_parameter_norms, strict=True):
                 module_norms[name].append(norm)
@@ -461,12 +478,27 @@ class Agent:
                 for name in modules
             }
             norms["grad_norm/max"] = self._combine_norms(list(per_parameter_norms), zero)
+            for layer_name, parameters in self._cnn_layer_parameter_groups().items():
+                layer_norms = [
+                    parameter_norms[id(parameter)]
+                    for parameter in parameters
+                    if id(parameter) in parameter_norms
+                ]
+                norms[f"grad_norm/cnn_{layer_name}"] = self._combine_norms(
+                    layer_norms, zero
+                )
         else:
             zero = T.zeros((), device=self.device)
             norms = {
                 **{f"grad_norm/{name}": zero for name in modules},
                 "grad_norm/max": zero,
             }
+            norms.update(
+                {
+                    f"grad_norm/cnn_{layer_name}": zero
+                    for layer_name in self._cnn_layer_parameter_groups()
+                }
+            )
 
         return norms, {
             "backbone": gradients["cnn"] + gradients["sequence_encoder"],
@@ -482,14 +514,19 @@ class Agent:
             return zero
         return T.linalg.vector_norm(T.stack(norms), ord=2)
 
+    def _cnn_layer_parameter_groups(self) -> dict[str, list[Parameter]]:
+        """Group CNN parameters by layer for the per-layer gradient norms."""
+        return self._network.cnn.layer_parameter_groups()
+
     @staticmethod
     def _clip_gradient_group(
         gradients: list[T.Tensor], total_norm: T.Tensor, max_norm: float
-    ) -> None:
-        """Scale gradients in-place using an already-computed group norm."""
+    ) -> T.Tensor:
+        """Scale gradients in-place and return the applied coefficient."""
+        clip_coefficient = T.clamp(max_norm / (total_norm + 1e-6), max=1.0)
         if gradients:
-            clip_coefficient = T.clamp(max_norm / (total_norm + 1e-6), max=1.0)
             T._foreach_mul_(gradients, clip_coefficient)
+        return clip_coefficient
 
     def save_state_dict(self, path: str) -> None:
         """Save network state dict to disk."""

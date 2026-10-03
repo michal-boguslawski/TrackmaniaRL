@@ -85,11 +85,28 @@ the cause:
 
 | Metric | Meaning |
 | --- | --- |
-| `grad_norm/max` | Largest module gradient norm; compare against the configured clip values |
-| `grad_norm/cnn` | CNN trunk norm |
-| `grad_norm/sequence_encoder` | Temporal encoder norm |
-| `grad_norm/actor` | Actor head norm |
-| `grad_norm/critic` | Critic head norm |
+| `grad_norm/max` | Total L2 norm across all network parameter gradients; despite the legacy name, this is not a maximum |
+| `grad_norm/backbone_total` | Pre-clipping L2 norm of CNN and temporal-encoder gradients combined; this is the norm compared with `backbone_max_grad_norm` |
+| `grad_norm/cnn` | Pre-clipping L2 norm across the CNN trunk |
+| `grad_norm/cnn_conv_{i}` | Pre-clipping L2 norm for CNN convolutional layer `i`, including its weights and bias |
+| `grad_norm/cnn_linear_{i}` | Pre-clipping L2 norm for CNN linear layer `i`, including its weights and bias |
+| `grad_norm/sequence_encoder` | Pre-clipping temporal-encoder norm |
+| `grad_norm/actor` | Pre-clipping actor-head norm |
+| `grad_norm/critic` | Pre-clipping critic-head norm |
+
+## `grad_clip/`
+
+| Metric | Meaning |
+| --- | --- |
+| `grad_clip/backbone_scale` | Per-minibatch multiplier applied to CNN + temporal gradients (1 means no clipping). Logged as an epoch mean by the sample config |
+| `grad_clip/backbone_clipped` | Per-minibatch 0/1 indicator (scale below 1); its epoch mean is the transition-weighted fraction of minibatches clipped |
+
+## CNN optimizer updates
+
+| Metric | Meaning |
+| --- | --- |
+| `update_norm/cnn` | L2 norm of the CNN parameter change made by the optimizer step |
+| `update_relative/cnn` | CNN parameter-change L2 norm divided by the pre-step CNN parameter L2 norm |
 
 ## `rollout/`
 
@@ -139,10 +156,9 @@ the vector env and never reaches the top level. See the outstanding item in
 
 ## Adding a metric
 
-1. Compute a **0-dim** tensor in the relevant method of
-   `src/rl_lib/training/ppo/losses.py`, guarded by
-   `self._verbosity.logs_diagnostics`. Per-dimension values must be fanned out
-   into `metrics/name_0`, `metrics/name_1`, ... rather than returned as a vector.
+1. Compute a **0-dim** tensor in the relevant loss or trainer diagnostic path,
+   guarded by `self._verbosity.logs_diagnostics`. Per-dimension values must be
+   fanned out into scalar names rather than returned as a vector.
 2. Add the name to the table above and to the diagnostics assertions in
    `tests/unit/test_ppo_trainer.py`.
 3. Regenerate the inventory and confirm the name shows up:

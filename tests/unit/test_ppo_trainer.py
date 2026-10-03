@@ -526,6 +526,10 @@ def test_calculate_losses_combines_every_term(agent: Agent, trainer: PPOTrainer,
 def test_train_step_updates_the_parameters(trainer: PPOTrainer, rollout):
     minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
     before = {name: param.clone() for name, param in trainer._agent._network.named_parameters()}
+    cnn_before = [
+        parameter.detach().clone()
+        for parameter in trainer._agent.network.cnn.parameters()
+    ]
 
     metrics = trainer.train_step(**minibatch)
 
@@ -535,6 +539,44 @@ def test_train_step_updates_the_parameters(trainer: PPOTrainer, rollout):
         rel=1e-4,
     )
     assert "grad_norm/max" in metrics
+    for key in (
+        "grad_norm/backbone_total",
+        "grad_clip/backbone_scale",
+        "grad_clip/backbone_clipped",
+        "update_norm/cnn",
+        "update_relative/cnn",
+    ):
+        assert key in metrics
+    assert 0.0 <= metrics["grad_clip/backbone_scale"] <= 1.0
+    assert metrics["grad_clip/backbone_clipped"] in (0.0, 1.0)
+    assert metrics["grad_clip/backbone_scale"] == pytest.approx(
+        min(1.0, 0.5 / (metrics["grad_norm/backbone_total"] + 1e-6)),
+        rel=1e-5,
+    )
+    assert metrics["grad_clip/backbone_clipped"] == float(
+        metrics["grad_clip/backbone_scale"] < 1.0
+    )
+    cnn_after = list(trainer._agent.network.cnn.parameters())
+    expected_update_norm = T.linalg.vector_norm(
+        T.stack(
+            [
+                T.linalg.vector_norm(parameter.detach() - previous)
+                for parameter, previous in zip(cnn_after, cnn_before, strict=True)
+            ]
+        )
+    )
+    expected_weight_norm = T.linalg.vector_norm(
+        T.stack([T.linalg.vector_norm(parameter) for parameter in cnn_before])
+    )
+    assert metrics["update_norm/cnn"] == pytest.approx(
+        expected_update_norm.item(), rel=1e-5
+    )
+    assert metrics["update_relative/cnn"] == pytest.approx(
+        (expected_update_norm / (expected_weight_norm + 1e-8)).item(), rel=1e-5
+    )
+    assert metrics["update_relative/cnn"] >= 0.0
+    for layer_name in trainer._agent._cnn_layer_parameter_groups():
+        assert f"grad_norm/cnn_{layer_name}" in metrics
 
 
 def test_diagnostics_are_deferred_and_emitted_as_epoch_metrics(
@@ -560,6 +602,10 @@ def test_diagnostics_are_deferred_and_emitted_as_epoch_metrics(
     trainer._on_epoch()
 
     assert "grad_norm/max" in capture.metrics
+    assert "grad_norm/backbone_total" in capture.metrics
+    assert "grad_clip/backbone_scale" in capture.metrics
+    assert "grad_clip/backbone_clipped" in capture.metrics
+    assert "update_relative/cnn" in capture.metrics
     assert "metrics/ratio_max" in capture.metrics
     assert "metrics/approx_kl_0" in capture.metrics
     assert "loss/total" in capture.metrics

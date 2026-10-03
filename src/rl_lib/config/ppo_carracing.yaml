@@ -145,7 +145,7 @@ callbacks:
   - name: checkpoints
     interval: 100_000
   - name: metrics
-    granularity: batch
+    granularity: epoch
   - name: episode_statistics
     mode: mean
     stats_key: episode

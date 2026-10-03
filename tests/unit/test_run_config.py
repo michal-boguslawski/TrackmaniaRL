@@ -24,6 +24,7 @@ def test_sample_yaml_loads_full_current_run_defaults():
     assert config.callback("checkpoints").interval == 100_000
     assert config.callback("evaluation").interval == 100_000
     assert config.callback("record_video").interval == 100_000
+    assert config.callback("metrics").granularity == "epoch"
     assert config.callback("evaluation").final_episodes == 1_000
     reward_wrapper = next(
         wrapper for wrapper in config.environment.wrappers if wrapper.name == "reward_on_done"

@@ -220,9 +220,45 @@ class PPOTrainer:
         Returns:
             Dict of loss and metric scalars for logging.
         """
+        loss, loss_metric_tensors = self._calculate_total_loss(
+            advantages,
+            returns,
+            old_log_probs,
+            old_values,
+            observation,
+            action,
+            dones,
+        )
+        self._optimizer.zero_grad()
+        essential_metrics = self._essential_metrics(loss, loss_metric_tensors)
+        if essential_metrics is None:
+            return {}
 
+        grad_norms = self._backward_and_clip(loss)
+        diagnostics = self._gradient_diagnostics(
+            loss, loss_metric_tensors, essential_metrics, grad_norms
+        )
+        cnn_parameters_before = self._snapshot_cnn_parameters()
+        self._optimizer_step()
+        diagnostics.update(self._cnn_update_metrics(cnn_parameters_before))
+        self._emit_diagnostics(diagnostics, essential_metrics, action.shape[0])
+        self._step += 1
+
+        return essential_metrics
+
+    def _calculate_total_loss(
+        self,
+        advantages: T.Tensor,
+        returns: T.Tensor,
+        old_log_probs: T.Tensor,
+        old_values: T.Tensor,
+        observation: T.Tensor,
+        action: T.Tensor,
+        dones: T.Tensor,
+    ) -> tuple[T.Tensor, dict[str, T.Tensor]]:
+        """Evaluate the PPO losses and combine them into the optimized scalar."""
         with record_function("ppo/forward_and_loss"):
-            (actor_loss, critic_loss, entropy_loss), loss_metric_tensors = (
+            (actor_loss, critic_loss, entropy_loss), metric_tensors = (
                 self.calculate_losses(
                     advantages,
                     returns,
@@ -234,15 +270,20 @@ class PPOTrainer:
                     return_tensors=True,
                 )
             )
-        loss = actor_loss + self.cfg.critic_beta * critic_loss - self._entropy_coef * entropy_loss
+        total_loss = (
+            actor_loss
+            + self.cfg.critic_beta * critic_loss
+            - self._entropy_coef * entropy_loss
+        )
+        return total_loss, metric_tensors
 
-        self._optimizer.zero_grad()
-
-        # KL is required by the update loop, and the finite flag is required to
-        # preserve safe skipping. Transfer both with the core losses in one go.
+    def _essential_metrics(
+        self, loss: T.Tensor, metric_tensors: dict[str, T.Tensor]
+    ) -> dict[str, float] | None:
+        """Synchronize control-flow and core-loss metrics, or reject bad loss."""
         essential_tensors = {
             key: value
-            for key, value in loss_metric_tensors.items()
+            for key, value in metric_tensors.items()
             if key == "metrics/approx_kl"
             or (self._verbosity.logs_core_losses and is_core_loss(key))
         }
@@ -255,47 +296,111 @@ class PPOTrainer:
             "_control/loss_is_finite"
         ):
             logger.error("Non-finite loss, skipping update")
-            return {}
+            return None
+        return essential_metrics
 
+    def _backward_and_clip(self, loss: T.Tensor) -> dict[str, T.Tensor]:
+        """Backpropagate and clip gradients by configured parameter group."""
         with record_function("ppo/backward"):
             loss.backward()
-
-        grad_norms = self._agent.clip_grad_norms(
+        return self._agent.clip_grad_norms(
             self.cfg.backbone_max_grad_norm,
             self.cfg.actor_max_grad_norm,
             self.cfg.critic_max_grad_norm,
         )
-        diagnostics: dict[str, T.Tensor] = {}
-        if self._verbosity.logs_diagnostics:
-            diagnostics = {
-                key: value
-                for key, value in loss_metric_tensors.items()
-                if key not in essential_tensors
-            }
-            diagnostics["loss/total"] = loss.detach()
-            diagnostics.update(
-                {
-                    key: grad_norms[key]
-                    for key in (
-                        "grad_norm/cnn",
-                        "grad_norm/sequence_encoder",
-                        "grad_norm/actor",
-                        "grad_norm/critic",
-                        "grad_norm/max",
-                    )
-                }
-            )
-        if diagnostics:
-            if self._defer_diagnostics:
-                self._pending_diagnostics.append((diagnostics, action.shape[0]))
-            else:
-                essential_metrics.update(_tensor_metrics_to_scalars(diagnostics))
 
+    def _gradient_diagnostics(
+        self,
+        loss: T.Tensor,
+        metric_tensors: dict[str, T.Tensor],
+        essential_metrics: dict[str, float],
+        grad_norms: dict[str, T.Tensor],
+    ) -> dict[str, T.Tensor]:
+        """Collect optional loss, module-gradient, and clipping diagnostics."""
+        if not self._verbosity.logs_diagnostics:
+            return {}
+        diagnostics = {
+            key: value
+            for key, value in metric_tensors.items()
+            if key not in essential_metrics
+        }
+        diagnostics["loss/total"] = loss.detach()
+        diagnostics.update(
+            {
+                key: grad_norms[key]
+                for key in (
+                    "grad_norm/cnn",
+                    "grad_norm/sequence_encoder",
+                    "grad_norm/actor",
+                    "grad_norm/critic",
+                    "grad_norm/max",
+                    "grad_norm/backbone_total",
+                    "grad_clip/backbone_scale",
+                    "grad_clip/backbone_clipped",
+                )
+            }
+        )
+        diagnostics.update(
+            {
+                key: value
+                for key, value in grad_norms.items()
+                if key.startswith("grad_norm/cnn_")
+            }
+        )
+        return diagnostics
+
+    def _snapshot_cnn_parameters(self) -> list[T.Tensor] | None:
+        """Snapshot CNN weights only when actual-update diagnostics are enabled."""
+        if not self._verbosity.logs_diagnostics:
+            return None
+        # This measures AdamW's update, including adaptive scaling and weight decay.
+        return [
+            parameter.detach().clone()
+            for parameter in self._agent.network.cnn.parameters()
+        ]
+
+    def _optimizer_step(self) -> None:
+        """Apply the optimizer update."""
         with record_function("ppo/optimizer_step"):
             self._optimizer.step()
-        self._step += 1
 
-        return essential_metrics
+    def _cnn_update_metrics(
+        self, parameters_before: list[T.Tensor] | None
+    ) -> dict[str, T.Tensor]:
+        """Measure the CNN parameter update relative to its pre-step weights."""
+        if parameters_before is None:
+            return {}
+        parameters_after = list(self._agent.network.cnn.parameters())
+        update_norms = T._foreach_norm(
+            [
+                parameter.detach() - previous
+                for parameter, previous in zip(
+                    parameters_after, parameters_before, strict=True
+                )
+            ],
+            2,
+        )
+        weight_norms = T._foreach_norm(parameters_before, 2)
+        update_norm = T.linalg.vector_norm(T.stack(update_norms), ord=2)
+        weight_norm = T.linalg.vector_norm(T.stack(weight_norms), ord=2)
+        return {
+            "update_norm/cnn": update_norm,
+            "update_relative/cnn": update_norm / (weight_norm + 1e-8),
+        }
+
+    def _emit_diagnostics(
+        self,
+        diagnostics: dict[str, T.Tensor],
+        essential_metrics: dict[str, float],
+        batch_size: int,
+    ) -> None:
+        """Defer diagnostics to the epoch boundary or convert and emit now."""
+        if not diagnostics:
+            return
+        if self._defer_diagnostics:
+            self._pending_diagnostics.append((diagnostics, batch_size))
+        else:
+            essential_metrics.update(_tensor_metrics_to_scalars(diagnostics))
 
     def calculate_losses(
         self,

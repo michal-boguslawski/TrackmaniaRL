@@ -459,14 +459,26 @@ def test_partial_grad_norms_cover_every_submodule(agent: Agent):
 
     norms = agent.get_partial_clip_grad_norms()
 
-    assert set(norms) == {
+    expected_keys = {
         "grad_norm/cnn",
         "grad_norm/sequence_encoder",
         "grad_norm/actor",
         "grad_norm/critic",
         "grad_norm/max",
     }
+    expected_keys.update(
+        f"grad_norm/cnn_{layer_name}"
+        for layer_name in agent._cnn_layer_parameter_groups()
+    )
+    assert set(norms) == expected_keys
     assert all(isinstance(value, float) and value >= 0.0 for value in norms.values())
+    layer_norms = [
+        norms[f"grad_norm/cnn_{layer_name}"]
+        for layer_name in agent._cnn_layer_parameter_groups()
+    ]
+    assert norms["grad_norm/cnn"] == pytest.approx(
+        T.linalg.vector_norm(T.tensor(layer_norms)).item(), rel=1e-5
+    )
 
 
 def test_save_and_load_state_dict_roundtrip(tmp_path, agent: Agent):
