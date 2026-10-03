@@ -1,0 +1,232 @@
+run:
+  algorithm: ppo
+  name: PPO
+  total_steps: 3000000
+  seed: 1
+  device: auto
+  clear_cuda_cache: true
+  log_level: DEBUG
+  cudnn_benchmark: true
+  channels_last: true
+  torch_compile: true
+  torch_compile_mode: reduce-overhead
+  cnn_autocast: none
+environment:
+  id: CarRacing-v3
+  num_envs: 8
+  skip: 2
+  continuous: true
+  normalize_rewards: true
+  reward_normalization_gamma: 0.99
+  reward_normalization_epsilon: 1.0e-08
+  vectorization_mode: async
+  autoreset_mode: same_step
+  wrappers:
+  - name: record_episode_stats
+    stats_buffer_length: 100
+    stats_key: episode
+  - name: grayscale
+    keep_dim: true
+  - name: reward_on_done
+    on_terminated: null
+    on_truncated: 0.0
+    on_win: 100.0
+  - name: max_and_skip
+agent:
+  stack_size: 4
+  observation_divisor: 127.5
+  observation_offset: -1.0
+  action_temperature: 1.0
+  deterministic_temperature: 0.0
+rollout:
+  buffer_size: 1024
+  epochs: 4
+  minibatch_size: 512
+  gamma: 0.99
+  gae_lambda: 0.95
+network:
+  cnn:
+    conv_layers:
+    - out_channels: 32
+      kernel_size: 8
+      stride: 4
+      padding: 0
+      dilation: 1
+      groups: 1
+      bias: true
+      padding_mode: zeros
+      activation: relu
+      init_gain: 1.41421356237
+      init_bias: 0.0
+    - out_channels: 64
+      kernel_size: 4
+      stride: 2
+      padding: 0
+      dilation: 1
+      groups: 1
+      bias: true
+      padding_mode: zeros
+      activation: relu
+      init_gain: 1.41421356237
+      init_bias: 0.0
+    - out_channels: 128
+      kernel_size: 3
+      stride: 1
+      padding: 0
+      dilation: 1
+      groups: 1
+      bias: true
+      padding_mode: zeros
+      activation: relu
+      init_gain: 1.41421356237
+      init_bias: 0.0
+    - out_channels: 128
+      kernel_size: 3
+      stride: 2
+      padding: 0
+      dilation: 1
+      groups: 1
+      bias: true
+      padding_mode: zeros
+      activation: relu
+      init_gain: 1.41421356237
+      init_bias: 0.0
+    adaptive_pool_size: 3
+    hidden_layers:
+    - out_dim: 256
+      activation: relu
+      init_gain: 1.41421356237
+      init_bias: 0.0
+      bias: true
+    out_dim: 256
+    output_init_gain: 1.41421356237
+    output_init_bias: 0.0
+  temporal:
+    out_dim: 256
+    normalize_input: true
+    normalize_output: true
+    bias: true
+    norm_eps: 1.0e-05
+    norm_affine: true
+  actor:
+    hidden_layers:
+    - out_dim: 1024
+      activation: gelu
+      init_gain: 1.41421356237
+      init_bias: 0.0
+      bias: true
+    output_init_gain: 0.01
+    output_init_bias: -2.0
+    output_bias: true
+    action_low:
+    - -1.0
+    - 0.0
+    - 0.0
+    action_high:
+    - 1.0
+    - 1.0
+    - 1.0
+    concentration_offset: 1.0
+    softplus_beta: 1.0
+    softplus_threshold: 20.0
+    default_temperature: 1.0
+    deterministic_distribution_temperature: 1.0
+  critic:
+    hidden_layers:
+    - out_dim: 256
+      activation: gelu
+      init_gain: 1.41421356237
+      init_bias: 0.0
+      bias: true
+    output_init_gain: 1.0
+    output_init_bias: 0.0
+    output_bias: true
+    huber_delta: 1.0
+trainer:
+  ppo_epsilon: 0.1
+  value_clip_epsilon: null
+  critic_beta: 0.8
+  entropy_coef: 0.01
+  entropy_decay: 0.9999
+  entropy_coef_min: 0.0001
+  mean_reg_coef: 0.001
+  advantage_normalization_strategy: global
+  target_kl: 0.015
+  kl_warmup_steps: 20000
+  kl_stop_multiplier: 3.0
+  hard_stop_kl: true
+  backbone_lr: 3.0e-05
+  head_lr: 0.0001
+  weight_decay: 1.0e-05
+  optimizer: AdamW
+  optimizer_eps: 1.0e-05
+  optimizer_beta1: 0.9
+  optimizer_beta2: 0.999
+  optimizer_amsgrad: false
+  no_decay_weight_decay: 0.0
+  scheduler: cosine
+  scheduler_min_lr: 1.0e-08
+  scheduler_start_factor: 1.0
+  scheduler_extra_iters: 1
+  backbone_max_grad_norm: 0.5
+  actor_max_grad_norm: 0.5
+  critic_max_grad_norm: 0.5
+  advantage_epsilon: 0.0001
+  explained_variance_epsilon: 1.0e-08
+  log_ratio_min: -5.0
+  log_ratio_max: 5.0
+  skip_nonfinite_updates: true
+  tanh_saturation_threshold: 3.5
+  minibatch_indexing_mode: iid
+tracking:
+  console: true
+  mlflow: true
+  experiment_name: CarRacing-v3
+  log_system_metrics: true
+  verbosity: 2
+callbacks:
+- name: checkpoints
+  interval: 100000
+- name: metrics
+  granularity: batch
+- name: episode_statistics
+  mode: mean
+  stats_key: episode
+- name: evaluation
+  interval: 100000
+  episodes: 10
+  final_episodes: 1000
+- name: record_video
+  interval: 100000
+  folder: ./logs/videos
+  skip: null
+  normalize_rewards: false
+  recording:
+    name: record_video
+    episode_trigger: all
+    episode_interval: 1
+    video_length: 0
+    video_name_prefix: rl-video
+    video_fps: null
+    video_disable_logger: true
+  wrappers:
+  - name: record_episode_stats
+    stats_buffer_length: 100
+    stats_key: episode
+  - name: grayscale
+    keep_dim: true
+  - name: max_and_skip
+runtime:
+  session_id: happy-grizzly-20261003T104309Z-0da411
+  config_path: /workspace/TrackmaniaRL/src/rl_lib/config/ppo_carracing.yaml
+  device: cuda
+  observation_shape:
+  - 8
+  - 96
+  - 96
+  - 1
+  action_shape:
+  - 8
+  - 3
+  mlflow_experiment_name: CarRacing-v3
+  mlflow_run_name: PPO/
