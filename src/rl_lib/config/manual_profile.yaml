@@ -54,7 +54,7 @@ network:
     norm_affine: true
   actor:
     hidden_layers:
-      - {out_dim: 256, activation: gelu, init_gain: 1.41421356237, init_bias: 0.0, bias: true}
+      - {out_dim: 1024, activation: gelu, init_gain: 1.41421356237, init_bias: 0.0, bias: true}
     output_init_gain: 0.01
     output_init_bias: -2.0
     output_bias: true
