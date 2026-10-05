@@ -103,15 +103,85 @@ transfers. Profiling adds overhead, so keep it enabled for short captures only.
 
 ### MLflow and interactive evaluation
 
+Training writes to the SQLite tracking store `mlflow.db` in the repository root,
+which is the MLflow 3.x default when `MLFLOW_TRACKING_URI` is unset. The UI needs
+a server in front of that store; `scripts/mlflow_server.sh` runs one as a
+detached daemon that logs to `logs/mlflow-server.log`:
+
 ```bash
-# Browse the local ./mlruns store (no tracking server needed).
-uv run --extra cpu mlflow ui --backend-store-uri ./mlruns --host 127.0.0.1 --port 5000
+scripts/mlflow_server.sh start     # detached, survives tmux detach and logout
+scripts/mlflow_server.sh status    # pid, health check, bind address, log path
+scripts/mlflow_server.sh logs      # tail -f the server log
+scripts/mlflow_server.sh stop
+```
 
-# Only if you need a tracking HTTP server; the UI does not require one.
-uv run --extra cpu mlflow server --host 127.0.0.1 --port 5000
+The server binds `0.0.0.0:5000` and accepts the Host headers listed in
+`scripts/mlflow_server.env`, so both of these reach the UI:
 
+```bash
+# From this machine.
+open http://127.0.0.1:5000/
+
+# From your laptop, over the SSH port that is forwarded to this host. Note the
+# local port is 5001; see the note below. Then browse http://localhost:5001/.
+ssh -N -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes \
+  -L 5001:127.0.0.1:5000 root@159.48.242.27 -p 48707
+```
+
+`-N` holds the forward without opening a shell, and `ExitOnForwardFailure=yes`
+makes SSH fail loudly instead of silently forwarding nothing. The forward's
+target is resolved on the server, so `127.0.0.1:5000` is correct on the right of
+the colon even though the container's own address is the private `172.17.0.3`.
+Any local port works; the browser URL must match the local one you chose.
+
+If the forward fails to bind with `Permission denied`, something on the laptop
+already holds that port. Note that Windows reports an exclusive bind as
+`Permission denied` rather than `Address already in use` when the holder used
+`SO_EXCLUSIVEADDRUSE`, which Docker, WSL and several Windows services do. Find
+the holder with `netstat -ano | findstr :5000` (the PID is the last column of the
+`LISTENING` row), or simply pick another local port. Ports reserved by Hyper-V or
+WSL show up in `netsh interface ipv4 show excludedportrange protocol=tcp` and are
+avoided the same way.
+
+The server has no authentication: anyone who can reach port 5000 can read and
+delete runs, so keep the port off the public internet and reach it over the
+tunnel. The `0.0.0.0` bind does not make it private — the Host check is a
+DNS-rebinding guard, and `curl` can send any `Host` it likes — so the firewall
+and the tunnel are what actually restrict access.
+
+`scripts/mlflow_server.env` sets `--allowed-hosts` and
+`--cors-allowed-origins` explicitly, which *replaces* MLflow's defaults rather
+than extending them. The defaults would otherwise accept `localhost:<port>`,
+`127.0.0.1:<port>`, and RFC-1918 addresses, which is all the SSH-tunnel
+workflow needs; the explicit list adds this container's `172.17.0.3` and the
+workstation's public IP for browsing from another machine. CORS stays on either
+way: localhost origins are always allowed, and with no allowlist MLflow still
+blocks cross-origin `POST`/`PUT`/`DELETE`/`PATCH` on `/api/` and `/ajax-api/`.
+Two settings to avoid, because both break the UI rather than helping it:
+
+- `--allowed-hosts '*'` disables DNS-rebinding protection outright.
+- `--cors-allowed-origins '*'` makes the server turn off credentialed CORS, and
+  the UI fetches with `credentials: include`, so the page loads with every API
+  call rejected.
+
+Hosts are compared including the port, so an entry must be `myhost:5000`, not
+`myhost`. If you browse under a name the list does not cover, add it to both
+variables in `scripts/mlflow_server.env` (they must stay in step) and run
+`scripts/mlflow_server.sh restart`, or pass both for one run:
+`MLFLOW_ALLOWED_HOSTS=myhost:5000 MLFLOW_CORS_ALLOWED_ORIGINS=http://myhost:5000 scripts/mlflow_server.sh restart`.
+
+The script pins `--backend-store-uri` and uses `uv run --no-sync`, so it never
+re-syncs the environment (a plain `uv run --extra cpu ...` would swap the CUDA
+torch build that live training processes are using).
+
+`./mlruns` is no longer a usable tracking store: MLflow 3.x puts run artifacts
+there while keeping metadata in `mlflow.db`, and it rejects the filesystem
+backend outright ("filesystem tracking backend is in maintenance mode"). To read
+runs from Python, point the client at the server:
+
+```bash
 # Interactive checkpoint evaluation.
-uv run --extra cpu rl-lib
+MLFLOW_TRACKING_URI=http://127.0.0.1:5000 uv run --extra cpu rl-lib
 
 # Evaluate a selected checkpoint directly, without creating a script.
 uv run --extra gpu python scripts/evaluate.py --run-id RUN_ID \
@@ -121,8 +191,10 @@ uv run --extra gpu python scripts/evaluate.py --run-id RUN_ID \
 uv run --extra gpu python scripts/evaluate.py --run-id RUN_ID --episodes 10
 ```
 
-Set `MLFLOW_TRACKING_URI=http://127.0.0.1:5000` before training or evaluating to
-use an HTTP tracking server.
+Training logs to `mlflow.db` directly and does not need the server; set
+`MLFLOW_TRACKING_URI=http://127.0.0.1:5000` to route runs over HTTP instead.
+Evaluation reads the store through the client, so it needs either that variable
+or the default `mlflow.db` path to resolve the same runs.
 
 `rl-lib` offers checkpoint evaluation. Choose MLflow as the source and enter the
 experiment name and run ID, or choose a local checkpoint and point it at
