@@ -1,8 +1,8 @@
 run:
   algorithm: ppo
   name: PPO
-  total_steps: 1000000 # vector-environment steps
-  seed: 1
+  total_steps: 3000000 # vector-environment steps
+  seed: 2
   device: auto
   clear_cuda_cache: true
   log_level: DEBUG
@@ -20,7 +20,7 @@ run:
 
 environment:
   id: CarRacing-v3
-  num_envs: 8
+  num_envs: 16
   skip: 2
   continuous: true
   normalize_rewards: true
@@ -37,7 +37,7 @@ environment:
     - name: reward_on_done
       on_terminated: null
       on_truncated: 0.0
-      on_win: 100.0
+      on_win: 50.0
     - name: max_and_skip
 
 agent:
@@ -49,7 +49,7 @@ agent:
 
 rollout:
   buffer_size: 1024
-  epochs: 4
+  epochs: 3
   minibatch_size: 512
   gamma: 0.99
   gae_lambda: 0.95
@@ -98,16 +98,16 @@ network:
 trainer:
   ppo_epsilon: 0.1
   critic_beta: 0.8
-  entropy_coef: 0.02
-  entropy_decay: 0.999
+  entropy_coef: 0.01
+  entropy_decay: 0.9995
   entropy_coef_min: 0.0001
   mean_reg_coef: 0.001
   advantage_normalization_strategy: global
-  target_kl: 0.03
+  target_kl: 0.015
   kl_warmup_steps: 20000
   kl_stop_multiplier: 3.0
   hard_stop_kl: true
-  backbone_lr: 0.0001 # to 0.0001
+  backbone_lr: 0.00003 # to 0.0001
   head_lr: 0.0001
   weight_decay: 0.00001
   optimizer: AdamW
@@ -145,7 +145,7 @@ callbacks:
   - name: checkpoints
     interval: 100_000
   - name: metrics
-    granularity: epoch
+    granularity: batch
   - name: episode_statistics
     mode: mean
     stats_key: episode

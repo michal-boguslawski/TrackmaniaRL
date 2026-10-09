@@ -13,18 +13,18 @@ def test_sample_yaml_loads_full_current_run_defaults():
     config = load_config(config_path)
 
     assert config.environment.id == "CarRacing-v3"
-    assert config.environment.num_envs == 8
+    assert config.environment.num_envs == 16
     assert config.run.algorithm == "ppo"
     assert config.run.total_steps == 3_000_000
     assert config.run.cnn_autocast == "none"
     assert config.rollout.gamma == pytest.approx(0.99)
-    assert config.rollout.epochs == 4
+    assert config.rollout.epochs == 3
     assert config.trainer.ppo_epsilon == pytest.approx(0.1)
     assert config.network.cnn.conv_layers[0].kernel_size == 8
     assert config.callback("checkpoints").interval == 100_000
     assert config.callback("evaluation").interval == 100_000
     assert config.callback("record_video").interval == 100_000
-    assert config.callback("metrics").granularity == "epoch"
+    assert config.callback("metrics").granularity == "batch"
     assert config.callback("evaluation").final_episodes == 1_000
     reward_wrapper = next(
         wrapper for wrapper in config.environment.wrappers if wrapper.name == "reward_on_done"
