@@ -85,7 +85,7 @@ class RuntimeSettings(StrictModel):
 class WrapperSettings(StrictModel):
     name: Literal[
         "grayscale", "frame_stack", "record_episode_stats", "record_video",
-        "max_and_skip", "reward_on_done",
+        "max_and_skip", "reward_on_done", "off_track_penalty",
     ]
     skip: PositiveInt | None = None
     stack_size: PositiveInt | None = None
@@ -103,6 +103,11 @@ class WrapperSettings(StrictModel):
     on_terminated: FiniteFloat | None = None
     on_truncated: FiniteFloat | None = -10.0
     on_win: FiniteFloat | None = 100.0
+    penalty_weight: FiniteFloat = Field(
+        default=0.05,
+        ge=0.0,
+        description="Maximum magnitude of the per-step penalty beyond the road edge.",
+    )
 
     @model_validator(mode="after")
     def validate_wrapper_options(self):
@@ -116,6 +121,7 @@ class WrapperSettings(StrictModel):
             },
             "max_and_skip": {"skip"},
             "reward_on_done": {"on_terminated", "on_truncated", "on_win"},
+            "off_track_penalty": {"penalty_weight"},
         }[self.name]
         supplied = self.model_fields_set - {"name"}
         invalid = supplied - allowed

@@ -15,7 +15,7 @@ def test_sample_yaml_loads_full_current_run_defaults():
     assert config.environment.id == "CarRacing-v3"
     assert config.environment.num_envs == 16
     assert config.run.algorithm == "ppo"
-    assert config.run.total_steps == 3_000_000
+    assert config.run.total_steps == 1_000_000
     assert config.run.cnn_autocast == "none"
     assert config.rollout.gamma == pytest.approx(0.99)
     assert config.rollout.epochs == 3
@@ -30,6 +30,12 @@ def test_sample_yaml_loads_full_current_run_defaults():
         wrapper for wrapper in config.environment.wrappers if wrapper.name == "reward_on_done"
     )
     assert reward_wrapper.on_truncated == 0.0
+    off_track_wrapper = next(
+        wrapper
+        for wrapper in config.environment.wrappers
+        if wrapper.name == "off_track_penalty"
+    )
+    assert off_track_wrapper.penalty_weight == pytest.approx(0.05)
     assert config.tracking.verbosity == 2
 
 

@@ -1,7 +1,7 @@
 run:
   algorithm: ppo
   name: PPO
-  total_steps: 3000000 # vector-environment steps
+  total_steps: 1000000 # vector-environment steps
   seed: 2
   device: auto
   clear_cuda_cache: true
@@ -38,6 +38,8 @@ environment:
       on_terminated: null
       on_truncated: 0.0
       on_win: 50.0
+    - name: off_track_penalty
+      penalty_weight: 0.05
     - name: max_and_skip
 
 agent:
@@ -98,7 +100,7 @@ network:
 trainer:
   ppo_epsilon: 0.1
   critic_beta: 0.8
-  entropy_coef: 0.01
+  entropy_coef: 0.02
   entropy_decay: 0.9995
   entropy_coef_min: 0.0001
   mean_reg_coef: 0.001

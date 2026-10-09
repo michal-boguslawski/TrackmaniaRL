@@ -26,6 +26,7 @@ from gymnasium.wrappers.vector import NormalizeReward
 
 from rl_lib.envs.wrappers.registry import WRAPPERS
 from rl_lib.envs.wrappers.reward_wrappers import RewardOnEpisodeEndWrapper
+from rl_lib.envs.wrappers.off_track_penalty_wrapper import OffTrackPenaltyWrapper
 from rl_lib.run_config import EnvironmentSettings, WrapperSettings
 
 
@@ -208,6 +209,7 @@ def test_registry_exposes_the_documented_wrappers():
         "record_video",
         "max_and_skip",
         "reward_on_done",
+        "off_track_penalty",
     }
 
 
@@ -273,6 +275,74 @@ def test_reward_on_done_registry_entry_applies_the_truncation_penalty():
 
     assert truncated
     assert reward == pytest.approx(-9.0)
+
+
+class _MockCarRacingEnv(_PixelEnv):
+    """CarRacing-shaped test environment exposing pose and centerline state."""
+
+    def __init__(self, position=(50.0, 0.0)):
+        super().__init__()
+        self.track = [
+            (0.0, 0.0, 0.0, 0.0),
+            (0.0, 0.0, 100.0, 0.0),
+            (0.0, 0.0, 100.0, 100.0),
+            (0.0, 0.0, 0.0, 100.0),
+        ]
+        self.car = type("Car", (), {})()
+        self.car.hull = type("Hull", (), {})()
+        self.car.hull.position = position
+        self.next_position = position
+
+    def step(self, action):
+        self.car.hull.position = self.next_position
+        return self._observation(), 1.0, False, False, {}
+
+
+def test_off_track_wrapper_does_not_penalize_a_car_on_the_road():
+    from gymnasium.envs.box2d.car_racing import TRACK_WIDTH
+
+    env = OffTrackPenaltyWrapper(_MockCarRacingEnv(position=(50.0, 0.8 * TRACK_WIDTH)))
+    env.reset()
+
+    _, reward, _, _, info = env.step(None)
+
+    assert reward == pytest.approx(1.0)
+    assert info["track_lateral_offset"] == pytest.approx(0.8)
+    assert info["off_track_penalty"] == pytest.approx(0.0)
+
+
+def test_off_track_wrapper_penalizes_deviation_beyond_road_edge():
+    from gymnasium.envs.box2d.car_racing import TRACK_WIDTH
+
+    base_env = _MockCarRacingEnv(position=(50.0, 1.5 * TRACK_WIDTH))
+    env = OffTrackPenaltyWrapper(base_env, penalty_weight=0.05)
+    env.reset()
+
+    _, reward, _, _, info = env.step(None)
+
+    assert info["track_lateral_offset"] == pytest.approx(1.5)
+    assert info["off_track_penalty"] == pytest.approx(-0.0125)
+    assert reward == pytest.approx(1.0 - 0.0125)
+
+
+def test_off_track_wrapper_penalty_is_bounded():
+    from gymnasium.envs.box2d.car_racing import TRACK_WIDTH
+
+    env = OffTrackPenaltyWrapper(
+        _MockCarRacingEnv(position=(50.0, 10.0 * TRACK_WIDTH)), penalty_weight=0.2
+    )
+    env.reset()
+
+    _, _, _, _, info = env.step(None)
+
+    assert info["off_track_penalty"] == pytest.approx(-0.2)
+
+
+def test_off_track_wrapper_is_available_through_registry_and_forwards_options():
+    env = WRAPPERS["off_track_penalty"](_MockCarRacingEnv(), penalty_weight=0.2)
+
+    assert isinstance(env, OffTrackPenaltyWrapper)
+    assert env.penalty_weight == pytest.approx(0.2)
 
 
 # ---------------------------------------------------------------- reward wrapper

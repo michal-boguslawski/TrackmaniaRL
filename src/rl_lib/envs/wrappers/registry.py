@@ -13,6 +13,7 @@ from gymnasium.wrappers import (
 )
 
 from rl_lib.envs.wrappers.reward_wrappers import RewardOnEpisodeEndWrapper
+from rl_lib.envs.wrappers.off_track_penalty_wrapper import OffTrackPenaltyWrapper
 from rl_lib.run_config import WrapperSettings
 
 _UNSET = object()
@@ -93,6 +94,11 @@ def _reward_on_done(
     )
 
 
+def _off_track_penalty(env, penalty_weight: float = 0.05, **kwargs):
+    """OffTrackPenaltyWrapper with configurable shaping strength."""
+    return OffTrackPenaltyWrapper(env, penalty_weight=penalty_weight)
+
+
 WRAPPERS = {
     "grayscale": _grayscale,
     "frame_stack": _frame_stack,
@@ -100,4 +106,5 @@ WRAPPERS = {
     "record_video": _record_video,
     "max_and_skip": _max_and_skip,
     "reward_on_done": _reward_on_done,
+    "off_track_penalty": _off_track_penalty,
 }
