@@ -28,8 +28,8 @@ BACKEND_STORE="${MLFLOW_BACKEND_STORE:-sqlite:///mlflow.db}"
 
 # Host validation and CORS are left to MLflow's defaults unless explicitly
 # overridden. The defaults already accept `localhost:<port>`, `127.0.0.1:<port>`
-# and the RFC-1918 ranges (so this container's 172.17.0.3), and default CORS to
-# localhost origins on any port. Do not "widen" these to '*':
+# and RFC-1918 private ranges, and default CORS to localhost origins on any
+# port. Do not "widen" these to '*':
 #   - `--allowed-hosts '*'` turns off DNS-rebinding protection outright.
 #   - `--cors-allowed-origins '*'` makes the server disable credentialed CORS
 #     ("Wildcard origins with credentials are not allowed"), which breaks the
