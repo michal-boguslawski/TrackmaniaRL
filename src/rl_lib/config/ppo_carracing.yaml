@@ -20,7 +20,7 @@ run:
 
 environment:
   id: CarRacing-v3
-  num_envs: 16
+  num_envs: 8
   skip: 2
   continuous: true
   normalize_rewards: true
@@ -39,7 +39,7 @@ environment:
       on_truncated: 0.0
       on_win: 50.0
     - name: off_track_penalty
-      penalty_weight: 0.05
+      penalty_weight: 0.1
     - name: max_and_skip
 
 agent:
@@ -91,7 +91,7 @@ network:
     deterministic_distribution_temperature: 1.0
   critic:
     hidden_layers:
-      - {out_dim: 256, activation: gelu, init_gain: 1.41421356237, init_bias: 0.0, bias: true} # to 1024
+      - {out_dim: 1024, activation: gelu, init_gain: 1.41421356237, init_bias: 0.0, bias: true} # to 1024
     output_init_gain: 1.0
     output_init_bias: 0.0
     output_bias: true
@@ -109,7 +109,7 @@ trainer:
   kl_warmup_steps: 20000
   kl_stop_multiplier: 3.0
   hard_stop_kl: true
-  backbone_lr: 0.00003 # to 0.0001
+  backbone_lr: 0.00003
   head_lr: 0.0001
   weight_decay: 0.00001
   optimizer: AdamW
