@@ -9,11 +9,9 @@ from __future__ import annotations
 from contextlib import closing
 import logging
 from pathlib import Path
-from collections.abc import Mapping
-
-import torch as T
 
 from rl_lib.agent import Agent
+from rl_lib.checkpoint_loaders import LocalCheckpointLoader, MLflowCheckpointLoader
 from rl_lib.device import resolve_device
 from rl_lib.envs.make_env import make_env
 from rl_lib.evaluation.inference import log_evaluation_results, run_inference
@@ -26,42 +24,6 @@ from rl_lib.evaluation.runtime import _episode_stats_key, _default_metrics_logge
 
 
 logger = logging.getLogger(__name__)
-
-
-def _load_local_network(network: Network, checkpoint_path: str | Path, device: T.device) -> Network:
-    """Load either a state-dict checkpoint or the saved full local Network.
-
-    Handles two checkpoint formats:
-    1. Full Network object saved with T.save(network, path)
-    2. State dict (or dict with "state_dict" key) saved with T.save(state_dict, path)
-
-    Args:
-        network: Empty Network instance to load state into.
-        checkpoint_path: Path to checkpoint file.
-        device: Target device for loading.
-
-    Returns:
-        Network with loaded weights on device.
-
-    Raises:
-        ValueError: If checkpoint format is unrecognized.
-    """
-    checkpoint = T.load(checkpoint_path, map_location=device, weights_only=False)
-    if isinstance(checkpoint, Network):
-        return checkpoint.to(device)
-    if isinstance(checkpoint, Mapping):
-        state_dict = checkpoint.get("state_dict", checkpoint)
-        if not isinstance(state_dict, Mapping):
-            raise ValueError(f"Checkpoint {checkpoint_path} does not contain a model state dict")
-        if state_dict and all(key.startswith("_orig_mod.") for key in state_dict):
-            # torch.compile wraps modules and prefixes their state-dict keys.
-            state_dict = {
-                key.removeprefix("_orig_mod."): value
-                for key, value in state_dict.items()
-            }
-        T.nn.Module.load_state_dict(network, state_dict)
-        return network
-    raise ValueError(f"Checkpoint {checkpoint_path} is neither a Network nor a state dict")
 
 
 def _evaluation_environment(config: RunConfig, num_envs: int, record_video: bool):
@@ -114,7 +76,7 @@ def evaluate_checkpoint(
         episodes=episodes,
         num_envs=num_envs,
         metrics_loggers=_default_metrics_loggers(metrics_loggers),
-        checkpoint_path=checkpoint_path,
+        checkpoint_loader=LocalCheckpointLoader(checkpoint_path),
         record_video=record_video,
         scope="local",
     )
@@ -127,8 +89,7 @@ def _evaluate_configured_policy(
     metrics_loggers: list[MetricsLogger],
     record_video: bool,
     scope: str,
-    checkpoint_path: str | Path | None = None,
-    network: Network | None = None,
+    checkpoint_loader: LocalCheckpointLoader | MLflowCheckpointLoader | None = None,
 ) -> list[float]:
     """Shared evaluation logic for local and MLflow checkpoints.
 
@@ -140,8 +101,7 @@ def _evaluate_configured_policy(
             ``tracking.verbosity`` before results are logged.
         record_video: Whether to record videos.
         scope: Metric prefix scope ("local" or "mlflow").
-        checkpoint_path: Optional path to local checkpoint.
-        network: Optional pre-loaded Network (for MLflow models).
+        checkpoint_loader: Optional source-specific model checkpoint loader.
 
     Returns:
         List of episode returns.
@@ -151,21 +111,17 @@ def _evaluate_configured_policy(
     metrics_loggers = filter_loggers(metrics_loggers, config.tracking.verbosity)
 
     with closing(make_env(env_config)) as env:
-        if network is None:
-            network = Network(
-                observation_dim=env.observation_space.shape[-1],
-                action_dim=env.action_space.shape[-1],
-                stack_size=config.agent.stack_size,
-                config=config.network,
-                cnn_autocast_dtype=resolve_cnn_autocast_dtype(
-                    config.run.cnn_autocast, device
-                ),
-            ).to(device)
-        else:
-            network = network.to(device)
-
-        if checkpoint_path is not None:
-            network = _load_local_network(network, checkpoint_path, device)
+        network = Network(
+            observation_dim=env.observation_space.shape[-1],
+            action_dim=env.action_space.shape[-1],
+            stack_size=config.agent.stack_size,
+            config=config.network,
+            cnn_autocast_dtype=resolve_cnn_autocast_dtype(
+                config.run.cnn_autocast, device
+            ),
+        ).to(device)
+        if checkpoint_loader is not None:
+            network = checkpoint_loader.load(network, device)
         agent = Agent(network, device, config.agent)
 
         results = run_inference(

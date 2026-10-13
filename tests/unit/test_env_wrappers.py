@@ -27,7 +27,8 @@ from gymnasium.wrappers.vector import NormalizeReward
 from rl_lib.envs.wrappers.registry import WRAPPERS
 from rl_lib.envs.wrappers.reward_wrappers import RewardOnEpisodeEndWrapper
 from rl_lib.envs.wrappers.off_track_penalty_wrapper import OffTrackPenaltyWrapper
-from rl_lib.run_config import EnvironmentSettings, WrapperSettings
+from rl_lib.envs.wrappers.settings import GrayscaleWrapperSettings
+from rl_lib.run_config import EnvironmentSettings
 
 
 make_env_module = importlib.import_module("rl_lib.envs.make_env")
@@ -133,7 +134,7 @@ def test_make_env_recording_forces_sync_and_rgb(capture_make_vec):
 
 
 def test_make_env_inserts_the_video_wrapper_first(capture_make_vec):
-    make_env(env_settings(record_video=True, wrappers=[WrapperSettings(name="grayscale")]))
+    make_env(env_settings(record_video=True, wrappers=[GrayscaleWrapperSettings()]))
 
     assert [wrapper.func for wrapper in capture_make_vec["wrappers"]] == [
         WRAPPERS["record_video"],
@@ -142,11 +143,11 @@ def test_make_env_inserts_the_video_wrapper_first(capture_make_vec):
 
 
 def test_make_env_does_not_mutate_the_callers_wrapper_list(capture_make_vec):
-    wrappers = [WrapperSettings(name="grayscale")]
+    wrappers = [GrayscaleWrapperSettings()]
 
     make_env(env_settings(record_video=True, wrappers=wrappers))
 
-    assert wrappers == [WrapperSettings(name="grayscale")]
+    assert wrappers == [GrayscaleWrapperSettings()]
 
 
 def test_make_env_forwards_the_video_folder_and_skip(capture_make_vec):

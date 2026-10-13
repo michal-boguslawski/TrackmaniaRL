@@ -11,7 +11,8 @@ from gymnasium.wrappers.vector import NormalizeReward
 from functools import partial
 
 from rl_lib.envs.wrappers.registry import WRAPPERS
-from rl_lib.run_config import EnvironmentSettings, WrapperSettings
+from rl_lib.envs.wrappers.settings import make_wrapper_settings
+from rl_lib.run_config import EnvironmentSettings
 
 
 def make_env(config: EnvironmentSettings) -> VectorEnv:
@@ -33,18 +34,19 @@ def make_env(config: EnvironmentSettings) -> VectorEnv:
     _wrappers = copy(config.wrappers)
     configured_video = any(wrapper.name == "record_video" for wrapper in _wrappers)
     if config.record_video and not configured_video:
-        _wrappers.insert(0, WrapperSettings(name="record_video", video_folder=config.video_folder))
+        _wrappers.insert(
+            0,
+            make_wrapper_settings("record_video", video_folder=config.video_folder),
+        )
     record_enabled = config.record_video or configured_video
 
     wrappers_fn = []
     for wrapper in _wrappers:
-        settings = wrapper if isinstance(wrapper, WrapperSettings) else WrapperSettings(name=wrapper)
-        if settings.name not in WRAPPERS:
-            raise ValueError(f"Unknown environment wrapper: {settings.name}")
+        settings = make_wrapper_settings(wrapper) if isinstance(wrapper, str) else wrapper
         options = settings.model_dump(exclude={"name"})
         for optional_key in ("skip", "stack_size", "video_folder"):
-            if options[optional_key] is None:
-                options.pop(optional_key)
+            if options.get(optional_key) is None:
+                options.pop(optional_key, None)
         options.setdefault("video_folder", config.video_folder)
         options.setdefault("skip", config.skip)
         if settings.name == "frame_stack" and "stack_size" not in options:
@@ -70,4 +72,3 @@ def make_env(config: EnvironmentSettings) -> VectorEnv:
             epsilon=config.reward_normalization_epsilon,
         )
     return env
-

@@ -6,12 +6,18 @@ from gymnasium import Env
 import torch as T
 from torch.profiler import record_function
 from torch.optim import Adam, AdamW
-from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, ExponentialLR, LinearLR
 
 from rl_lib.agent import Agent
 from rl_lib.tracking.verbosity import Verbosity, as_verbosity, is_core_loss
 from rl_lib.training.callbacks.base import Callback, CallbackList
-from rl_lib.run_config import RolloutSettings, RunSettings, TrainerSettings
+from rl_lib.run_config import RolloutSettings, RunSettings
+from rl_lib.training.settings import (
+    CosineSchedulerSettings,
+    ExponentialSchedulerSettings,
+    LinearSchedulerSettings,
+    TrainerSettings,
+)
 from rl_lib.training.ppo.losses import PPOLosses
 from rl_lib.training.ppo.metrics import _tensor_metrics_to_scalars
 from rl_lib.training.ppo.update_loop import run_ppo_update_loop
@@ -31,7 +37,7 @@ class PPOTrainer:
         cfg (TrainerSettings): Training hyperparameters.
         _agent (Agent): Policy/value network wrapper.
         _optimizer: Adam or AdamW with parameter groups.
-        _scheduler: LR scheduler (CosineAnnealingLR, LinearLR, or None).
+        _scheduler: Cosine, linear, exponential, or disabled learning-rate scheduler.
         _entropy_coef: Current entropy coefficient (decays per update).
         _step: Global training step counter (minibatches processed).
         _verbosity (Verbosity): Metric detail; below ALL the diagnostic
@@ -63,10 +69,8 @@ class PPOTrainer:
         self._agent = agent
         self._optimizer = self._build_optimizer()
         self._scheduler = None
-        # The only trainer value that is not purely configuration: entropy_coef
-        # decays every update, so its live value lives on the instance while
-        # cfg.entropy_coef stays the initial coefficient.
-        self._entropy_coef = self.cfg.entropy_coef
+        # Entropy decays every update, so its live value stays on the instance.
+        self._entropy_coef = self.cfg.loss.entropy.coefficient
         self._verbosity = as_verbosity(verbosity)
         self._losses = PPOLosses(self._agent, self._verbosity)
         self._step = 0
@@ -79,31 +83,63 @@ class PPOTrainer:
         """Build optimizer with differential LR/weight_decay per parameter group.
 
         Groups (from agent.network_parameter_groups):
-        - backbone_decay: CNN + temporal weights (backbone_lr, weight_decay)
-        - backbone_no_decay: CNN + temporal biases/norms (backbone_lr, no_decay_weight_decay)
+        - cnn_decay/no_decay: CNN weights and biases/norms
+        - sequence_encoder_decay/no_decay: sequence weights and biases/norms
         - head_decay: Actor/critic weights (head_lr, weight_decay)
         - head_no_decay: Actor/critic biases + log_std (head_lr, no_decay_weight_decay)
 
+        CNN and sequence encoder rates independently override backbone_lr when
+        their corresponding settings are configured.
+
         Returns:
             Configured Adam or AdamW optimizer. Uses the fused CUDA kernel when
-            trainer.fused_optimizer is set and the agent runs on CUDA, which
+            trainer.optimizer.fused is set and the agent runs on CUDA, which
             replaces the per-parameter foreach kernel sequence with one launch.
         """
         param_groups = self._agent.network_parameter_groups()
-        optimizer_type = {"Adam": Adam, "AdamW": AdamW}[self.cfg.optimizer]
+        optimizer_cfg = self.cfg.optimizer
+        optimizer_type = {"Adam": Adam, "AdamW": AdamW}[optimizer_cfg.name]
+        cnn_lr = optimizer_cfg.cnn_lr or optimizer_cfg.backbone_lr
+        sequence_encoder_lr = optimizer_cfg.sequence_encoder_lr or optimizer_cfg.backbone_lr
         implementation_kwargs = {}
-        if self.cfg.fused_optimizer and self._agent.device.type == "cuda":
+        if optimizer_cfg.fused and self._agent.device.type == "cuda":
             implementation_kwargs["fused"] = True
         return optimizer_type(
             [
-                {"params": param_groups["backbone_decay"], "lr": self.cfg.backbone_lr, "weight_decay": self.cfg.weight_decay},
-                {"params": param_groups["backbone_no_decay"], "lr": self.cfg.backbone_lr, "weight_decay": self.cfg.no_decay_weight_decay},
-                {"params": param_groups["head_decay"], "lr": self.cfg.head_lr, "weight_decay": self.cfg.weight_decay},
-                {"params": param_groups["head_no_decay"], "lr": self.cfg.head_lr, "weight_decay": self.cfg.no_decay_weight_decay},
+                {
+                    "params": param_groups["cnn_decay"],
+                    "lr": cnn_lr,
+                    "weight_decay": optimizer_cfg.weight_decay,
+                },
+                {
+                    "params": param_groups["cnn_no_decay"],
+                    "lr": cnn_lr,
+                    "weight_decay": optimizer_cfg.no_decay_weight_decay,
+                },
+                {
+                    "params": param_groups["sequence_encoder_decay"],
+                    "lr": sequence_encoder_lr,
+                    "weight_decay": optimizer_cfg.weight_decay,
+                },
+                {
+                    "params": param_groups["sequence_encoder_no_decay"],
+                    "lr": sequence_encoder_lr,
+                    "weight_decay": optimizer_cfg.no_decay_weight_decay,
+                },
+                {
+                    "params": param_groups["head_decay"],
+                    "lr": optimizer_cfg.head_lr,
+                    "weight_decay": optimizer_cfg.weight_decay,
+                },
+                {
+                    "params": param_groups["head_no_decay"],
+                    "lr": optimizer_cfg.head_lr,
+                    "weight_decay": optimizer_cfg.no_decay_weight_decay,
+                },
             ],
-            eps=self.cfg.optimizer_eps,
-            betas=(self.cfg.optimizer_beta1, self.cfg.optimizer_beta2),
-            amsgrad=self.cfg.optimizer_amsgrad,
+            eps=optimizer_cfg.eps,
+            betas=(optimizer_cfg.beta1, optimizer_cfg.beta2),
+            amsgrad=optimizer_cfg.amsgrad,
             **implementation_kwargs,
         )
 
@@ -116,21 +152,30 @@ class PPOTrainer:
             run: RunSettings with total_steps.
             rollout: RolloutSettings with buffer_size.
         """
-        total_iters = run.total_steps // rollout.buffer_size + self.cfg.scheduler_extra_iters
-        if self.cfg.scheduler == "cosine":
+        scheduler_cfg = self.cfg.scheduler
+        if isinstance(scheduler_cfg, CosineSchedulerSettings):
+            total_iters = run.total_steps // rollout.buffer_size + scheduler_cfg.extra_iters
             self._scheduler = CosineAnnealingLR(
                 self._optimizer,
-                eta_min=self.cfg.scheduler_min_lr,
+                eta_min=scheduler_cfg.eta_min,
                 T_max=total_iters,
             )
-        elif self.cfg.scheduler == "linear":
-            max_lr = max(self.cfg.backbone_lr, self.cfg.head_lr)
+        elif isinstance(scheduler_cfg, LinearSchedulerSettings):
+            total_iters = run.total_steps // rollout.buffer_size + scheduler_cfg.extra_iters
+            optimizer_cfg = self.cfg.optimizer
+            max_lr = max(
+                optimizer_cfg.cnn_lr or optimizer_cfg.backbone_lr,
+                optimizer_cfg.sequence_encoder_lr or optimizer_cfg.backbone_lr,
+                optimizer_cfg.head_lr,
+            )
             self._scheduler = LinearLR(
                 self._optimizer,
-                start_factor=self.cfg.scheduler_start_factor,
-                end_factor=self.cfg.scheduler_min_lr / max_lr,
+                start_factor=scheduler_cfg.start_factor,
+                end_factor=scheduler_cfg.min_lr / max_lr,
                 total_iters=total_iters,
             )
+        elif isinstance(scheduler_cfg, ExponentialSchedulerSettings):
+            self._scheduler = ExponentialLR(self._optimizer, gamma=scheduler_cfg.gamma)
         else:
             self._scheduler = None
 
@@ -179,9 +224,9 @@ class PPOTrainer:
         Returns:
             Dict with clipped norms per group.
         """
-        backbone_max_norm = self.cfg.backbone_max_grad_norm if backbone_max_norm is None else backbone_max_norm
-        actor_max_norm = self.cfg.actor_max_grad_norm if actor_max_norm is None else actor_max_norm
-        critic_max_norm = self.cfg.critic_max_grad_norm if critic_max_norm is None else critic_max_norm
+        backbone_max_norm = self.cfg.gradients.backbone_max_grad_norm if backbone_max_norm is None else backbone_max_norm
+        actor_max_norm = self.cfg.gradients.actor_max_grad_norm if actor_max_norm is None else actor_max_norm
+        critic_max_norm = self.cfg.gradients.critic_max_grad_norm if critic_max_norm is None else critic_max_norm
         norm_tensors = self._agent.clip_grad_norms(
             backbone_max_norm, actor_max_norm, critic_max_norm
         )
@@ -272,7 +317,7 @@ class PPOTrainer:
             )
         total_loss = (
             actor_loss
-            + self.cfg.critic_beta * critic_loss
+            + self.cfg.loss.critic_beta * critic_loss
             - self._entropy_coef * entropy_loss
         )
         return total_loss, metric_tensors
@@ -287,12 +332,12 @@ class PPOTrainer:
             if key == "metrics/approx_kl"
             or (self._verbosity.logs_core_losses and is_core_loss(key))
         }
-        if self.cfg.skip_nonfinite_updates:
+        if self.cfg.stability.skip_nonfinite_updates:
             essential_tensors["_control/loss_is_finite"] = T.isfinite(loss).to(
                 dtype=T.float32
             )
         essential_metrics = _tensor_metrics_to_scalars(essential_tensors)
-        if self.cfg.skip_nonfinite_updates and not essential_metrics.pop(
+        if self.cfg.stability.skip_nonfinite_updates and not essential_metrics.pop(
             "_control/loss_is_finite"
         ):
             logger.error("Non-finite loss, skipping update")
@@ -304,9 +349,9 @@ class PPOTrainer:
         with record_function("ppo/backward"):
             loss.backward()
         return self._agent.clip_grad_norms(
-            self.cfg.backbone_max_grad_norm,
-            self.cfg.actor_max_grad_norm,
-            self.cfg.critic_max_grad_norm,
+            self.cfg.gradients.backbone_max_grad_norm,
+            self.cfg.gradients.actor_max_grad_norm,
+            self.cfg.gradients.critic_max_grad_norm,
         )
 
     def _gradient_diagnostics(
@@ -511,7 +556,7 @@ class PPOTrainer:
                 },
             }
         )
-        explained_variance = 1 - (batch["returns"] - batch["critic_value"]).var() / (batch["returns"].var() + self.cfg.explained_variance_epsilon)
+        explained_variance = 1 - (batch["returns"] - batch["critic_value"]).var() / (batch["returns"].var() + self.cfg.stability.explained_variance_epsilon)
         metric_tensors["rollout/explained_variance"] = explained_variance
         return _tensor_metrics_to_scalars(metric_tensors)
 
@@ -544,9 +589,9 @@ class PPOTrainer:
             metrics=self._get_metrics_from_batch(batch)
         )
 
-        if self.cfg.advantage_normalization_strategy == "global":
+        if self.cfg.loss.advantage_normalization_strategy == "global":
             batch["advantages"] = (batch["advantages"] - batch["advantages"].mean()) / (
-                batch["advantages"].std() + self.cfg.advantage_epsilon
+                batch["advantages"].std() + self.cfg.stability.advantage_epsilon
             )
 
         self._pending_diagnostics.clear()
@@ -569,7 +614,11 @@ class PPOTrainer:
 
         if self._scheduler:
             self._scheduler.step()
-        self._entropy_coef = max(self.cfg.entropy_decay * self._entropy_coef, self.cfg.entropy_coef_min)
+        entropy_cfg = self.cfg.loss.entropy
+        self._entropy_coef = max(
+            entropy_cfg.decay * self._entropy_coef,
+            entropy_cfg.min_coefficient,
+        )
         metrics = {
             "training/entropy_coef": self._entropy_coef,
             # "training/lr": self._optimizer.param_groups[0]["lr"]
@@ -581,35 +630,43 @@ class PPOTrainer:
     def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}("
-            f"ppo_epsilon={self.cfg.ppo_epsilon}, "
-            f"critic_beta={self.cfg.critic_beta}, "
+            f"name={self.cfg.name!r}, "
+            f"ppo_epsilon={self.cfg.loss.ppo_epsilon}, "
+            f"critic_beta={self.cfg.loss.critic_beta}, "
             f"entropy_coef={self._entropy_coef}, "
-            f"entropy_decay={self.cfg.entropy_decay}, "
-            f"target_kl={self.cfg.target_kl}, "
-            f"kl_warmup_steps={self.cfg.kl_warmup_steps}, "
-            f"backbone_lr={self.cfg.backbone_lr}, "
-            f"head_lr={self.cfg.head_lr}, "
-            f"weight_decay={self.cfg.weight_decay}, "
-            f"hard_stop_kl={self.cfg.hard_stop_kl}, "
-            f"advantage_normalization_strategy={self.cfg.advantage_normalization_strategy!r}, "
+            f"entropy_decay={self.cfg.loss.entropy.decay}, "
+            f"target_kl={self.cfg.kl.target_kl}, "
+            f"kl_warmup_steps={self.cfg.kl.warmup_steps}, "
+            f"backbone_lr={self.cfg.optimizer.backbone_lr}, "
+            f"cnn_lr={self.cfg.optimizer.cnn_lr or self.cfg.optimizer.backbone_lr}, "
+            f"sequence_encoder_lr={self.cfg.optimizer.sequence_encoder_lr or self.cfg.optimizer.backbone_lr}, "
+            f"head_lr={self.cfg.optimizer.head_lr}, "
+            f"weight_decay={self.cfg.optimizer.weight_decay}, "
+            f"hard_stop_kl={self.cfg.kl.hard_stop}, "
+            f"advantage_normalization_strategy={self.cfg.loss.advantage_normalization_strategy!r}, "
             f"scheduler={self._scheduler.__class__.__name__ if self._scheduler else None}, "
-            f"mean_reg_coef={self.cfg.mean_reg_coef})"
+            f"mean_reg_coef={self.cfg.loss.mean_reg_coef})"
         )
 
     def config(self) -> dict[str, int | float | str]:
         """Hyperparameters, suitable for mlflow.log_params (with a prefix)."""
-        config = {
-            **{
-                f"{key}": ("none" if value is None else value)
-                for key, value in self.cfg.model_dump().items()
-                if isinstance(value, (int, float, str, bool)) or value is None
-            },
-            "entropy_coef_init": self.cfg.entropy_coef,
+        config: dict[str, int | float | str] = {}
+
+        def flatten(prefix: str, value: dict | object) -> None:
+            if isinstance(value, dict):
+                for key, nested in value.items():
+                    flatten(f"{prefix}.{key}" if prefix else key, nested)
+            else:
+                config[prefix] = "none" if value is None else value
+
+        flatten("", self.cfg.model_dump())
+        config.update({
+            "entropy_coef_init": self.cfg.loss.entropy.coefficient,
             "entropy_coef_current": self._entropy_coef,
-            "optimizer": self._optimizer.__class__.__name__,
-            "scheduler_config": self.cfg.scheduler,
+            "optimizer": self.cfg.optimizer.name,
+            "scheduler_config": self.cfg.scheduler.name,
             "scheduler": self._scheduler.__class__.__name__ if self._scheduler else "none",
-        }
+        })
         return config
 
     def network_config(self) -> dict[str, int | float | str]:

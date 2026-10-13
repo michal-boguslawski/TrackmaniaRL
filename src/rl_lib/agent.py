@@ -18,6 +18,7 @@ from torch.profiler import record_function
 from torch.nn.parameter import Parameter
 from typing import Iterator
 
+from rl_lib.checkpoint_loaders import LocalCheckpointLoader
 from rl_lib.networks.factory import Network
 from rl_lib.run_config import AgentSettings
 
@@ -341,21 +342,30 @@ class Agent:
         self._network.train()
 
     def network_parameter_groups(self) -> dict[str, list[Parameter]]:
-        """Group network parameters by role for differential learning rates.
+        """Group parameters by network component and weight-decay eligibility.
 
         Groups:
-        - backbone_decay: CNN + temporal encoder weights (with weight decay)
-        - backbone_no_decay: CNN + temporal encoder biases/norms (no weight decay)
+        - cnn_decay: CNN weights (with weight decay)
+        - cnn_no_decay: CNN biases/norms (no weight decay)
+        - sequence_encoder_decay: Sequence encoder weights (with weight decay)
+        - sequence_encoder_no_decay: Sequence encoder biases/norms (no weight decay)
         - head_decay: Actor/critic weights (with weight decay)
         - head_no_decay: Actor/critic biases + log_std params (no weight decay)
 
         Returns:
             Dict mapping group name to list of parameters.
         """
-        decay, no_decay = [], []
-        for module in [self._network.cnn, self._network.sequence_encoder]:
+        component_groups: dict[str, list[Parameter]] = {}
+        for component, module in (
+            ("cnn", self._network.cnn),
+            ("sequence_encoder", self._network.sequence_encoder),
+        ):
+            decay: list[Parameter] = []
+            no_decay: list[Parameter] = []
             for name, p in module.named_parameters():
                 (no_decay if "bias" in name or "norm" in name.lower() else decay).append(p)
+            component_groups[f"{component}_decay"] = decay
+            component_groups[f"{component}_no_decay"] = no_decay
 
         head_decay, head_no_decay = [], []
         for module in [self._network.actor, self._network.critic]:
@@ -363,8 +373,7 @@ class Agent:
                 (head_no_decay if "bias" in name or "_log_std" in name else head_decay).append(p)
 
         return {
-            "backbone_decay": decay,
-            "backbone_no_decay": no_decay,
+            **component_groups,
             "head_decay": head_decay,
             "head_no_decay": head_no_decay,
         }
@@ -533,8 +542,12 @@ class Agent:
         self._network.save_state_dict(path)
 
     def load_state_dict(self, path: str) -> None:
-        """Load network state dict from disk."""
-        self._network.load_state_dict(path)
+        """Load network weights from a local model checkpoint.
+
+        Args:
+            path: Local model or state-dict checkpoint file.
+        """
+        LocalCheckpointLoader(path).load(self._network, self.device)
 
     def reset(self) -> None:
         """Clear observation and done history windows."""

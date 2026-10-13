@@ -6,8 +6,8 @@ from logging import getLogger
 import numpy as np
 import torch as T
 
-from rl_lib.run_config import TrainerSettings
 from rl_lib.training.ppo.minibatches import get_iid_minibatches
+from rl_lib.training.settings import TrainerSettings
 
 
 logger = getLogger(__name__)
@@ -66,9 +66,9 @@ def run_ppo_update_loop(
 
             if (
                 minibatch_metrics["metrics/approx_kl"]
-                > cfg.target_kl * cfg.kl_stop_multiplier
-                and training_step > cfg.kl_warmup_steps
-                and cfg.hard_stop_kl
+                > cfg.kl.target_kl * cfg.kl.stop_multiplier
+                and training_step > cfg.kl.warmup_steps
+                and cfg.kl.hard_stop
             ):
                 logger.warning(
                     "Hard stop mid-epoch: KL %.4f",
@@ -84,14 +84,14 @@ def run_ppo_update_loop(
         on_epoch()
         if (
             mean_epoch_kl is not None
-            and mean_epoch_kl > cfg.target_kl
-            and training_step > cfg.kl_warmup_steps
-            and cfg.hard_stop_kl
+            and mean_epoch_kl > cfg.kl.target_kl
+            and training_step > cfg.kl.warmup_steps
+            and cfg.kl.hard_stop
         ):
             logger.warning(
                 "Early stop epoch %s: KL %.4f > %.4f",
                 epoch,
                 mean_epoch_kl,
-                cfg.target_kl,
+                cfg.kl.target_kl,
             )
             break

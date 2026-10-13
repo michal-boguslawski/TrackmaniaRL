@@ -5,8 +5,8 @@ It handles the full forward pass from raw NCHW observations to action distributi
 and value estimates, with shape validation via describe_shapes().
 """
 
-import torch as T
 import json
+import torch as T
 from torch import nn
 from torch.distributions import Distribution
 
@@ -144,10 +144,6 @@ class Network(nn.Module):
     def save_state_dict(self, path: str) -> None:
         """Save model state dict to disk."""
         T.save(self.state_dict(), path)
-
-    def load_state_dict(self, path: str) -> None:
-        """Load model state dict from disk (weights_only=True for security)."""
-        super().load_state_dict(T.load(path, weights_only=True))
 
     def _submodules(self) -> list[tuple[str, nn.Module]]:
         """Return named submodules for repr."""

@@ -4,13 +4,20 @@ from pathlib import Path
 from typing import Annotated, Literal, Union
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, NonNegativeInt, PositiveInt, model_validator
+from pydantic import Field, FiniteFloat, NonNegativeInt, PositiveInt, model_validator
 
+from rl_lib.config_base import StrictModel
+from rl_lib.envs.wrappers.settings import (
+    RecordVideoWrapperSettings,
+    WrapperSettings,
+    make_wrapper_settings,
+)
 from rl_lib.networks.config import NetworkConfig
-
-
-class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+from rl_lib.training.settings import (
+    CosineSchedulerSettings,
+    LinearSchedulerSettings,
+    TrainerSettings,
+)
 
 
 class RunSettings(StrictModel):
@@ -25,6 +32,28 @@ class RunSettings(StrictModel):
     device: str = "auto"
     clear_cuda_cache: bool = True
     log_config: str | None = None
+    pretrained_checkpoint: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Optional local model or state-dict checkpoint to load before training. "
+            "Optimizer state and training progress are not restored."
+        ),
+    )
+    pretrained_mlflow_run_id: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Optional MLflow run ID or runs:/ URI used to initialize network weights."
+        ),
+    )
+    pretrained_mlflow_checkpoint_step: NonNegativeInt | None = Field(
+        default=None,
+        description=(
+            "Optional periodic checkpoint step from pretrained_mlflow_run_id. "
+            "When omitted, the MLflow run's final_model artifact is loaded."
+        ),
+    )
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "DEBUG"
     cudnn_benchmark: bool = Field(
         default=True,
@@ -82,56 +111,6 @@ class RuntimeSettings(StrictModel):
     mlflow_run_name: str | None = None
 
 
-class WrapperSettings(StrictModel):
-    name: Literal[
-        "grayscale", "frame_stack", "record_episode_stats", "record_video",
-        "max_and_skip", "reward_on_done", "off_track_penalty",
-    ]
-    skip: PositiveInt | None = None
-    stack_size: PositiveInt | None = None
-    video_folder: str | None = None
-    episode_trigger: Literal["all", "interval"] = "all"
-    episode_interval: PositiveInt = 1
-    video_length: NonNegativeInt = 0
-    video_name_prefix: str = "rl-video"
-    video_fps: PositiveInt | None = None
-    video_disable_logger: bool = True
-    stats_buffer_length: PositiveInt = 100
-    stats_key: str = Field(default="episode", min_length=1)
-    keep_dim: bool = True
-    frame_padding_type: Literal["reset", "zero"] = "reset"
-    on_terminated: FiniteFloat | None = None
-    on_truncated: FiniteFloat | None = -10.0
-    on_win: FiniteFloat | None = 100.0
-    penalty_weight: FiniteFloat = Field(
-        default=0.05,
-        ge=0.0,
-        description="Maximum magnitude of the per-step penalty beyond the road edge.",
-    )
-
-    @model_validator(mode="after")
-    def validate_wrapper_options(self):
-        allowed = {
-            "grayscale": {"keep_dim"},
-            "frame_stack": {"stack_size", "frame_padding_type"},
-            "record_episode_stats": {"stats_buffer_length", "stats_key"},
-            "record_video": {
-                "video_folder", "episode_trigger", "episode_interval", "video_length",
-                "video_name_prefix", "video_fps", "video_disable_logger",
-            },
-            "max_and_skip": {"skip"},
-            "reward_on_done": {"on_terminated", "on_truncated", "on_win"},
-            "off_track_penalty": {"penalty_weight"},
-        }[self.name]
-        supplied = self.model_fields_set - {"name"}
-        invalid = supplied - allowed
-        if invalid:
-            raise ValueError(f"options {sorted(invalid)} are not supported by wrapper {self.name!r}")
-        if self.name == "frame_stack" and self.stack_size is None:
-            raise ValueError("frame_stack requires an explicit stack_size")
-        return self
-
-
 class EnvironmentSettings(StrictModel):
     id: str = "CarRacing-v3"
     num_envs: PositiveInt = 16
@@ -145,10 +124,10 @@ class EnvironmentSettings(StrictModel):
     record_video: bool = False
     video_folder: str = "./logs/videos"
     wrappers: list[WrapperSettings] = Field(default_factory=lambda: [
-        WrapperSettings(name="record_episode_stats"),
-        WrapperSettings(name="grayscale"),
-        WrapperSettings(name="reward_on_done", on_terminated=None, on_truncated=-10.0, on_win=100.0),
-        WrapperSettings(name="max_and_skip"),
+        make_wrapper_settings("record_episode_stats"),
+        make_wrapper_settings("grayscale"),
+        make_wrapper_settings("reward_on_done", on_terminated=None, on_truncated=-10.0, on_win=100.0),
+        make_wrapper_settings("max_and_skip"),
     ])
 
 
@@ -168,56 +147,6 @@ class RolloutSettings(StrictModel):
     gae_lambda: float = Field(default=0.95, ge=0, le=1)
 
 
-class TrainerSettings(StrictModel):
-    ppo_epsilon: float = Field(default=0.2, gt=0, lt=1)
-    value_clip_epsilon: float | None = Field(default=None, gt=0, lt=1)
-    critic_beta: float = Field(default=0.5, ge=0)
-    entropy_coef: float = Field(default=0.001, ge=0)
-    entropy_decay: float = Field(default=0.995, gt=0, le=1)
-    entropy_coef_min: float = Field(default=1e-4, ge=0)
-    mean_reg_coef: float = Field(default=0.01, ge=0)
-    advantage_normalization_strategy: Literal["batch", "global"] | None = None
-    target_kl: float = Field(default=0.03, gt=0)
-    kl_warmup_steps: int = Field(default=20_000, ge=0)
-    kl_stop_multiplier: float = Field(default=3.0, gt=0)
-    hard_stop_kl: bool = True
-    backbone_lr: float = Field(default=1e-4, gt=0)
-    head_lr: float = Field(default=1e-4, gt=0)
-    weight_decay: float = Field(default=1e-4, ge=0)
-    optimizer: Literal["AdamW", "Adam"] = "AdamW"
-    optimizer_eps: float = Field(default=1e-5, gt=0)
-    optimizer_beta1: float = Field(default=0.9, ge=0, lt=1)
-    optimizer_beta2: float = Field(default=0.999, ge=0, lt=1)
-    optimizer_amsgrad: bool = False
-    fused_optimizer: bool = Field(
-        default=True,
-        description=(
-            "Use the fused CUDA implementation of Adam/AdamW when the agent "
-            "runs on a CUDA device. Collapses the per-parameter foreach kernel "
-            "sequence into a single kernel per step. Ignored on CPU."
-        ),
-    )
-    no_decay_weight_decay: float = Field(default=0.0, ge=0)
-    scheduler: Literal["cosine", "linear", "none"] = "cosine"
-    scheduler_min_lr: float = Field(default=1e-8, ge=0)
-    scheduler_start_factor: float = Field(default=1.0, gt=0, le=1)
-    scheduler_extra_iters: int = Field(default=1, ge=0)
-    backbone_max_grad_norm: float = Field(default=0.5, gt=0)
-    actor_max_grad_norm: float = Field(default=0.5, gt=0)
-    critic_max_grad_norm: float = Field(default=0.5, gt=0)
-    advantage_epsilon: float = Field(default=1e-4, gt=0)
-    explained_variance_epsilon: float = Field(default=1e-8, gt=0)
-    log_ratio_min: FiniteFloat = -5.0
-    log_ratio_max: FiniteFloat = 5.0
-    skip_nonfinite_updates: bool = True
-    tanh_saturation_threshold: float = Field(default=3.5, gt=0)
-    minibatch_indexing_mode: Literal["iid", "sequential"] = "iid"
-
-    @model_validator(mode="after")
-    def validate_loss_ranges(self):
-        if self.log_ratio_min >= self.log_ratio_max:
-            raise ValueError("trainer.log_ratio_min must be lower than log_ratio_max")
-        return self
 
 
 class TrackingSettings(StrictModel):
@@ -274,11 +203,11 @@ class RecordVideoCallbackConfig(StrictModel):
     folder: str = "./logs/videos"
     skip: PositiveInt | None = None
     normalize_rewards: bool = False
-    recording: WrapperSettings = Field(default_factory=lambda: WrapperSettings(name="record_video"))
+    recording: RecordVideoWrapperSettings = Field(default_factory=RecordVideoWrapperSettings)
     wrappers: list[WrapperSettings] = Field(default_factory=lambda: [
-        WrapperSettings(name="record_episode_stats"),
-        WrapperSettings(name="grayscale"),
-        WrapperSettings(name="max_and_skip"),
+        make_wrapper_settings("record_episode_stats"),
+        make_wrapper_settings("grayscale"),
+        make_wrapper_settings("max_and_skip"),
     ])
 
     @model_validator(mode="after")
@@ -354,6 +283,22 @@ class RunConfig(StrictModel):
     tracking: TrackingSettings = Field(default_factory=TrackingSettings)
     callbacks: list[CallbackSettings] = Field(default_factory=list)
     runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_trainer_name_from_run_algorithm(cls, values):
+        """Keep the trainer identity aligned with the selected run algorithm."""
+        if not isinstance(values, dict):
+            return values
+        run = values.get("run", {})
+        trainer = values.get("trainer", {})
+        if not isinstance(run, dict) or not isinstance(trainer, dict):
+            return values
+        trainer = dict(trainer)
+        trainer.setdefault("name", run.get("algorithm", "ppo"))
+        values = dict(values)
+        values["trainer"] = trainer
+        return values
 
     @model_validator(mode="before")
     @classmethod
@@ -446,7 +391,7 @@ class RunConfig(StrictModel):
         if stats_wrappers:
             wrappers = [stats_wrappers[0], *[wrapper for wrapper in wrappers if wrapper is not stats_wrappers[0]]]
         else:
-            wrappers.insert(0, WrapperSettings(name="record_episode_stats"))
+            wrappers.insert(0, make_wrapper_settings("record_episode_stats"))
         return self.environment.model_copy(update={
             "num_envs": self.environment.num_envs if num_envs is None else num_envs,
             "normalize_rewards": False,
@@ -499,6 +444,29 @@ class RunConfig(StrictModel):
 
     @model_validator(mode="after")
     def validate_relationships(self):
+        if self.trainer.name != self.run.algorithm:
+            raise ValueError("trainer.name must match run.algorithm")
+        if (
+            self.run.pretrained_checkpoint is not None
+            and self.run.pretrained_mlflow_run_id is not None
+        ):
+            raise ValueError(
+                "configure only one of run.pretrained_checkpoint and "
+                "run.pretrained_mlflow_run_id"
+            )
+        if (
+            self.run.pretrained_mlflow_checkpoint_step is not None
+            and self.run.pretrained_mlflow_run_id is None
+        ):
+            raise ValueError(
+                "run.pretrained_mlflow_checkpoint_step requires "
+                "run.pretrained_mlflow_run_id"
+            )
+        if (
+            self.run.pretrained_mlflow_run_id is not None
+            and not self.run.pretrained_mlflow_run_id.strip()
+        ):
+            raise ValueError("run.pretrained_mlflow_run_id cannot be blank")
         names = [callback.name for callback in self.callbacks]
         if len(names) != len(set(names)):
             raise ValueError("each callback may only be configured once")
@@ -534,14 +502,20 @@ class RunConfig(StrictModel):
             raise ValueError("network.actor.action_low and action_high must have equal lengths")
         if any(low >= high for low, high in zip(self.network.actor.action_low, self.network.actor.action_high)):
             raise ValueError("every network.actor.action_low value must be below action_high")
-        if self.trainer.scheduler_min_lr > min(self.trainer.backbone_lr, self.trainer.head_lr):
-            raise ValueError("trainer.scheduler_min_lr cannot exceed either initial learning rate")
-        if (
-            self.trainer.scheduler == "linear"
-            and self.trainer.scheduler_min_lr / max(self.trainer.backbone_lr, self.trainer.head_lr)
-            > self.trainer.scheduler_start_factor
-        ):
-            raise ValueError("linear scheduler minimum LR is above the configured starting LR")
+        optimizer = self.trainer.optimizer
+        initial_lrs = (
+            optimizer.cnn_lr or optimizer.backbone_lr,
+            optimizer.sequence_encoder_lr or optimizer.backbone_lr,
+            optimizer.head_lr,
+        )
+        scheduler = self.trainer.scheduler
+        if isinstance(scheduler, (CosineSchedulerSettings, LinearSchedulerSettings)):
+            minimum_lr = scheduler.min_lr if isinstance(scheduler, LinearSchedulerSettings) else scheduler.eta_min
+            if minimum_lr > min(initial_lrs):
+                raise ValueError("trainer.scheduler minimum learning rate cannot exceed any initial learning rate")
+        if isinstance(scheduler, LinearSchedulerSettings):
+            if scheduler.min_lr / max(initial_lrs) > scheduler.start_factor:
+                raise ValueError("linear scheduler minimum LR is above the configured starting LR")
         return self
 
 

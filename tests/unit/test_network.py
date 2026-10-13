@@ -10,6 +10,7 @@ import torch as T
 from torch.distributions import Distribution, TransformedDistribution
 
 from rl_lib.networks.factory import Network
+from rl_lib.checkpoint_loaders import LocalCheckpointLoader
 from rl_lib.networks.config import (
     ActorConfig,
     CNNConfig,
@@ -130,7 +131,7 @@ def test_save_and_load_state_dict_roundtrip(tmp_path, network: Network):
     with T.no_grad():
         for param in network.parameters():
             param.add_(1.0)
-    network.load_state_dict(path)
+    LocalCheckpointLoader(path).load(network, "cpu")
 
     for key, value in network.state_dict().items():
         T.testing.assert_close(value, expected[key])
@@ -147,7 +148,29 @@ def test_load_state_dict_rejects_mismatched_checkpoints(tmp_path, network: Netwo
     other.save_state_dict(path)
 
     with pytest.raises(RuntimeError):
-        network.load_state_dict(path)
+        LocalCheckpointLoader(path).load(network, "cpu")
+
+
+@pytest.mark.parametrize("compiled_prefix", [False, True])
+def test_load_state_dict_accepts_wrapped_and_compiled_checkpoints(
+    tmp_path, network: Network, compiled_prefix: bool
+):
+    expected_state = {key: value.clone() for key, value in network.state_dict().items()}
+    checkpoint_state = (
+        {f"_orig_mod.{key}": value for key, value in expected_state.items()}
+        if compiled_prefix
+        else expected_state
+    )
+    path = tmp_path / "wrapped.pt"
+    T.save({"state_dict": checkpoint_state}, path)
+
+    with T.no_grad():
+        for parameter in network.parameters():
+            parameter.add_(1.0)
+    LocalCheckpointLoader(path).load(network, "cpu")
+
+    for key, value in network.state_dict().items():
+        T.testing.assert_close(value, expected_state[key])
 
 
 def test_config_is_flat_and_counts_parameters(network: Network):

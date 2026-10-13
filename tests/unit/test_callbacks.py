@@ -26,12 +26,15 @@ from rl_lib.training.callbacks.params_logger import ParamsLoggingCallback
 from rl_lib.training.callbacks.record_statistics import RecordStatisticLoggerCallback
 from rl_lib.training.callbacks.record_video import RecordVideoCallback
 from rl_lib.training.callbacks.utils import stop_video_recording
+from rl_lib.envs.wrappers.settings import (
+    RecordEpisodeStatisticsWrapperSettings,
+    RecordVideoWrapperSettings,
+)
 from rl_lib.run_config import (
     EnvironmentSettings,
     EpisodeStatisticsCallbackSettings,
     MetricsCallbackSettings,
     VideoCallbackSettings,
-    WrapperSettings,
 )
 from rl_lib.tracking.base import MetricsLogger
 
@@ -489,8 +492,8 @@ def _video_settings(**overrides) -> VideoCallbackSettings:
         id="CarRacing-v3",
         num_envs=1,
         wrappers=[
-            WrapperSettings(name="record_video", video_folder="videos"),
-            WrapperSettings(name="record_episode_stats"),
+            RecordVideoWrapperSettings(video_folder="videos"),
+            RecordEpisodeStatisticsWrapperSettings(),
         ],
     )
     base = {"environment": environment, "interval": 10_000, "seed": 1}

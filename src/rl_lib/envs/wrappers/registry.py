@@ -14,26 +14,32 @@ from gymnasium.wrappers import (
 
 from rl_lib.envs.wrappers.reward_wrappers import RewardOnEpisodeEndWrapper
 from rl_lib.envs.wrappers.off_track_penalty_wrapper import OffTrackPenaltyWrapper
-from rl_lib.run_config import WrapperSettings
+from rl_lib.envs.wrappers.settings import (
+    GrayscaleWrapperSettings,
+    FrameStackWrapperSettings,
+    RecordEpisodeStatisticsWrapperSettings,
+    RecordVideoWrapperSettings,
+    RewardOnDoneWrapperSettings,
+)
 
 _UNSET = object()
 
 
 def _grayscale(env, keep_dim: bool | None = None, **kwargs):
-    """GrayscaleObservation wrapper with default from WrapperSettings."""
-    keep_dim = WrapperSettings(name="grayscale").keep_dim if keep_dim is None else keep_dim
+    """GrayscaleObservation wrapper with its configured default."""
+    keep_dim = GrayscaleWrapperSettings().keep_dim if keep_dim is None else keep_dim
     return GrayscaleObservation(env, keep_dim=keep_dim)
 
 
 def _frame_stack(env, stack_size: int, frame_padding_type: str | None = None, **kwargs):
-    """FrameStackObservation wrapper with default from WrapperSettings."""
-    frame_padding_type = WrapperSettings(name="frame_stack", stack_size=stack_size).frame_padding_type if frame_padding_type is None else frame_padding_type
+    """FrameStackObservation wrapper with its configured default."""
+    frame_padding_type = FrameStackWrapperSettings(stack_size=stack_size).frame_padding_type if frame_padding_type is None else frame_padding_type
     return FrameStackObservation(env, stack_size=stack_size, padding_type=frame_padding_type)
 
 
 def _record_episode_stats(env, stats_buffer_length: int | None = None, stats_key: str | None = None, **kwargs):
-    """RecordEpisodeStatistics wrapper with defaults from WrapperSettings."""
-    defaults = WrapperSettings(name="record_episode_stats")
+    """RecordEpisodeStatistics wrapper with its configured defaults."""
+    defaults = RecordEpisodeStatisticsWrapperSettings()
     stats_buffer_length = defaults.stats_buffer_length if stats_buffer_length is None else stats_buffer_length
     stats_key = defaults.stats_key if stats_key is None else stats_key
     return RecordEpisodeStatistics(env, buffer_length=stats_buffer_length, stats_key=stats_key)
@@ -50,8 +56,8 @@ def _record_video(
     video_disable_logger: bool | None = None,
     **kwargs,
 ):
-    """RecordVideo wrapper with defaults from WrapperSettings."""
-    defaults = WrapperSettings(name="record_video", video_folder=video_folder)
+    """RecordVideo wrapper with its configured defaults."""
+    defaults = RecordVideoWrapperSettings(video_folder=video_folder)
     episode_trigger = defaults.episode_trigger if episode_trigger is None else episode_trigger
     episode_interval = defaults.episode_interval if episode_interval is None else episode_interval
     video_length = defaults.video_length if video_length is None else video_length
@@ -81,8 +87,8 @@ def _reward_on_done(
     on_win=_UNSET,
     **kwargs,
 ):
-    """RewardOnEpisodeEndWrapper with defaults from WrapperSettings."""
-    defaults = WrapperSettings(name="reward_on_done")
+    """RewardOnEpisodeEndWrapper with its configured defaults."""
+    defaults = RewardOnDoneWrapperSettings()
     on_terminated = defaults.on_terminated if on_terminated is _UNSET else on_terminated
     on_truncated = defaults.on_truncated if on_truncated is _UNSET else on_truncated
     on_win = defaults.on_win if on_win is _UNSET else on_win

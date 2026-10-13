@@ -17,8 +17,9 @@ from gymnasium.vector import AutoresetMode
 from rl_lib.buffers.rollout_buffer import RolloutBuffer
 from rl_lib.training.callbacks.base import Callback
 from rl_lib.training.rollout_collector import RolloutCollector
-from rl_lib.run_config import RolloutSettings, TrainerSettings
+from rl_lib.run_config import RolloutSettings
 from rl_lib.training.ppo.trainer import PPOTrainer
+from rl_lib.training.settings import TrainerSettings
 
 
 OBSERVATION_SHAPE = (96, 96, 1)
@@ -367,7 +368,7 @@ def test_config_merges_the_buffer_trainer_and_network_settings(collector: Rollou
     assert "training_steps" not in config
     assert config["buffer.size"] == collector.buffer.size
     assert config["buffer.stack_size"] == collector.trainer.stack_size
-    assert config["trainer.ppo_epsilon"] == collector.trainer.cfg.ppo_epsilon
+    assert config["trainer.loss.ppo_epsilon"] == collector.trainer.cfg.loss.ppo_epsilon
     assert all(
         isinstance(value, (int, float, str, bool)) for value in config.values()
     ), "the config has to stay flat and loggable"

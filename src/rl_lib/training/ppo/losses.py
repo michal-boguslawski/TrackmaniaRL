@@ -5,9 +5,9 @@ import torch as T
 from torch.distributions import Distribution
 
 from rl_lib.agent import Agent
-from rl_lib.run_config import TrainerSettings
 from rl_lib.tracking.verbosity import Verbosity, as_verbosity
 from rl_lib.training.ppo.metrics import _tensor_metrics_to_scalars
+from rl_lib.training.settings import TrainerSettings
 
 
 class PPOLosses:
@@ -139,18 +139,18 @@ class PPOLosses:
         action_mean: T.Tensor,
     ) -> tuple[T.Tensor, dict[str, T.Tensor]]:
         """Compute actor loss and leave diagnostic tensors on their device."""
-        if cfg.advantage_normalization_strategy == "batch":
+        if cfg.loss.advantage_normalization_strategy == "batch":
             advantages = (advantages - advantages.mean()) / (
-                advantages.std() + cfg.advantage_epsilon
+                advantages.std() + cfg.stability.advantage_epsilon
             )
 
         assert log_probs.shape == old_log_probs.shape
         log_ratio = (log_probs - old_log_probs).clamp(
-            cfg.log_ratio_min, cfg.log_ratio_max
+            cfg.stability.log_ratio_min, cfg.stability.log_ratio_max
         )
         ratio = log_ratio.sum(-1).clamp(-5, 5).exp()
         clipped_ratio = ratio.clamp(
-            min=1 - cfg.ppo_epsilon, max=1 + cfg.ppo_epsilon
+            min=1 - cfg.loss.ppo_epsilon, max=1 + cfg.loss.ppo_epsilon
         )
 
         assert advantages.shape == ratio.shape
@@ -160,7 +160,7 @@ class PPOLosses:
 
         # Zero represents no input for steering, gas, and brake.
         mean_reg = action_mean.pow(2).mean()
-        actor_loss = surrogate_loss + cfg.mean_reg_coef * mean_reg
+        actor_loss = surrogate_loss + cfg.loss.mean_reg_coef * mean_reg
         metrics = self._actor_loss_metrics(
             cfg, log_ratio, surrogate_loss, mean_reg, action_mean, actor_loss
         )
@@ -192,7 +192,7 @@ class PPOLosses:
             approx_kl_per_action = (ratio_per_action - 1 - log_ratio).mean(dim=0)
             ratio_max = ratio_total.max()
             clip_fraction = (
-                T.abs(ratio_total - 1) > cfg.ppo_epsilon
+                T.abs(ratio_total - 1) > cfg.loss.ppo_epsilon
             ).float().mean()
             metric_tensors.update(
                 {
@@ -202,7 +202,7 @@ class PPOLosses:
                     "metrics/mean_reg": mean_reg.detach(),
                     "metrics/mean_abs_max": action_mean.abs().max(),
                     "metrics/tanh_saturation_frac": (
-                        action_mean.abs() > cfg.tanh_saturation_threshold
+                        action_mean.abs() > cfg.stability.tanh_saturation_threshold
                     ).float().mean(),
                 }
             )
@@ -249,7 +249,7 @@ class PPOLosses:
     ) -> tuple[T.Tensor, dict[str, T.Tensor]]:
         """Compute critic loss and leave its diagnostic tensor on-device."""
         assert values.shape == old_values.shape == returns.shape
-        value_clip_epsilon = cfg.value_clip_epsilon or cfg.ppo_epsilon
+        value_clip_epsilon = cfg.loss.value_clip_epsilon or cfg.loss.ppo_epsilon
         clipped_values = old_values + (values - old_values).clamp(
             -value_clip_epsilon, value_clip_epsilon
         )

@@ -5,10 +5,10 @@ from pkgutil import ModuleInfo
 
 import pytest
 
-from rl_lib.run_config import TrainerSettings
 from rl_lib.tracking.verbosity import Verbosity
 from rl_lib.training import factory
 from rl_lib.training.ppo.trainer import PPOTrainer
+from rl_lib.training.settings import TrainerSettings
 
 
 def _isolate_registry(monkeypatch, registry: dict) -> None:

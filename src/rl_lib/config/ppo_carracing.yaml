@@ -2,7 +2,7 @@ run:
   algorithm: ppo
   name: PPO
   total_steps: 1000000 # vector-environment steps
-  seed: 2
+  seed: 1
   device: auto
   clear_cuda_cache: true
   log_level: DEBUG
@@ -17,6 +17,11 @@ run:
   # distribution math, and the PPO losses stay FP32. CUDA-only: this raises on
   # a CPU device, so a CPU run of this config needs cnn_autocast: none.
   cnn_autocast: none
+  # Optional local state-dict checkpoint to initialize network weights.
+  pretrained_checkpoint: null
+  # Alternatively, load an MLflow final model or periodic checkpoint.
+  pretrained_mlflow_run_id: null
+  pretrained_mlflow_checkpoint_step: null
 
 environment:
   id: CarRacing-v3
@@ -37,9 +42,9 @@ environment:
     - name: reward_on_done
       on_terminated: null
       on_truncated: 0.0
-      on_win: 50.0
-    - name: off_track_penalty
-      penalty_weight: 0.1
+      on_win: 100.0
+    # - name: off_track_penalty
+    #   penalty_weight: 0.05
     - name: max_and_skip
 
 agent:
@@ -91,47 +96,56 @@ network:
     deterministic_distribution_temperature: 1.0
   critic:
     hidden_layers:
-      - {out_dim: 1024, activation: gelu, init_gain: 1.41421356237, init_bias: 0.0, bias: true} # to 1024
+      - {out_dim: 256, activation: gelu, init_gain: 1.41421356237, init_bias: 0.0, bias: true} # to 1024
     output_init_gain: 1.0
     output_init_bias: 0.0
     output_bias: true
     huber_delta: 1.0
 
 trainer:
-  ppo_epsilon: 0.1
-  critic_beta: 0.8
-  entropy_coef: 0.02
-  entropy_decay: 0.9995
-  entropy_coef_min: 0.0001
-  mean_reg_coef: 0.001
-  advantage_normalization_strategy: global
-  target_kl: 0.015
-  kl_warmup_steps: 20000
-  kl_stop_multiplier: 3.0
-  hard_stop_kl: true
-  backbone_lr: 0.00003
-  head_lr: 0.0001
-  weight_decay: 0.00001
-  optimizer: AdamW
-  optimizer_eps: 0.00001
-  optimizer_beta1: 0.9
-  optimizer_beta2: 0.999
-  optimizer_amsgrad: false
-  no_decay_weight_decay: 0.0
-  scheduler: cosine
-  scheduler_min_lr: 0.00000001
-  scheduler_start_factor: 1.0
-  scheduler_extra_iters: 1
-  backbone_max_grad_norm: 0.5
-  actor_max_grad_norm: 0.5
-  critic_max_grad_norm: 0.5
-  advantage_epsilon: 0.0001
-  explained_variance_epsilon: 0.00000001
-  log_ratio_min: -5.0
-  log_ratio_max: 5.0
-  skip_nonfinite_updates: true
-  value_clip_epsilon: null
-  tanh_saturation_threshold: 3.5
+  name: ppo
+  loss:
+    name: ppo
+    ppo_epsilon: 0.1
+    value_clip_epsilon: null
+    critic_beta: 0.8
+    entropy:
+      coefficient: 0.02
+      decay: 0.999
+      min_coefficient: 0.0001
+    mean_reg_coef: 0.001
+    advantage_normalization_strategy: global
+  kl:
+    target_kl: 0.015
+    warmup_steps: 20000
+    stop_multiplier: 3.0
+    hard_stop: true
+  optimizer:
+    name: Adam
+    backbone_lr: 5.0e-5
+    sequence_encoder_lr: 2.0e-4
+    head_lr: 3.0e-4
+    # weight_decay: 0.00001
+    eps: 1.0e-5
+    # beta1: 0.9
+    # beta2: 0.999
+    # amsgrad: false
+    # no_decay_weight_decay: 0.0
+  scheduler:
+    name: cosine
+    eta_min: 1.0e-8
+    extra_iters: 1
+  gradients:
+    backbone_max_grad_norm: 0.5
+    actor_max_grad_norm: 0.5
+    critic_max_grad_norm: 0.5
+  stability:
+    advantage_epsilon: 0.0001
+    explained_variance_epsilon: 1.0e-8
+    log_ratio_min: -5.0
+    log_ratio_max: 5.0
+    skip_nonfinite_updates: true
+    tanh_saturation_threshold: 3.5
   minibatch_indexing_mode: iid
 
 tracking:

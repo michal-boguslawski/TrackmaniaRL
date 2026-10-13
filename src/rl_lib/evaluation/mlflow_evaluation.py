@@ -15,18 +15,14 @@ import mlflow
 from mlflow.tracking import MlflowClient
 import yaml
 
-from rl_lib.device import resolve_device
+from rl_lib.checkpoint_loaders import FINAL_MODEL_ARTIFACT, MLflowCheckpointLoader
 from rl_lib.evaluation.checkpoint import _evaluate_configured_policy
-from rl_lib.networks.factory import Network
 from rl_lib.run_config import RunConfig
 from rl_lib.tracking.base import MetricsLogger
 from rl_lib.evaluation.runtime import _default_metrics_loggers
-from rl_lib.tracking.artifacts import step_artifact_path
 
 
 logger = logging.getLogger(__name__)
-
-FINAL_MODEL_ARTIFACT = "final_model"
 
 
 @dataclass(frozen=True)
@@ -354,31 +350,6 @@ def evaluate_mlflow(
         )
 
     config = _load_mlflow_config(model_ref.run_id)
-    device = resolve_device(config)
-
-    if checkpoint_step is None:
-        network = mlflow.pytorch.load_model(
-            f"runs:/{model_ref.run_id}/{FINAL_MODEL_ARTIFACT}",
-            map_location=device,
-        )
-        if not isinstance(network, Network):
-            # torch.compile serializes an OptimizedModule around the original model.
-            network = getattr(network, "_orig_mod", network)
-        if not isinstance(network, Network):
-            raise TypeError(
-                f"MLflow artifact {FINAL_MODEL_ARTIFACT} from run {model_ref.run_id} "
-                "is not an rl_lib Network"
-            )
-        checkpoint_path = None
-    else:
-        checkpoint_artifact = (
-            f"{step_artifact_path('checkpoints', checkpoint_step)}/state_dict.pth"
-        )
-        checkpoint_path = mlflow.artifacts.download_artifacts(
-            run_id=model_ref.run_id,
-            artifact_path=checkpoint_artifact,
-        )
-        network = None
 
     return _evaluate_configured_policy(
         config,
@@ -387,8 +358,7 @@ def evaluate_mlflow(
         metrics_loggers=_default_metrics_loggers(metrics_loggers),
         record_video=record_video,
         scope="mlflow",
-        network=network,
-        checkpoint_path=checkpoint_path,
+        checkpoint_loader=MLflowCheckpointLoader(model_ref.run_id, checkpoint_step),
     )
 
 

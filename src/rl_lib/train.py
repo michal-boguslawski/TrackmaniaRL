@@ -28,6 +28,7 @@ import torch as T
 
 from rl_lib.agent import Agent
 from rl_lib.buffers.rollout_buffer import RolloutBuffer
+from rl_lib.checkpoint_loaders import LocalCheckpointLoader, MLflowCheckpointLoader
 from rl_lib.device import resolve_device
 from rl_lib.envs.make_env import make_env
 from rl_lib.logger_setup import setup_logging, shutdown_logging
@@ -137,6 +138,20 @@ def run_training(
                 config.run.cnn_autocast, device
             ),
         ).to(device)
+        checkpoint_loader = None
+        if config.run.pretrained_checkpoint is not None:
+            checkpoint_loader = LocalCheckpointLoader(config.run.pretrained_checkpoint)
+        elif config.run.pretrained_mlflow_run_id is not None:
+            checkpoint_loader = MLflowCheckpointLoader(
+                config.run.pretrained_mlflow_run_id,
+                config.run.pretrained_mlflow_checkpoint_step,
+            )
+        if checkpoint_loader is not None:
+            network = checkpoint_loader.load(network, device)
+            logger.info(
+                "Loaded pretrained network weights using %s",
+                type(checkpoint_loader).__name__,
+            )
         if device.type == "cuda" and config.run.channels_last:
             # The CNN's Conv2d layers are the only 2D operators in the network.
             # NHWC weights match cuDNN's native kernel layout and the
@@ -159,7 +174,7 @@ def run_training(
         )
 
         trainer = create_trainer(
-            config.run.algorithm,
+            config.trainer.name,
             agent=agent,
             config=config.trainer,
             callbacks=callback_groups.trainer,

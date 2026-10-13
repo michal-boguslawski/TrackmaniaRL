@@ -25,8 +25,9 @@ if str(_PROJECT_ROOT) not in sys.path:
 from rl_lib.agent import Agent
 from rl_lib.networks.factory import Network
 from rl_lib.networks.mixed_precision import resolve_cnn_autocast_dtype
-from rl_lib.run_config import AgentSettings, TrainerSettings, load_config
+from rl_lib.run_config import AgentSettings, load_config
 from rl_lib.training.ppo.trainer import PPOTrainer
+from rl_lib.training.settings import TrainerSettings
 from scripts.benchmarking import benchmark_callables
 
 
@@ -154,13 +155,13 @@ def run_benchmark(
     bf16_losses, _ = bf16_trainer.calculate_losses(**batch)
     fp32_total_loss = (
         fp32_losses[0]
-        + run_config.trainer.critic_beta * fp32_losses[1]
-        - run_config.trainer.entropy_coef * fp32_losses[2]
+        + run_config.trainer.loss.critic_beta * fp32_losses[1]
+        - run_config.trainer.loss.entropy.coefficient * fp32_losses[2]
     )
     bf16_total_loss = (
         bf16_losses[0]
-        + run_config.trainer.critic_beta * bf16_losses[1]
-        - run_config.trainer.entropy_coef * bf16_losses[2]
+        + run_config.trainer.loss.critic_beta * bf16_losses[1]
+        - run_config.trainer.loss.entropy.coefficient * bf16_losses[2]
     )
     fp32_total_loss.backward()
     bf16_total_loss.backward()
@@ -180,8 +181,8 @@ def run_benchmark(
             metrics = trainer.train_step(**batch)
             loss_value = (
                 metrics.get("metrics/actor_loss", math.nan)
-                + run_config.trainer.critic_beta * metrics.get("loss/critic", math.nan)
-                - run_config.trainer.entropy_coef * metrics.get("loss/entropy", math.nan)
+                + run_config.trainer.loss.critic_beta * metrics.get("loss/critic", math.nan)
+                - run_config.trainer.loss.entropy.coefficient * metrics.get("loss/entropy", math.nan)
             )
             if not math.isfinite(loss_value) or not all(
                 T.isfinite(parameter).all().item() for parameter in network.parameters()

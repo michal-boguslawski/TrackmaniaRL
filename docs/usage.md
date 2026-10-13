@@ -38,9 +38,52 @@ counts calls to vector `env.step`, not transitions multiplied across
 environments. Copy the YAML config to customize an experiment; it is validated
 by strict Pydantic models, so unknown fields and invalid values are rejected.
 
+Optimizer and learning-rate scheduler options are grouped under
+`trainer.optimizer` and `trainer.scheduler`. The scheduler's `name` selects a
+typed option set: cosine accepts `eta_min`, linear accepts `min_lr` and
+`start_factor`, and exponential accepts `gamma`.
+The trainer's `name` mirrors `run.algorithm`; PPO loss settings are under
+`trainer.loss`, with KL stopping, gradient clipping, and numerical guards
+separated into `trainer.kl`, `trainer.gradients`, and `trainer.stability`.
+Environment wrapper options are likewise wrapper-specific, so each item under
+`environment.wrappers` only accepts fields supported by its `name`.
+
+```yaml
+trainer:
+  optimizer:
+    name: AdamW
+    backbone_lr: 0.0001
+    head_lr: 0.0001
+    eps: 0.00001
+    fused: true
+  scheduler:
+    name: exponential
+    gamma: 0.995
+```
+
 ```bash
 uv run --extra gpu python scripts/train.py \
   --config path/to/your_config.yaml
+```
+
+To initialize a new run from a saved model, set `run.pretrained_checkpoint` in
+your YAML to a local state-dict file (for example, a run's
+`final_state_dict.pt` or a periodic checkpoint). The network architecture must
+match the checkpoint. Only model weights are loaded; the optimizer, step count,
+and environment state start fresh:
+
+```yaml
+run:
+  pretrained_checkpoint: logs/artifacts/SESSION_ID/final_state_dict.pt
+```
+
+Alternatively, load a final model directly from MLflow, or select a periodic
+state-dict checkpoint by step:
+
+```yaml
+run:
+  pretrained_mlflow_run_id: RUN_ID  # accepts a runs:/RUN_ID/... URI too
+  pretrained_mlflow_checkpoint_step: 500000  # omit for final_model
 ```
 
 `cnn_autocast: bf16`, `channels_last`, and the fused optimizer are CUDA-only.

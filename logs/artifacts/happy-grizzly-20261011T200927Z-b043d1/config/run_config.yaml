@@ -196,7 +196,7 @@ callbacks:
   stats_key: episode
 - name: evaluation
   interval: 100000
-  episodes: 10
+  episodes: 100
   final_episodes: 1000
 - name: record_video
   interval: 100000

@@ -403,7 +403,14 @@ def test_evaluate_actions_keeps_gradients(agent: Agent, observations):
 def test_network_parameter_groups_partition_the_parameters(agent: Agent):
     groups = agent.network_parameter_groups()
 
-    assert set(groups) == {"backbone_decay", "backbone_no_decay", "head_decay", "head_no_decay"}
+    assert set(groups) == {
+        "cnn_decay",
+        "cnn_no_decay",
+        "sequence_encoder_decay",
+        "sequence_encoder_no_decay",
+        "head_decay",
+        "head_no_decay",
+    }
 
     by_id = {id(p): group for group, params in groups.items() for p in params}
     assert len(by_id) == len(list(agent._network.parameters())), "every parameter is grouped once"
@@ -417,14 +424,21 @@ def test_network_parameter_groups_exclude_biases_and_norms_from_decay(agent: Age
     def names(group: str) -> set[str]:
         return {id(p) for p in groups[group]}
 
-    backbone_decay = names("backbone_decay")
-    backbone_no_decay = names("backbone_no_decay")
-    assert not backbone_decay & backbone_no_decay
-
-    for module, prefix in ((agent._network.cnn, "cnn"), (agent._network.sequence_encoder, "temporal")):
+    for module, prefix, decay_group, no_decay_group in (
+        (agent._network.cnn, "cnn", "cnn_decay", "cnn_no_decay"),
+        (
+            agent._network.sequence_encoder,
+            "temporal",
+            "sequence_encoder_decay",
+            "sequence_encoder_no_decay",
+        ),
+    ):
+        component_decay = names(decay_group)
+        component_no_decay = names(no_decay_group)
+        assert not component_decay & component_no_decay
         for name, param in module.named_parameters():
             should_decay = "bias" not in name and "norm" not in name.lower()
-            grouped = (id(param) in backbone_decay) if should_decay else (id(param) in backbone_no_decay)
+            grouped = (id(param) in component_decay) if should_decay else (id(param) in component_no_decay)
             assert grouped, f"{prefix}.{name} landed in the wrong weight-decay group"
 
     head_no_decay = {id(p) for p in groups["head_no_decay"]}

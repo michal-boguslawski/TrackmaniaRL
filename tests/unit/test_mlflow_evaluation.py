@@ -8,6 +8,7 @@ import yaml
 
 from rl_lib.evaluation import MLflowModelRef, discover_mlflow_models, evaluate_mlflow, select_mlflow_run
 from rl_lib.evaluation.mlflow_evaluation import _load_mlflow_config, _shortest_unique_prefixes
+from rl_lib.checkpoint_loaders import MLflowCheckpointLoader
 from rl_lib.run_config import AgentSettings, RunConfig
 from rl_lib.tracking.base import MetricsLogger
 
@@ -100,6 +101,7 @@ def test_mlflow_evaluation_loads_run_config_model_and_logs(
         ),
     )
     monkeypatch.setattr("rl_lib.evaluation.mlflow_evaluation.mlflow", fake_mlflow)
+    monkeypatch.setattr("rl_lib.checkpoint_loaders.mlflow", fake_mlflow)
     monkeypatch.setattr("rl_lib.evaluation.checkpoint.make_env", lambda config: _vector_env(config.num_envs))
     logger = _Logger()
 
@@ -127,6 +129,7 @@ def test_mlflow_run_uri_is_accepted(monkeypatch, tmp_path, network_config, agent
         ),
     )
     monkeypatch.setattr("rl_lib.evaluation.mlflow_evaluation.mlflow", fake_mlflow)
+    monkeypatch.setattr("rl_lib.checkpoint_loaders.mlflow", fake_mlflow)
     monkeypatch.setattr("rl_lib.evaluation.checkpoint.make_env", lambda config: _vector_env(config.num_envs))
 
     evaluate_mlflow(
@@ -161,6 +164,7 @@ def test_mlflow_evaluation_loads_selected_checkpoint(
         ),
     )
     monkeypatch.setattr("rl_lib.evaluation.mlflow_evaluation.mlflow", fake_mlflow)
+    monkeypatch.setattr("rl_lib.checkpoint_loaders.mlflow", fake_mlflow)
     monkeypatch.setattr(
         "rl_lib.evaluation.mlflow_evaluation._evaluate_configured_policy",
         lambda config, **kwargs: evaluated.update(config=config, **kwargs) or [12.0],
@@ -174,16 +178,14 @@ def test_mlflow_evaluation_loads_selected_checkpoint(
     )
 
     assert returns == [12.0]
-    assert artifact_calls == [
-        ("run-checkpoint", "config/run_config.yaml"),
-        ("run-checkpoint", "checkpoints/step_500000/state_dict.pth"),
-    ]
-    assert evaluated["checkpoint_path"] == str(tmp_path / "state_dict.pth")
-    assert evaluated["network"] is None
+    assert artifact_calls == [("run-checkpoint", "config/run_config.yaml")]
+    assert isinstance(evaluated["checkpoint_loader"], MLflowCheckpointLoader)
+    assert evaluated["checkpoint_loader"].run_id == "run-checkpoint"
+    assert evaluated["checkpoint_loader"].checkpoint_step == 500_000
 
 
-def test_mlflow_evaluation_unwraps_compiled_final_model(
-    monkeypatch, tmp_path, network_config, agent
+def test_mlflow_evaluation_configures_loader_for_final_model(
+    monkeypatch, tmp_path, network_config
 ):
     config_path = tmp_path / "run_config.yaml"
     _save_config(_config(network_config), config_path)
@@ -193,12 +195,13 @@ def test_mlflow_evaluation_unwraps_compiled_final_model(
             download_artifacts=lambda **kwargs: str(config_path),
         ),
         pytorch=SimpleNamespace(
-            load_model=lambda uri, map_location: SimpleNamespace(
-                _orig_mod=agent.network
+            load_model=lambda *args, **kwargs: pytest.fail(
+                "model loading is deferred to the configured checkpoint loader"
             ),
         ),
     )
     monkeypatch.setattr("rl_lib.evaluation.mlflow_evaluation.mlflow", fake_mlflow)
+    monkeypatch.setattr("rl_lib.checkpoint_loaders.mlflow", fake_mlflow)
     monkeypatch.setattr(
         "rl_lib.evaluation.mlflow_evaluation._evaluate_configured_policy",
         lambda config, **kwargs: evaluated.update(config=config, **kwargs) or [1.0],
@@ -207,8 +210,9 @@ def test_mlflow_evaluation_unwraps_compiled_final_model(
     returns = evaluate_mlflow(run_id="compiled-run", episodes=1)
 
     assert returns == [1.0]
-    assert evaluated["network"] is agent.network
-    assert evaluated["checkpoint_path"] is None
+    assert isinstance(evaluated["checkpoint_loader"], MLflowCheckpointLoader)
+    assert evaluated["checkpoint_loader"].run_id == "compiled-run"
+    assert evaluated["checkpoint_loader"].checkpoint_step is None
 
 
 def test_mlflow_evaluation_rejects_negative_checkpoint_step():

@@ -56,11 +56,12 @@ from rl_lib.networks.config import (
     TemporalConfig,
 )
 from rl_lib.networks.factory import Network
-from rl_lib.run_config import AgentSettings, TrainerSettings
+from rl_lib.run_config import AgentSettings
 from rl_lib.tracking.verbosity import Verbosity, filter_metrics
 from rl_lib.training.ppo import losses as losses_module
 from rl_lib.training.ppo import trainer as trainer_module
 from rl_lib.training.ppo.trainer import PPOTrainer
+from rl_lib.training.settings import TrainerSettings
 
 
 _SHIPPED_CONFIG = Path(rl_lib.__file__).resolve().parent / "config" / "ppo_carracing.yaml"

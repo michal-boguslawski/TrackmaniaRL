@@ -32,9 +32,10 @@ from rl_lib.networks.config import (
     TemporalConfig,
 )
 from rl_lib.networks.factory import Network
-from rl_lib.run_config import AgentSettings, RolloutSettings, TrainerSettings
+from rl_lib.run_config import AgentSettings, RolloutSettings
 from rl_lib.training.callbacks.base import Callback
 from rl_lib.training.ppo.trainer import PPOTrainer
+from rl_lib.training.settings import TrainerSettings
 
 NUM_ENVS = 2
 SIZE = 4

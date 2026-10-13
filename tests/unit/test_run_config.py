@@ -1,9 +1,10 @@
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from rl_lib.buffers.rollout_buffer import RolloutBuffer
 from rl_lib.profiling_config import ProfilingConfig, load_profiling_config
-from rl_lib.run_config import RolloutSettings, RunConfig, WrapperSettings, load_config
+from rl_lib.envs.wrappers.settings import WrapperSettings, make_wrapper_settings
+from rl_lib.run_config import RolloutSettings, RunConfig, load_config
 from rl_lib.training.ppo.trainer import PPOTrainer
 
 
@@ -13,13 +14,16 @@ def test_sample_yaml_loads_full_current_run_defaults():
     config = load_config(config_path)
 
     assert config.environment.id == "CarRacing-v3"
-    assert config.environment.num_envs == 16
+    assert config.environment.num_envs == 8
     assert config.run.algorithm == "ppo"
     assert config.run.total_steps == 1_000_000
+    assert config.run.pretrained_checkpoint is None
     assert config.run.cnn_autocast == "none"
     assert config.rollout.gamma == pytest.approx(0.99)
     assert config.rollout.epochs == 3
-    assert config.trainer.ppo_epsilon == pytest.approx(0.1)
+    assert config.trainer.name == "ppo"
+    assert config.trainer.loss.name == "ppo"
+    assert config.trainer.loss.ppo_epsilon == pytest.approx(0.1)
     assert config.network.cnn.conv_layers[0].kernel_size == 8
     assert config.callback("checkpoints").interval == 100_000
     assert config.callback("evaluation").interval == 100_000
@@ -30,17 +34,13 @@ def test_sample_yaml_loads_full_current_run_defaults():
         wrapper for wrapper in config.environment.wrappers if wrapper.name == "reward_on_done"
     )
     assert reward_wrapper.on_truncated == 0.0
-    off_track_wrapper = next(
-        wrapper
-        for wrapper in config.environment.wrappers
-        if wrapper.name == "off_track_penalty"
-    )
-    assert off_track_wrapper.penalty_weight == pytest.approx(0.05)
+    assert all(wrapper.name != "off_track_penalty" for wrapper in config.environment.wrappers)
     assert config.tracking.verbosity == 2
 
 
 def test_performance_backend_defaults_and_validation():
-    from rl_lib.run_config import RunSettings, TrainerSettings
+    from rl_lib.run_config import RunSettings
+    from rl_lib.training.settings import TrainerSettings
 
     settings = RunSettings()
     assert settings.cudnn_benchmark is True
@@ -48,7 +48,7 @@ def test_performance_backend_defaults_and_validation():
     assert settings.torch_compile is False
     assert settings.torch_compile_mode == "reduce-overhead"
     assert settings.cnn_autocast == "none"
-    assert TrainerSettings().fused_optimizer is True
+    assert TrainerSettings().optimizer.fused is True
 
     with pytest.raises(ValidationError):
         RunSettings(torch_compile_mode="turbo")
@@ -145,6 +145,42 @@ def test_missing_yaml_sections_resolve_from_pydantic_defaults(tmp_path):
     assert config.network.actor.action_low == [-1.0, 0.0, 0.0]
 
 
+def test_pretrained_checkpoint_can_be_configured(tmp_path):
+    path = tmp_path / "pretrained.yaml"
+    path.write_text("run:\n  pretrained_checkpoint: models/policy.pt\n", encoding="utf-8")
+
+    assert load_config(str(path)).run.pretrained_checkpoint == "models/policy.pt"
+
+
+def test_pretrained_mlflow_checkpoint_can_be_configured(tmp_path):
+    path = tmp_path / "pretrained-mlflow.yaml"
+    path.write_text(
+        "run:\n  pretrained_mlflow_run_id: runs:/run-123/final_model\n"
+        "  pretrained_mlflow_checkpoint_step: 500000\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(str(path))
+
+    assert config.run.pretrained_mlflow_run_id == "runs:/run-123/final_model"
+    assert config.run.pretrained_mlflow_checkpoint_step == 500000
+
+
+@pytest.mark.parametrize(
+    "run_settings",
+    [
+        {
+            "pretrained_checkpoint": "local.pt",
+            "pretrained_mlflow_run_id": "run-123",
+        },
+        {"pretrained_mlflow_checkpoint_step": 100},
+    ],
+)
+def test_pretrained_checkpoint_sources_are_validated(run_settings):
+    with pytest.raises(ValidationError, match="pretrained"):
+        RunConfig.model_validate({"run": run_settings})
+
+
 def test_run_config_accepts_a_registered_algorithm_name(tmp_path):
     path = tmp_path / "algorithm.yaml"
     path.write_text("run:\n  algorithm: sac\n", encoding="utf-8")
@@ -152,6 +188,15 @@ def test_run_config_accepts_a_registered_algorithm_name(tmp_path):
     config = load_config(str(path))
 
     assert config.run.algorithm == "sac"
+    assert config.trainer.name == "sac"
+
+
+def test_explicit_trainer_name_must_match_run_algorithm():
+    with pytest.raises(ValidationError, match="trainer.name must match run.algorithm"):
+        RunConfig.model_validate({
+            "run": {"algorithm": "sac"},
+            "trainer": {"name": "ppo"},
+        })
 
 
 def test_loader_rejects_unknown_fields(tmp_path):
@@ -187,11 +232,14 @@ def test_run_config_rejects_invalid_ranges_and_relationships(tmp_path, yaml_text
 
 
 def test_wrapper_settings_validate_name_and_wrapper_specific_options():
+    wrapper_adapter = TypeAdapter(WrapperSettings)
     with pytest.raises(ValidationError):
-        WrapperSettings.model_validate({"name": "not_registered"})
+        wrapper_adapter.validate_python({"name": "not_registered"})
 
-    with pytest.raises(ValidationError, match="not supported"):
-        WrapperSettings.model_validate({"name": "grayscale", "stack_size": 3})
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        wrapper_adapter.validate_python({"name": "grayscale", "stack_size": 3})
+
+    assert make_wrapper_settings("frame_stack", stack_size=3).stack_size == 3
 
     config = RunConfig.model_validate({
         "environment": {
@@ -220,11 +268,54 @@ def test_rollout_and_trainer_settings_reach_runtime_components(agent):
 
     assert buffer.config()["gamma"] == pytest.approx(0.8)
     assert buffer.config()["gae_lambda"] == pytest.approx(0.7)
-    assert trainer.cfg.backbone_lr == pytest.approx(0.0002)
-    assert trainer.cfg.head_lr == pytest.approx(0.0003)
+    assert trainer.cfg.optimizer.backbone_lr == pytest.approx(0.0002)
+    assert trainer.cfg.optimizer.head_lr == pytest.approx(0.0003)
+    assert [group["lr"] for group in trainer._optimizer.param_groups] == pytest.approx(
+        [0.0002, 0.0002, 0.0002, 0.0002, 0.0003, 0.0003]
+    )
     assert trainer._optimizer.__class__.__name__ == "Adam"
-    assert trainer.cfg.backbone_max_grad_norm == pytest.approx(0.75)
-    assert trainer.cfg.entropy_coef_min == pytest.approx(0.00002)
+    assert trainer.cfg.gradients.backbone_max_grad_norm == pytest.approx(0.75)
+    assert trainer.cfg.loss.entropy.min_coefficient == pytest.approx(0.00002)
+
+
+def test_component_learning_rates_override_backbone_rate(agent):
+    trainer = PPOTrainer(
+        agent,
+        RunConfig.model_validate({
+            "trainer": {
+                "backbone_lr": 0.0002,
+                "cnn_lr": 0.0001,
+                "sequence_encoder_lr": 0.00005,
+                "head_lr": 0.0003,
+                "scheduler_min_lr": 1e-8,
+            },
+        }).trainer,
+    )
+
+    assert [group["lr"] for group in trainer._optimizer.param_groups] == pytest.approx(
+        [0.0001, 0.0001, 0.00005, 0.00005, 0.0003, 0.0003]
+    )
+
+
+@pytest.mark.parametrize(
+    ("scheduler", "expected_type"),
+    [
+        ({"name": "cosine", "eta_min": 1e-8}, "CosineSchedulerSettings"),
+        ({"name": "linear", "min_lr": 1e-8, "start_factor": 0.8}, "LinearSchedulerSettings"),
+        ({"name": "exponential", "gamma": 0.97}, "ExponentialSchedulerSettings"),
+    ],
+)
+def test_scheduler_settings_validate_type_specific_options(scheduler, expected_type):
+    config = RunConfig.model_validate({"trainer": {"scheduler": scheduler}})
+
+    assert type(config.trainer.scheduler).__name__ == expected_type
+
+
+def test_scheduler_settings_reject_options_for_other_scheduler_types():
+    with pytest.raises(ValidationError):
+        RunConfig.model_validate({
+            "trainer": {"scheduler": {"name": "exponential", "eta_min": 1e-8}},
+        })
 
 
 def test_environment_wrapper_arguments_survive_validation():

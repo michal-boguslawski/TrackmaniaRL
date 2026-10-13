@@ -31,9 +31,9 @@ from tqdm import tqdm
 import yaml
 
 from rl_lib.agent import Agent
+from rl_lib.checkpoint_loaders import LocalCheckpointLoader
 from rl_lib.device import resolve_device
 from rl_lib.envs.make_env import make_env
-from rl_lib.evaluation.checkpoint import _load_local_network
 from rl_lib.networks.factory import Network
 from rl_lib.networks.mixed_precision import resolve_cnn_autocast_dtype
 from rl_lib.run_config import RunConfig
@@ -600,7 +600,7 @@ def run_probe(
             T.backends.cudnn.benchmark = config.run.cudnn_benchmark
             if config.run.channels_last:
                 network.cnn.to(memory_format=T.channels_last)
-        network = _load_local_network(network, checkpoint_path, device)
+        network = LocalCheckpointLoader(checkpoint_path).load(network, device)
         network.eval()
         agent = Agent(network, device, config.agent)
         agent.eval()

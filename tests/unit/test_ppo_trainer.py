@@ -14,10 +14,11 @@ import torch as T
 from rl_lib.agent import Agent
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
 from rl_lib.training.callbacks.base import Callback
-from rl_lib.run_config import RolloutSettings, RunSettings, TrainerSettings
+from rl_lib.run_config import RolloutSettings, RunSettings
 from rl_lib.training.ppo.losses import PPOLosses
 from rl_lib.training.ppo.minibatches import get_iid_minibatches
 from rl_lib.training.ppo.trainer import PPOTrainer
+from rl_lib.training.settings import OptimizerSettings, TrainerSettings
 
 
 NUM_ENVS = 2
@@ -43,6 +44,17 @@ class SpyCallback(Callback):
 
     def on_end(self, *args, **kwargs):
         self.events.append(("end", kwargs.get("step"), sorted(kwargs.get("metrics", {}))))
+
+
+def _copy_settings(settings, path: str, **updates):
+    """Copy one nested settings model with updated leaf values."""
+    section, _, remainder = path.partition(".")
+    nested = getattr(settings, section)
+    if remainder:
+        nested = _copy_settings(nested, remainder, **updates)
+    else:
+        nested = nested.model_copy(update=updates)
+    return settings.model_copy(update={section: nested})
 
 
 @pytest.fixture
@@ -325,7 +337,7 @@ def test_actor_loss_normalises_advantages_per_minibatch(
 def test_actor_loss_clips_the_importance_ratio(
     trainer: PPOTrainer, ppo_losses: PPOLosses
 ):
-    trainer.cfg = trainer.cfg.model_copy(update={"ppo_epsilon": 0.2})
+    trainer.cfg = _copy_settings(trainer.cfg, "loss", ppo_epsilon=0.2)
     advantages = T.ones(4)
     old_log_probs = T.zeros(4, ACTION_DIM)
     # one unit of log-ratio per action dim sums to log(1.65) -> above 1 + epsilon
@@ -348,7 +360,7 @@ def test_actor_loss_regularizes_toward_no_input_not_action_range_midpoint(
     log_probs = T.zeros(2, ACTION_DIM)
     # Zero is no input for all controls; gas/brake at 0.5 would apply both.
     action_mean = T.tensor([[0.0, 0.0, 0.0], [0.0, 0.5, 0.5]])
-    trainer.cfg = trainer.cfg.model_copy(update={"mean_reg_coef": 0.5})
+    trainer.cfg = _copy_settings(trainer.cfg, "loss", mean_reg_coef=0.5)
 
     loss, metrics = ppo_losses.actor_loss(
         trainer.cfg, advantages, log_probs, log_probs, action_mean
@@ -387,7 +399,7 @@ def test_actor_loss_metrics_are_reported_per_action_dim(
 def test_critic_loss_takes_the_worse_of_clipped_and_unclipped(
     trainer: PPOTrainer, ppo_losses: PPOLosses
 ):
-    trainer.cfg = trainer.cfg.model_copy(update={"ppo_epsilon": 0.2})
+    trainer.cfg = _copy_settings(trainer.cfg, "loss", ppo_epsilon=0.2)
     returns = T.zeros(4)
     old_values = T.zeros(4)
 
@@ -404,7 +416,7 @@ def test_critic_loss_takes_the_worse_of_clipped_and_unclipped(
 def test_critic_loss_ignores_the_clip_when_the_value_is_inside_it(
     trainer: PPOTrainer, ppo_losses: PPOLosses
 ):
-    trainer.cfg = trainer.cfg.model_copy(update={"ppo_epsilon": 0.5})
+    trainer.cfg = _copy_settings(trainer.cfg, "loss", ppo_epsilon=0.5)
     returns = T.zeros(2)
 
     loss, metrics = ppo_losses.critic_loss(
@@ -853,9 +865,9 @@ def test_train_leaves_advantages_untouched_without_normalisation(trainer: PPOTra
 
 
 def test_train_stops_mid_epoch_when_the_kl_spikes(trainer: PPOTrainer, rollout, monkeypatch):
-    trainer.cfg = trainer.cfg.model_copy(update={"hard_stop_kl": True})
-    trainer.cfg = trainer.cfg.model_copy(update={"target_kl": 0.01})
-    trainer.cfg = trainer.cfg.model_copy(update={"kl_warmup_steps": 0})
+    trainer.cfg = _copy_settings(trainer.cfg, "kl", hard_stop=True)
+    trainer.cfg = _copy_settings(trainer.cfg, "kl", target_kl=0.01)
+    trainer.cfg = _copy_settings(trainer.cfg, "kl", warmup_steps=0)
     monkeypatch.setattr(
         PPOTrainer,
         "train_step",
@@ -874,9 +886,9 @@ def test_train_stops_mid_epoch_when_the_kl_spikes(trainer: PPOTrainer, rollout, 
 
 
 def test_train_keeps_going_while_the_kl_stays_below_target(trainer: PPOTrainer, rollout, monkeypatch):
-    trainer.cfg = trainer.cfg.model_copy(update={"hard_stop_kl": True})
-    trainer.cfg = trainer.cfg.model_copy(update={"target_kl": 0.01})
-    trainer.cfg = trainer.cfg.model_copy(update={"kl_warmup_steps": 0})
+    trainer.cfg = _copy_settings(trainer.cfg, "kl", hard_stop=True)
+    trainer.cfg = _copy_settings(trainer.cfg, "kl", target_kl=0.01)
+    trainer.cfg = _copy_settings(trainer.cfg, "kl", warmup_steps=0)
     monkeypatch.setattr(
         PPOTrainer,
         "train_step",
@@ -893,9 +905,9 @@ def test_train_keeps_going_while_the_kl_stays_below_target(trainer: PPOTrainer, 
 
 
 def test_train_respects_the_kl_warmup(trainer: PPOTrainer, rollout, monkeypatch):
-    trainer.cfg = trainer.cfg.model_copy(update={"hard_stop_kl": True})
-    trainer.cfg = trainer.cfg.model_copy(update={"target_kl": 0.01})
-    trainer.cfg = trainer.cfg.model_copy(update={"kl_warmup_steps": 10_000})
+    trainer.cfg = _copy_settings(trainer.cfg, "kl", hard_stop=True)
+    trainer.cfg = _copy_settings(trainer.cfg, "kl", target_kl=0.01)
+    trainer.cfg = _copy_settings(trainer.cfg, "kl", warmup_steps=10_000)
     monkeypatch.setattr(
         PPOTrainer,
         "train_step",
@@ -922,7 +934,7 @@ def test_train_reraises_update_failures(trainer: PPOTrainer, rollout, monkeypatc
 
 def test_entropy_coefficient_decays_towards_a_floor(trainer: PPOTrainer, rollout):
     trainer._entropy_coef = 1e-2
-    trainer.cfg = trainer.cfg.model_copy(update={"entropy_decay": 0.5})
+    trainer.cfg = _copy_settings(trainer.cfg, "loss.entropy", decay=0.5)
 
     trainer.train(rollout, epochs=1, minibatch_size=4, training_step=0)
     assert trainer._entropy_coef == pytest.approx(5e-3)
@@ -943,6 +955,28 @@ def test_setup_train_builds_a_cosine_schedule(agent: Agent):
     assert trainer.config()["scheduler"] == "CosineAnnealingLR"
 
 
+def test_setup_train_builds_a_linear_schedule_with_its_own_options(agent: Agent):
+    trainer = PPOTrainer(
+        agent,
+        TrainerSettings(
+            optimizer=OptimizerSettings(backbone_lr=1e-4, head_lr=2e-4),
+            scheduler={
+                "name": "linear",
+                "min_lr": 1e-6,
+                "start_factor": 0.5,
+                "extra_iters": 2,
+            },
+        ),
+    )
+
+    trainer.setup_train(RunSettings(total_steps=1000), RolloutSettings(buffer_size=128))
+
+    assert type(trainer._scheduler).__name__ == "LinearLR"
+    assert trainer._scheduler.total_iters == 1000 // 128 + 2
+    assert trainer._scheduler.start_factor == pytest.approx(0.5)
+    assert trainer._scheduler.end_factor == pytest.approx(1e-6 / 2e-4)
+
+
 def test_train_steps_the_scheduler(agent: Agent, rollout):
     trainer = PPOTrainer(agent, TrainerSettings())
     trainer.setup_train(RunSettings(total_steps=10_000), RolloutSettings(buffer_size=SIZE))
@@ -958,26 +992,61 @@ def test_optimizer_groups_use_the_configured_learning_rates(agent: Agent):
     trainer = PPOTrainer(agent, TrainerSettings(backbone_lr=1e-3, head_lr=1e-5, weight_decay=1e-2, optimizer_eps=1e-6))
     groups = trainer._optimizer.param_groups
 
-    assert [group["lr"] for group in groups] == [1e-3, 1e-3, 1e-5, 1e-5]
-    assert [group["weight_decay"] for group in groups] == [1e-2, 0.0, 1e-2, 0.0]
+    assert [group["lr"] for group in groups] == [1e-3] * 4 + [1e-5] * 2
+    assert [group["weight_decay"] for group in groups] == [1e-2, 0.0] * 3
     assert trainer._optimizer.defaults["eps"] == 1e-6
-    assert trainer.config()["optimizer_eps"] == 1e-6
+    assert trainer.config()["optimizer.eps"] == 1e-6
+
+
+def test_optimizer_supports_distinct_cnn_and_sequence_encoder_rates(agent: Agent):
+    trainer = PPOTrainer(
+        agent,
+        TrainerSettings(
+            optimizer=OptimizerSettings(
+                backbone_lr=1e-3,
+                cnn_lr=2e-3,
+                sequence_encoder_lr=3e-4,
+                head_lr=1e-5,
+            ),
+        ),
+    )
+
+    assert [group["lr"] for group in trainer._optimizer.param_groups] == [
+        2e-3,
+        2e-3,
+        3e-4,
+        3e-4,
+        1e-5,
+        1e-5,
+    ]
 
 
 def test_fused_optimizer_is_requested_but_cuda_only(agent: Agent):
-    trainer = PPOTrainer(agent, TrainerSettings(fused_optimizer=True))
+    trainer = PPOTrainer(agent, TrainerSettings(optimizer=OptimizerSettings(fused=True)))
     # The fixture agent lives on CPU, so the fused CUDA kernel must not be
     # selected; on a CUDA agent the same flag passes fused=True instead.
     assert trainer._optimizer.defaults.get("fused") in (None, False)
 
 
+def test_setup_train_builds_an_exponential_schedule(agent: Agent):
+    trainer = PPOTrainer(
+        agent,
+        TrainerSettings(scheduler={"name": "exponential", "gamma": 0.95}),
+    )
+
+    trainer.setup_train(RunSettings(total_steps=1000), RolloutSettings(buffer_size=128))
+
+    assert type(trainer._scheduler).__name__ == "ExponentialLR"
+    assert trainer._scheduler.gamma == pytest.approx(0.95)
+
+
 def test_config_reports_the_hyperparameters(trainer: PPOTrainer):
     config = trainer.config()
 
-    assert config["ppo_epsilon"] == trainer.cfg.ppo_epsilon
-    assert config["critic_beta"] == trainer.cfg.critic_beta
-    assert config["entropy_coef_init"] == trainer.cfg.entropy_coef
-    assert config["advantage_normalization_strategy"] == "none"
+    assert config["loss.ppo_epsilon"] == trainer.cfg.loss.ppo_epsilon
+    assert config["loss.critic_beta"] == trainer.cfg.loss.critic_beta
+    assert config["entropy_coef_init"] == trainer.cfg.loss.entropy.coefficient
+    assert config["loss.advantage_normalization_strategy"] == "none"
     assert config["scheduler"] == "none"
     assert config["optimizer"] == "AdamW"
 
@@ -1121,8 +1190,8 @@ def test_repr_mentions_the_hyperparameters(trainer: PPOTrainer):
     text = repr(trainer)
 
     assert "PPOTrainer(" in text
-    assert f"ppo_epsilon={trainer.cfg.ppo_epsilon}" in text
-    assert f"target_kl={trainer.cfg.target_kl}" in text
+    assert f"ppo_epsilon={trainer.cfg.loss.ppo_epsilon}" in text
+    assert f"target_kl={trainer.cfg.kl.target_kl}" in text
     assert "scheduler=None" in text
 
 
