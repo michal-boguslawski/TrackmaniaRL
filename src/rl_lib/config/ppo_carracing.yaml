@@ -122,9 +122,9 @@ trainer:
     hard_stop: true
   optimizer:
     name: Adam
-    backbone_lr: 5.0e-5
-    sequence_encoder_lr: 2.0e-4
-    head_lr: 3.0e-4
+    backbone_lr: 1.0e-5
+    sequence_encoder_lr: 2.0e-5
+    head_lr: 3.0e-5
     # weight_decay: 0.00001
     eps: 1.0e-5
     # beta1: 0.9
