@@ -1,27 +1,25 @@
 """PPO trainer orchestration, optimizer management, and rollout lifecycle."""
 
 from logging import getLogger
-from numpy.typing import NDArray
-from gymnasium import Env
+
 import torch as T
-from torch.profiler import record_function
 from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, ExponentialLR, LinearLR
+from torch.profiler import record_function
 
 from rl_lib.agent import Agent
+from rl_lib.run_config import RolloutSettings, RunSettings
 from rl_lib.tracking.verbosity import Verbosity, as_verbosity, is_core_loss
 from rl_lib.training.callbacks.base import Callback, CallbackList
-from rl_lib.run_config import RolloutSettings, RunSettings
+from rl_lib.training.ppo.losses import PPOLosses
+from rl_lib.training.ppo.metrics import _tensor_metrics_to_scalars
+from rl_lib.training.ppo.update_loop import run_ppo_update_loop
 from rl_lib.training.settings import (
     CosineSchedulerSettings,
     ExponentialSchedulerSettings,
     LinearSchedulerSettings,
     TrainerSettings,
 )
-from rl_lib.training.ppo.losses import PPOLosses
-from rl_lib.training.ppo.metrics import _tensor_metrics_to_scalars
-from rl_lib.training.ppo.update_loop import run_ppo_update_loop
-
 
 logger = getLogger(__name__)
 
@@ -100,7 +98,9 @@ class PPOTrainer:
         optimizer_cfg = self.cfg.optimizer
         optimizer_type = {"Adam": Adam, "AdamW": AdamW}[optimizer_cfg.name]
         cnn_lr = optimizer_cfg.cnn_lr or optimizer_cfg.backbone_lr
-        sequence_encoder_lr = optimizer_cfg.sequence_encoder_lr or optimizer_cfg.backbone_lr
+        sequence_encoder_lr = (
+            optimizer_cfg.sequence_encoder_lr or optimizer_cfg.backbone_lr
+        )
         implementation_kwargs = {}
         if optimizer_cfg.fused and self._agent.device.type == "cuda":
             implementation_kwargs["fused"] = True
@@ -154,14 +154,18 @@ class PPOTrainer:
         """
         scheduler_cfg = self.cfg.scheduler
         if isinstance(scheduler_cfg, CosineSchedulerSettings):
-            total_iters = run.total_steps // rollout.buffer_size + scheduler_cfg.extra_iters
+            total_iters = (
+                run.total_steps // rollout.buffer_size + scheduler_cfg.extra_iters
+            )
             self._scheduler = CosineAnnealingLR(
                 self._optimizer,
                 eta_min=scheduler_cfg.eta_min,
                 T_max=total_iters,
             )
         elif isinstance(scheduler_cfg, LinearSchedulerSettings):
-            total_iters = run.total_steps // rollout.buffer_size + scheduler_cfg.extra_iters
+            total_iters = (
+                run.total_steps // rollout.buffer_size + scheduler_cfg.extra_iters
+            )
             optimizer_cfg = self.cfg.optimizer
             max_lr = max(
                 optimizer_cfg.cnn_lr or optimizer_cfg.backbone_lr,
@@ -194,7 +198,9 @@ class PPOTrainer:
         """Whether the most recent environment step truncated any environment."""
         return self._agent.last_step_had_truncation
 
-    def act(self, observation: T.Tensor, done: T.Tensor) -> tuple[T.Tensor, T.Tensor, T.Tensor]:
+    def act(
+        self, observation: T.Tensor, done: T.Tensor
+    ) -> tuple[T.Tensor, T.Tensor, T.Tensor]:
         """Sample action, log-prob, and value (delegated to agent).
 
         Args:
@@ -224,9 +230,21 @@ class PPOTrainer:
         Returns:
             Dict with clipped norms per group.
         """
-        backbone_max_norm = self.cfg.gradients.backbone_max_grad_norm if backbone_max_norm is None else backbone_max_norm
-        actor_max_norm = self.cfg.gradients.actor_max_grad_norm if actor_max_norm is None else actor_max_norm
-        critic_max_norm = self.cfg.gradients.critic_max_grad_norm if critic_max_norm is None else critic_max_norm
+        backbone_max_norm = (
+            self.cfg.gradients.backbone_max_grad_norm
+            if backbone_max_norm is None
+            else backbone_max_norm
+        )
+        actor_max_norm = (
+            self.cfg.gradients.actor_max_grad_norm
+            if actor_max_norm is None
+            else actor_max_norm
+        )
+        critic_max_norm = (
+            self.cfg.gradients.critic_max_grad_norm
+            if critic_max_norm is None
+            else critic_max_norm
+        )
         norm_tensors = self._agent.clip_grad_norms(
             backbone_max_norm, actor_max_norm, critic_max_norm
         )
@@ -556,13 +574,11 @@ class PPOTrainer:
                 },
             }
         )
-        explained_variance = 1 - (batch["returns"] - batch["critic_value"]).var() / (batch["returns"].var() + self.cfg.stability.explained_variance_epsilon)
+        explained_variance = 1 - (batch["returns"] - batch["critic_value"]).var() / (
+            batch["returns"].var() + self.cfg.stability.explained_variance_epsilon
+        )
         metric_tensors["rollout/explained_variance"] = explained_variance
         return _tensor_metrics_to_scalars(metric_tensors)
-
-    def step_env(self, env: Env, state: NDArray, done: T.Tensor, temperature: float | None = None) -> tuple:
-        """Step environment using agent policy (delegated to agent)."""
-        return self._agent.step_env(env, state, done, temperature)
 
     def bootstrap_value(self, observation: T.Tensor) -> T.Tensor:
         """Bootstrap value for truncated episodes (delegated to agent)."""
@@ -584,10 +600,7 @@ class PPOTrainer:
             training_step: Global environment step count (for callbacks/logging).
         """
 
-        self._on_start(
-            step=training_step,
-            metrics=self._get_metrics_from_batch(batch)
-        )
+        self._on_start(step=training_step, metrics=self._get_metrics_from_batch(batch))
 
         if self.cfg.loss.advantage_normalization_strategy == "global":
             batch["advantages"] = (batch["advantages"] - batch["advantages"].mean()) / (
@@ -660,13 +673,17 @@ class PPOTrainer:
                 config[prefix] = "none" if value is None else value
 
         flatten("", self.cfg.model_dump())
-        config.update({
-            "entropy_coef_init": self.cfg.loss.entropy.coefficient,
-            "entropy_coef_current": self._entropy_coef,
-            "optimizer": self.cfg.optimizer.name,
-            "scheduler_config": self.cfg.scheduler.name,
-            "scheduler": self._scheduler.__class__.__name__ if self._scheduler else "none",
-        })
+        config.update(
+            {
+                "entropy_coef_init": self.cfg.loss.entropy.coefficient,
+                "entropy_coef_current": self._entropy_coef,
+                "optimizer": self.cfg.optimizer.name,
+                "scheduler_config": self.cfg.scheduler.name,
+                "scheduler": self._scheduler.__class__.__name__
+                if self._scheduler
+                else "none",
+            }
+        )
         return config
 
     def network_config(self) -> dict[str, int | float | str]:

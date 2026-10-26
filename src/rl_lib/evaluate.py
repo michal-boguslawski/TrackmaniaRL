@@ -3,7 +3,6 @@
 from rl_lib.evaluation.checkpoint import evaluate_checkpoint
 from rl_lib.evaluation.mlflow_evaluation import (
     MLflowModelRef,
-    _shortest_unique_prefixes,
     discover_mlflow_models,
     evaluate_mlflow,
     select_mlflow_run,

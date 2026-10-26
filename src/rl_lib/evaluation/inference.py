@@ -6,9 +6,9 @@ log_evaluation_results() for logging per-episode and aggregate metrics.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from logging import getLogger
-from collections.abc import Mapping, Sequence
 
 import numpy as np
 import torch as T
@@ -17,7 +17,6 @@ from tqdm import tqdm
 
 from rl_lib.agent import Agent
 from rl_lib.tracking.base import MetricsLogger
-
 
 logger = getLogger(__name__)
 
@@ -30,6 +29,7 @@ class EpisodeResult:
         return_: Episode return (sum of rewards).
         length: Episode length in steps.
     """
+
     return_: float
     length: int
 
@@ -70,7 +70,11 @@ def _episode_stat_from_info(
 
     # Nested stats are unmasked; aggregated final_info requires a mask.
     sources = (
-        (nested_info.get(stats_key) if isinstance(nested_info, Mapping) else None, None, False),
+        (
+            nested_info.get(stats_key) if isinstance(nested_info, Mapping) else None,
+            None,
+            False,
+        ),
         (final_infos, f"_{stats_key}", True),
         (info, f"_{stats_key}", False),
     )
@@ -176,24 +180,15 @@ def run_inference(
 
         with tqdm(total=episodes, desc="Evaluation", unit="episode") as progress:
             while len(results) < episodes:
-                (
-                    next_observation,
-                    _,
-                    _,
-                    _,
-                    _,
-                    reward,
-                    _,
-                    _,
-                    done,
-                    info,
-                ) = agent.step_env(
+                transition, info = agent.step_env(
                     env,
                     observation,
                     done,
                     temperature=temperature,
                 )
-                episode_returns += np.asarray(reward, dtype=np.float64).reshape(env.num_envs)
+                episode_returns += np.asarray(
+                    transition.reward, dtype=np.float64
+                ).reshape(env.num_envs)
                 episode_lengths += 1
                 done_mask = done.detach().cpu().numpy().astype(np.bool_, copy=False)
 
@@ -230,7 +225,7 @@ def run_inference(
                     episode_returns[env_index] = 0.0
                     episode_lengths[env_index] = 0
 
-                observation = next_observation
+                observation = transition.next_obs
 
         return results
     finally:
@@ -266,7 +261,9 @@ def log_evaluation_results(
     if not results:
         raise ValueError("cannot log an empty evaluation")
 
-    prefix = "/".join(part.strip("/") for part in ("evaluation", scope) if part.strip("/"))
+    prefix = "/".join(
+        part.strip("/") for part in ("evaluation", scope) if part.strip("/")
+    )
     for result in results:
         episode_metrics = {
             f"{prefix}/episode_return": result.return_,

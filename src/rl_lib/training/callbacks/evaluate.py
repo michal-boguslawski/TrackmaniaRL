@@ -49,7 +49,7 @@ class EvaluationCallback(Callback):
         self.agent = Agent(agent.network, agent.device, agent.cfg)
         self.cfg = config
         self._loggers = metrics_loggers
-        self.env = make_env(config.environment)
+        self.env = make_env(config.environment, device=self.agent.device)
         self._training_steps: int | None = None
         self._evaluation_index = 0
         self._last_evaluation_step: int | None = None

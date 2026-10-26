@@ -9,70 +9,9 @@ packages on first use, so this module never names them.
 from collections.abc import Callable
 from importlib import import_module
 from pkgutil import iter_modules
-from typing import Any, Protocol, TypeVar
+from typing import Any, TypeVar
 
-from gymnasium import Env
-from numpy.typing import NDArray
-import torch as T
-
-from rl_lib.run_config import RolloutSettings, RunSettings
-
-
-class Trainer(Protocol):
-    """Interface required by the rollout collector and training entrypoint."""
-
-    @property
-    def stack_size(self) -> int:
-        """Temporal observation window size."""
-        ...
-
-    @property
-    def device(self) -> T.device:
-        """Device used for policy and value computations."""
-        ...
-
-    def setup_train(self, run: RunSettings, rollout: RolloutSettings) -> None:
-        """Initialize training schedules from run and rollout settings."""
-        ...
-
-    def act(
-        self, observation: T.Tensor, done: T.Tensor
-    ) -> tuple[T.Tensor, T.Tensor, T.Tensor]:
-        """Choose actions and return their log probabilities and values."""
-        ...
-
-    def step_env(
-        self,
-        env: Env,
-        state: NDArray,
-        done: T.Tensor,
-        temperature: float | None = None,
-    ) -> tuple:
-        """Step the environment using the current policy."""
-        ...
-
-    def bootstrap_value(self, observation: T.Tensor) -> T.Tensor:
-        """Estimate values for truncated transitions."""
-        ...
-
-    def train(
-        self,
-        batch: dict[str, T.Tensor],
-        epochs: int,
-        minibatch_size: int,
-        training_step: int,
-    ) -> None:
-        """Update the policy/value model from a collected batch."""
-        ...
-
-    def config(self) -> dict[str, int | float | str]:
-        """Return trainer settings suitable for experiment logging."""
-        ...
-
-    def network_config(self) -> dict[str, int | float | str]:
-        """Return network settings suitable for experiment logging."""
-        ...
-
+from rl_lib.training.base import Trainer
 
 T_Trainer = TypeVar("T_Trainer", bound=Trainer)
 _TRAINER_REGISTRY: dict[str, Callable[..., Trainer]] = {}
@@ -81,9 +20,7 @@ _NON_ALGORITHM_PACKAGES = frozenset({"callbacks"})
 _algorithms_discovered = False
 
 
-def register_trainer(
-    algorithm: str, trainer_type: Callable[..., T_Trainer]
-) -> None:
+def register_trainer(algorithm: str, trainer_type: Callable[..., T_Trainer]) -> None:
     """Register a trainer constructor for an algorithm name.
 
     Algorithm packages call this from their ``__init__``, so importing the

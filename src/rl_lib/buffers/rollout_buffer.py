@@ -7,7 +7,9 @@ episode) to align with Agent's temporal masking convention.
 """
 
 from dataclasses import dataclass
+
 import torch as T
+
 from rl_lib.run_config import RolloutSettings
 
 
@@ -26,6 +28,7 @@ class RolloutStep:
         truncated_value: Bootstrap value for truncated episodes, shape (num_envs,)
             or None if no truncation occurred.
     """
+
     observation: T.Tensor
     action: T.Tensor
     critic_value: T.Tensor
@@ -232,11 +235,7 @@ class RolloutBuffer:
             + gamma * next_value * T.logical_not(terminated)
             - critic_value[:, :-1]
         )
-        decay = (
-            gamma
-            * gae_lambda
-            * T.logical_not(dones).to(dtype=reward.dtype)
-        )
+        decay = gamma * gae_lambda * T.logical_not(dones).to(dtype=reward.dtype)
         advantages = delta
         offset = 1
         while offset < reward.shape[1]:
@@ -254,7 +253,9 @@ class RolloutBuffer:
         returns = advantages + critic_value[:, :-1]
         return returns, advantages
 
-    def get(self, gamma: float | None = None, gae_lambda: float | None = None) -> dict[str, T.Tensor]:
+    def get(
+        self, gamma: float | None = None, gae_lambda: float | None = None
+    ) -> dict[str, T.Tensor]:
         """Compute returns/advantages and return flattened batch for PPO update.
 
         Returns tensors with batch dimension (num_envs) and a sequence dimension
@@ -282,22 +283,21 @@ class RolloutBuffer:
         if not self._buffer:
             raise ValueError("cannot compute a batch from an empty rollout buffer")
         buffer = {
-            key: self._ordered(key, windowed=key in {"observation", "terminated", "truncated"})
+            key: self._ordered(
+                key, windowed=key in {"observation", "terminated", "truncated"}
+            )
             for key in self._buffer
         }
         returns, advantages = self.compute_returns_and_advantages(
             buffer["reward"][:, :-1],
             buffer["critic_value"],
-            buffer["terminated"][:, (self._stack_size-1):-1],
-            buffer["truncated"][:, (self._stack_size-1):-1],
+            buffer["terminated"][:, (self._stack_size - 1) : -1],
+            buffer["truncated"][:, (self._stack_size - 1) : -1],
             gamma,
             gae_lambda,
             buffer["truncated_value"][:, :-1],
         )
-        episode_ends = T.logical_or(
-            buffer["terminated"],
-            buffer["truncated"]
-        )
+        episode_ends = T.logical_or(buffer["terminated"], buffer["truncated"])
         # `dones` has to answer "is this frame the first of a new episode", the
         # question `Agent._get_mask_window` asks while collecting: a frame is
         # history only if no episode boundary precedes it inside the window. The

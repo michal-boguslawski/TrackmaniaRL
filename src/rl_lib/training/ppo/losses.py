@@ -1,7 +1,7 @@
 """PPO objective terms and their diagnostic metrics."""
 
-from torch import nn
 import torch as T
+from torch import nn
 from torch.distributions import Distribution
 
 from rl_lib.agent import Agent
@@ -192,8 +192,8 @@ class PPOLosses:
             approx_kl_per_action = (ratio_per_action - 1 - log_ratio).mean(dim=0)
             ratio_max = ratio_total.max()
             clip_fraction = (
-                T.abs(ratio_total - 1) > cfg.loss.ppo_epsilon
-            ).float().mean()
+                (T.abs(ratio_total - 1) > cfg.loss.ppo_epsilon).float().mean()
+            )
             metric_tensors.update(
                 {
                     "metrics/ratio_max": ratio_max,
@@ -203,14 +203,18 @@ class PPOLosses:
                     "metrics/mean_abs_max": action_mean.abs().max(),
                     "metrics/tanh_saturation_frac": (
                         action_mean.abs() > cfg.stability.tanh_saturation_threshold
-                    ).float().mean(),
+                    )
+                    .float()
+                    .mean(),
                 }
             )
             mean_abs_max_by_action = action_mean.abs().amax(dim=0)
-            metric_tensors.update({
-                f"metrics/mean_abs_max_{index}": value
-                for index, value in enumerate(mean_abs_max_by_action)
-            })
+            metric_tensors.update(
+                {
+                    f"metrics/mean_abs_max_{index}": value
+                    for index, value in enumerate(mean_abs_max_by_action)
+                }
+            )
             metric_tensors.update(
                 {
                     f"metrics/approx_kl_{index}": value
@@ -258,9 +262,7 @@ class PPOLosses:
         critic_loss = T.maximum(loss_unclipped, loss_clipped).mean()
         return critic_loss, {"loss/critic": critic_loss.detach()}
 
-    def entropy_loss(
-        self, dist: Distribution
-    ) -> tuple[T.Tensor, dict[str, float]]:
+    def entropy_loss(self, dist: Distribution) -> tuple[T.Tensor, dict[str, float]]:
         """Compute the base distribution entropy bonus and diagnostics.
 
         Args:
@@ -273,9 +275,7 @@ class PPOLosses:
         entropy_loss, metric_tensors = self._entropy_loss(dist)
         return entropy_loss, _tensor_metrics_to_scalars(metric_tensors)
 
-    def _entropy_loss(
-        self, dist: Distribution
-    ) -> tuple[T.Tensor, dict[str, T.Tensor]]:
+    def _entropy_loss(self, dist: Distribution) -> tuple[T.Tensor, dict[str, T.Tensor]]:
         """Compute entropy and leave diagnostics on-device."""
         entropy: T.Tensor = dist.base_dist.entropy()
         entropy_loss = entropy.sum(dim=-1).mean()
@@ -350,16 +350,22 @@ class PPOLosses:
                 base_dist.concentration0.max()
             ),
         }
-        metric_tensors.update({
-            f"metrics/alpha_{index}": value
-            for index, value in enumerate(alpha_by_action)
-        })
-        metric_tensors.update({
-            f"metrics/beta_{index}": value
-            for index, value in enumerate(beta_by_action)
-        })
-        metric_tensors.update({
-            f"metrics/beta_mean_{index}": value
-            for index, value in enumerate(base_dist.mean.mean(0))
-        })
+        metric_tensors.update(
+            {
+                f"metrics/alpha_{index}": value
+                for index, value in enumerate(alpha_by_action)
+            }
+        )
+        metric_tensors.update(
+            {
+                f"metrics/beta_{index}": value
+                for index, value in enumerate(beta_by_action)
+            }
+        )
+        metric_tensors.update(
+            {
+                f"metrics/beta_mean_{index}": value
+                for index, value in enumerate(base_dist.mean.mean(0))
+            }
+        )
         return metric_tensors

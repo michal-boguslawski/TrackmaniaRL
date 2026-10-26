@@ -5,6 +5,7 @@ for consistent network construction across modules.
 """
 
 from torch import nn
+
 from rl_lib.networks.config import LinearLayerConfig
 
 
@@ -54,3 +55,39 @@ def make_activation(name: str) -> nn.Module:
         "identity": nn.Identity,
     }
     return activations[name]()
+
+
+def update_state_dict(
+    target: dict[str, nn.Parameter],
+    source: dict[str, nn.Parameter],
+    strict: bool = True,
+) -> None:
+    """Update target state dict with source state dict.
+
+    Args:
+        target: Target state dict to update.
+        source: Source state dict to copy from.
+        strict: If True, raise error if keys mismatch; else ignore missing keys.
+    """
+    for key, source_value in source.items():
+        if key in target:
+            target[key].data.copy_(source_value.data)
+        elif strict:
+            raise KeyError(f"Key {key} not found in target state dict.")
+
+
+def update_weighted_state_dict(
+    target: dict[str, nn.Parameter],
+    source: dict[str, nn.Parameter],
+    alpha: float,
+) -> None:
+    """Weighted update of target state dict with source state dict.
+
+    Args:
+        target: Target state dict to update.
+        source: Source state dict to copy from.
+        alpha: Weighting factor (0.0 = no update, 1.0 = full update).
+    """
+    for key, source_value in source.items():
+        if key in target:
+            target[key].data.mul_(1 - alpha).add_(source_value.data, alpha=alpha)

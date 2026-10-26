@@ -16,19 +16,19 @@ uv run --extra gpu python scripts/benchmarks/representation_probe.py \\
 from __future__ import annotations
 
 import argparse
+import json
 from collections.abc import Sequence
 from contextlib import closing
 from dataclasses import dataclass
-import json
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-from numpy.typing import NDArray
 import torch as T
+import yaml
+from numpy.typing import NDArray
 from torch import nn
 from tqdm import tqdm
-import yaml
 
 from rl_lib.agent import Agent
 from rl_lib.checkpoint_loaders import LocalCheckpointLoader
@@ -217,7 +217,9 @@ def _make_episode_data(
 
 def _flatten_episodes(
     episodes: list[EpisodeData], indices: NDArray[np.int64]
-) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
+) -> tuple[
+    NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]
+]:
     """Concatenate selected episodes into CNN, temporal, value, and target arrays."""
     selected = [episodes[int(index)] for index in indices]
     return (
@@ -262,8 +264,8 @@ def _ridge_probe(
     for alpha in candidates:
         weights = T.linalg.solve(gram + alpha * identity, cross)
         validation_predictions = (
-            x_validation @ weights * y_scale + y_mean
-        ).detach().cpu().numpy()
+            (x_validation @ weights * y_scale + y_mean).detach().cpu().numpy()
+        )
         validation_ev = explained_variance(y_validation_np, validation_predictions)
         if validation_ev > best_validation_ev:
             best_alpha = alpha
@@ -271,7 +273,9 @@ def _ridge_probe(
             best_weights = weights
 
     assert best_weights is not None
-    train_predictions = (x_train @ best_weights * y_scale + y_mean).detach().cpu().numpy()
+    train_predictions = (
+        (x_train @ best_weights * y_scale + y_mean).detach().cpu().numpy()
+    )
     test_predictions = (x_test @ best_weights * y_scale + y_mean).detach().cpu().numpy()
     return {
         "alpha": best_alpha,
@@ -299,7 +303,9 @@ def _mlp_probe(
     x_train = T.as_tensor(train_x, device=device, dtype=T.float32)
     y_train = T.as_tensor(train_y, device=device, dtype=T.float32).unsqueeze(-1)
     x_validation = T.as_tensor(validation_x, device=device, dtype=T.float32)
-    y_validation = T.as_tensor(validation_y, device=device, dtype=T.float32).unsqueeze(-1)
+    y_validation = T.as_tensor(validation_y, device=device, dtype=T.float32).unsqueeze(
+        -1
+    )
     x_test = T.as_tensor(test_x, device=device, dtype=T.float32)
     y_test = T.as_tensor(test_y, device=device, dtype=T.float32).unsqueeze(-1)
 
@@ -360,17 +366,17 @@ def _mlp_probe(
     model.load_state_dict(best_state)
     model.eval()
     with T.no_grad():
-        train_predictions = (model(x_train).squeeze(-1) * y_scale + y_mean).cpu().numpy()
+        train_predictions = (
+            (model(x_train).squeeze(-1) * y_scale + y_mean).cpu().numpy()
+        )
         validation_predictions = (
-            model(x_validation).squeeze(-1) * y_scale + y_mean
-        ).cpu().numpy()
+            (model(x_validation).squeeze(-1) * y_scale + y_mean).cpu().numpy()
+        )
         test_predictions = (model(x_test).squeeze(-1) * y_scale + y_mean).cpu().numpy()
 
     return {
         "best_epoch": best_epoch,
-        "train_explained_variance": explained_variance(
-            train_y, train_predictions
-        ),
+        "train_explained_variance": explained_variance(train_y, train_predictions),
         "validation_explained_variance": explained_variance(
             validation_y, validation_predictions
         ),
@@ -391,7 +397,9 @@ def _collect_episodes(
     captured: dict[str, T.Tensor] = {}
 
     def capture(name: str):
-        def hook(_module: nn.Module, _inputs: tuple[T.Tensor, ...], output: T.Tensor) -> None:
+        def hook(
+            _module: nn.Module, _inputs: tuple[T.Tensor, ...], output: T.Tensor
+        ) -> None:
             captured[name] = output
 
         return hook
@@ -436,16 +444,23 @@ def _collect_episodes(
             )
 
             if "cnn" not in captured or "temporal" not in captured:
-                raise RuntimeError("feature hooks did not observe the policy forward pass")
+                raise RuntimeError(
+                    "feature hooks did not observe the policy forward pass"
+                )
             # One compact transfer keeps collection from synchronizing once per feature.
-            feature_payload = T.cat(
-                (
-                    captured["cnn"].detach(),
-                    captured["temporal"].detach(),
-                    values.detach().unsqueeze(-1),
-                ),
-                dim=-1,
-            ).float().cpu().numpy()
+            feature_payload = (
+                T.cat(
+                    (
+                        captured["cnn"].detach(),
+                        captured["temporal"].detach(),
+                        values.detach().unsqueeze(-1),
+                    ),
+                    dim=-1,
+                )
+                .float()
+                .cpu()
+                .numpy()
+            )
             cnn_dim = captured["cnn"].shape[-1]
             temporal_dim = captured["temporal"].shape[-1]
             values_np = feature_payload[:, cnn_dim + temporal_dim]
@@ -455,15 +470,20 @@ def _collect_episodes(
             truncation_indices = np.flatnonzero(truncated_np)
             bootstrap_values.fill(0.0)
             if truncation_indices.size:
-                final_observations = info.get("final_obs", info.get("final_observation"))
+                final_observations = info.get(
+                    "final_obs", info.get("final_observation")
+                )
                 if final_observations is None:
                     raise RuntimeError(
                         "truncated episode did not provide final observations for bootstrap"
                     )
                 final_mask = info.get("_final_obs", info.get("_final_observation"))
-                if final_mask is not None and not np.asarray(final_mask, dtype=np.bool_)[
-                    truncation_indices
-                ].all():
+                if (
+                    final_mask is not None
+                    and not np.asarray(final_mask, dtype=np.bool_)[
+                        truncation_indices
+                    ].all()
+                ):
                     raise RuntimeError(
                         "vector environment omitted a final observation for a truncated episode"
                     )
@@ -477,9 +497,9 @@ def _collect_episodes(
                 bootstrap_tensor = T.from_numpy(bootstrap_observations).to(agent.device)
                 with T.no_grad():
                     truncation_values = agent.bootstrap_value(bootstrap_tensor)
-                bootstrap_values[truncation_indices] = truncation_values[
-                    truncation_indices
-                ].detach().cpu().numpy()
+                bootstrap_values[truncation_indices] = (
+                    truncation_values[truncation_indices].detach().cpu().numpy()
+                )
 
             for env_index in range(num_envs):
                 pending_cnn[env_index].append(
@@ -586,7 +606,7 @@ def run_probe(
     T.manual_seed(collection_seed)
     np.random.seed(collection_seed)
 
-    with closing(make_env(environment_config)) as environment:
+    with closing(make_env(environment_config, device=device)) as environment:
         network = Network(
             observation_dim=environment.observation_space.shape[-1],
             action_dim=environment.action_space.shape[-1],
@@ -720,8 +740,12 @@ def run_probe(
 def _parse_args() -> argparse.Namespace:
     """Parse the command-line arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", required=True, help="Saved training run_config.yaml")
-    parser.add_argument("--checkpoint", required=True, help="Saved network state-dict checkpoint")
+    parser.add_argument(
+        "--config", required=True, help="Saved training run_config.yaml"
+    )
+    parser.add_argument(
+        "--checkpoint", required=True, help="Saved network state-dict checkpoint"
+    )
     parser.add_argument("--episodes", type=int, default=200)
     parser.add_argument("--num-envs", type=int)
     parser.add_argument("--seed", type=int)

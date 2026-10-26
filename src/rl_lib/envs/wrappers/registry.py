@@ -5,18 +5,18 @@ create Gymnasium wrappers with config from WrapperSettings.
 """
 
 from gymnasium.wrappers import (
-    GrayscaleObservation,
     FrameStackObservation,
+    GrayscaleObservation,
+    MaxAndSkipObservation,
     RecordEpisodeStatistics,
     RecordVideo,
-    MaxAndSkipObservation,
 )
 
-from rl_lib.envs.wrappers.reward_wrappers import RewardOnEpisodeEndWrapper
 from rl_lib.envs.wrappers.off_track_penalty_wrapper import OffTrackPenaltyWrapper
+from rl_lib.envs.wrappers.reward_wrappers import RewardOnEpisodeEndWrapper
 from rl_lib.envs.wrappers.settings import (
-    GrayscaleWrapperSettings,
     FrameStackWrapperSettings,
+    GrayscaleWrapperSettings,
     RecordEpisodeStatisticsWrapperSettings,
     RecordVideoWrapperSettings,
     RewardOnDoneWrapperSettings,
@@ -33,16 +33,30 @@ def _grayscale(env, keep_dim: bool | None = None, **kwargs):
 
 def _frame_stack(env, stack_size: int, frame_padding_type: str | None = None, **kwargs):
     """FrameStackObservation wrapper with its configured default."""
-    frame_padding_type = FrameStackWrapperSettings(stack_size=stack_size).frame_padding_type if frame_padding_type is None else frame_padding_type
-    return FrameStackObservation(env, stack_size=stack_size, padding_type=frame_padding_type)
+    frame_padding_type = (
+        FrameStackWrapperSettings(stack_size=stack_size).frame_padding_type
+        if frame_padding_type is None
+        else frame_padding_type
+    )
+    return FrameStackObservation(
+        env, stack_size=stack_size, padding_type=frame_padding_type
+    )
 
 
-def _record_episode_stats(env, stats_buffer_length: int | None = None, stats_key: str | None = None, **kwargs):
+def _record_episode_stats(
+    env, stats_buffer_length: int | None = None, stats_key: str | None = None, **kwargs
+):
     """RecordEpisodeStatistics wrapper with its configured defaults."""
     defaults = RecordEpisodeStatisticsWrapperSettings()
-    stats_buffer_length = defaults.stats_buffer_length if stats_buffer_length is None else stats_buffer_length
+    stats_buffer_length = (
+        defaults.stats_buffer_length
+        if stats_buffer_length is None
+        else stats_buffer_length
+    )
     stats_key = defaults.stats_key if stats_key is None else stats_key
-    return RecordEpisodeStatistics(env, buffer_length=stats_buffer_length, stats_key=stats_key)
+    return RecordEpisodeStatistics(
+        env, buffer_length=stats_buffer_length, stats_key=stats_key
+    )
 
 
 def _record_video(
@@ -58,16 +72,28 @@ def _record_video(
 ):
     """RecordVideo wrapper with its configured defaults."""
     defaults = RecordVideoWrapperSettings(video_folder=video_folder)
-    episode_trigger = defaults.episode_trigger if episode_trigger is None else episode_trigger
-    episode_interval = defaults.episode_interval if episode_interval is None else episode_interval
+    episode_trigger = (
+        defaults.episode_trigger if episode_trigger is None else episode_trigger
+    )
+    episode_interval = (
+        defaults.episode_interval if episode_interval is None else episode_interval
+    )
     video_length = defaults.video_length if video_length is None else video_length
-    video_name_prefix = defaults.video_name_prefix if video_name_prefix is None else video_name_prefix
+    video_name_prefix = (
+        defaults.video_name_prefix if video_name_prefix is None else video_name_prefix
+    )
     video_fps = defaults.video_fps if video_fps is None else video_fps
-    video_disable_logger = defaults.video_disable_logger if video_disable_logger is None else video_disable_logger
+    video_disable_logger = (
+        defaults.video_disable_logger
+        if video_disable_logger is None
+        else video_disable_logger
+    )
     return RecordVideo(
         env,
         video_folder=video_folder,
-        episode_trigger=lambda episode: episode_trigger == "all" or episode % episode_interval == 0,
+        episode_trigger=lambda episode: (
+            episode_trigger == "all" or episode % episode_interval == 0
+        ),
         video_length=video_length,
         name_prefix=video_name_prefix,
         fps=video_fps,

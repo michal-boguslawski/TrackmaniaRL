@@ -15,11 +15,11 @@ Orchestrates the full PPO training run:
 from __future__ import annotations
 
 import argparse
-from contextlib import ExitStack, closing, nullcontext
 import gc
 import logging
 import random
 import signal
+from contextlib import ExitStack, closing, nullcontext
 from importlib import resources
 from pathlib import Path
 
@@ -76,14 +76,20 @@ def run_training(
         profiling_config: Optional settings for a bounded PyTorch profiler trace.
     """
     level = getattr(logging, config.run.log_level)
-    session_id = setup_logging(config.run.log_config, default_level=level) if config.run.log_config else setup_logging(default_level=level)
+    session_id = (
+        setup_logging(config.run.log_config, default_level=level)
+        if config.run.log_config
+        else setup_logging(default_level=level)
+    )
     logger = logging.getLogger(__name__)
     device = resolve_device(config)
     config = config.with_runtime(
         session_id=session_id,
         config_path=str(config_path) if config_path is not None else None,
         device=str(device),
-        mlflow_experiment_name=config.experiment_name if config.tracking.mlflow else None,
+        mlflow_experiment_name=config.experiment_name
+        if config.tracking.mlflow
+        else None,
         mlflow_run_name=config.run_name if config.tracking.mlflow else None,
     )
     _seed_everything(config.run.seed)
@@ -112,8 +118,10 @@ def run_training(
             if config.tracking.mlflow
             else nullcontext(None)
         )
-        local_artifact_logger = LocalArtifactLogger(
-            Path("logs") / "artifacts" / session_id
+        local_artifact_logger = stack.enter_context(
+            LocalArtifactLogger(Path("logs") / "artifacts" / session_id)
+            if config.tracking.local_artifacts
+            else nullcontext(None),
         )
         metrics_loggers = filter_loggers(
             [
@@ -123,7 +131,7 @@ def run_training(
             ],
             verbosity,
         )
-        env = stack.enter_context(closing(make_env(config.environment)))
+        env = stack.enter_context(closing(make_env(config.environment, device=device)))
         config = config.with_runtime(
             observation_shape=list(env.observation_space.shape),
             action_shape=list(env.action_space.shape),
@@ -185,13 +193,18 @@ def run_training(
         collector = RolloutCollector(
             env,
             buffer,
+            agent,
             trainer,
             config.rollout,
             callbacks=callback_groups.collector,
             seed=config.run.seed,
             run_config=run_config_dump,
         )
-        logger.info("Starting training with device=%s config=%s", device, config_path or "<object>")
+        logger.info(
+            "Starting training with device=%s config=%s",
+            device,
+            config_path or "<object>",
+        )
         try:
             if profiling_config is None or not profiling_config.enabled:
                 collector.run(config.run.total_steps)
@@ -246,7 +259,9 @@ def main(
     profiling_path = profiling_config_path or default_profiling_config
     profiling_settings = load_profiling_config(profiling_path)
     profiling_enabled = profiling_settings.enabled if profile is None else profile
-    profiling_settings = profiling_settings.model_copy(update={"enabled": profiling_enabled})
+    profiling_settings = profiling_settings.model_copy(
+        update={"enabled": profiling_enabled}
+    )
     try:
         run_training(
             config,
@@ -258,9 +273,16 @@ def main(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train the PPO agent using a YAML configuration")
-    parser.add_argument("--config", default="configs/ppo_carracing.yaml", help="YAML run configuration")
-    parser.add_argument("--profiling-config", help="Separate YAML configuration for optional PyTorch profiling")
+    parser = argparse.ArgumentParser(
+        description="Train the PPO agent using a YAML configuration"
+    )
+    parser.add_argument(
+        "--config", default="configs/ppo_carracing.yaml", help="YAML run configuration"
+    )
+    parser.add_argument(
+        "--profiling-config",
+        help="Separate YAML configuration for optional PyTorch profiling",
+    )
     parser.add_argument("--profile", dest="profile", action="store_true", default=None)
     parser.add_argument("--no-profile", dest="profile", action="store_false")
     args = parser.parse_args()

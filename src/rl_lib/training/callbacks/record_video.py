@@ -8,13 +8,12 @@ from logging import getLogger
 
 from rl_lib.agent import Agent
 from rl_lib.envs.make_env import make_env
-from rl_lib.training.callbacks.base import Callback
 from rl_lib.evaluation.inference import log_evaluation_results, run_inference
+from rl_lib.run_config import VideoCallbackSettings
 from rl_lib.tracking.artifacts import step_artifact_path
 from rl_lib.tracking.base import MetricsLogger
+from rl_lib.training.callbacks.base import Callback
 from rl_lib.training.callbacks.utils import stop_video_recording
-from rl_lib.run_config import VideoCallbackSettings
-
 
 logger = getLogger(__name__)
 
@@ -59,7 +58,7 @@ class RecordVideoCallback(Callback):
         video_environment = config.environment.model_copy(
             update={"autoreset_mode": "next_step"}
         )
-        self.env = make_env(video_environment)
+        self.env = make_env(video_environment, device=agent.device)
         self._step = 0
         self._last_step = 0
 
@@ -84,7 +83,10 @@ class RecordVideoCallback(Callback):
 
         if video_path:
             artifact_path = step_artifact_path("videos", self._step)
-            [lgr.log_artifact(video_path, artifact_path=artifact_path) for lgr in self._loggers]
+            [
+                lgr.log_artifact(video_path, artifact_path=artifact_path)
+                for lgr in self._loggers
+            ]
 
         self._step += 1
 

@@ -7,21 +7,22 @@ and action sampling from the Beta-distribution actor.
 """
 
 from collections import deque
-import numpy as np
-from numpy.typing import NDArray
 from logging import getLogger
-from gymnasium import Env
+from typing import Any
+
+import numpy as np
 import torch as T
+from gymnasium import Env
+from numpy.typing import NDArray
 from torch import nn
 from torch.distributions import Distribution
-from torch.profiler import record_function
 from torch.nn.parameter import Parameter
-from typing import Iterator
+from torch.profiler import record_function
 
 from rl_lib.checkpoint_loaders import LocalCheckpointLoader
 from rl_lib.networks.factory import Network
 from rl_lib.run_config import AgentSettings
-
+from rl_lib.training.transitions import Transition
 
 logger = getLogger(__name__)
 
@@ -94,7 +95,6 @@ class Agent:
         """Whether the most recent environment step truncated any environment."""
         return self._last_step_had_truncation
 
-
     def _preprocess_observation(self, observation: T.Tensor) -> T.Tensor:
         """Convert raw NHWC uint8 observation to normalized NCHW float32.
 
@@ -161,7 +161,9 @@ class Agent:
         self._done_window.append(done)
         stacked_done_window = T.stack(list(self._done_window), dim=1)
         # True where a done has occurred at or before this position in the window
-        mask = stacked_done_window.logical_not() & (stacked_done_window.flip(1).cumsum(dim=1).flip(1) > 0)
+        mask = stacked_done_window.logical_not() & (
+            stacked_done_window.flip(1).cumsum(dim=1).flip(1) > 0
+        )
         return mask
 
     def temporal_encode(self, x: T.Tensor, mask: T.Tensor | None = None) -> T.Tensor:
@@ -180,10 +182,12 @@ class Agent:
             masked_x = x
         else:
             assert mask.shape == x.shape[:2], f"mask: {mask.shape}, x: {x.shape}"
-            masked_x = x.masked_fill(mask.unsqueeze(-1), 0.)
+            masked_x = x.masked_fill(mask.unsqueeze(-1), 0.0)
         return self._network.temporal_encode(masked_x).squeeze(1)
 
-    def heads(self, temporal: T.Tensor, temperature: float | None = None) -> tuple[Distribution, T.Tensor]:
+    def heads(
+        self, temporal: T.Tensor, temperature: float | None = None
+    ) -> tuple[Distribution, T.Tensor, T.Tensor, T.Tensor]:
         """Compute action distribution and value from temporal encoding.
 
         Args:
@@ -194,17 +198,24 @@ class Agent:
         Returns:
             Tuple of (action_distribution, action_mean, value).
         """
-        temperature = self.cfg.action_temperature if temperature is None else temperature
-        return self._network.heads(temporal, temperature)
+        temperature = (
+            self.cfg.action_temperature if temperature is None else temperature
+        )
+
+        action_dist, action, value = self._network.heads(temporal, temperature)
+
+        if temperature != 0.0:
+            action = action_dist.sample()
+
+        log_probs = action_dist.log_prob(action)
+        return action_dist, action, value, log_probs
 
     def act(
         self,
         observation: T.Tensor,
         done: T.Tensor,
         temperature: float | None = None,
-        *,
-        check_finite: bool = True,
-    ) -> tuple[T.Tensor, T.Tensor, T.Tensor]:
+    ) -> tuple[T.Tensor, dict[str, T.Tensor]]:
         """Sample action, log-prob, and value for a batch of observations.
 
         Args:
@@ -212,8 +223,6 @@ class Agent:
             done: Boolean tensor of shape (batch,) indicating episode termination.
             temperature: Sampling temperature. Defaults to config.action_temperature.
                 Use 0.0 for deterministic (mean) action.
-            check_finite: Validate log-probabilities immediately. Collection
-                disables this check and batches it with the action host copy.
 
         Returns:
             Tuple of:
@@ -222,7 +231,9 @@ class Agent:
             - value: Tensor of shape (batch,) state value estimate.
         """
         with T.no_grad():
-            temperature = self.cfg.action_temperature if temperature is None else temperature
+            temperature = (
+                self.cfg.action_temperature if temperature is None else temperature
+            )
             features = self.feature_extract(observation)
 
             temporal = self.temporal_encode(
@@ -230,27 +241,13 @@ class Agent:
                 self._get_mask_window(done),
             )
 
-            action_dist, action, value = self.heads(temporal, temperature)
-            
-            if temperature != 0.:
-                action = action_dist.sample()
+            _, action, value, log_probs = self.heads(temporal, temperature)
 
-            log_probs = action_dist.log_prob(action)
-
-            if check_finite and not T.isfinite(log_probs).all():
-                logger.error(
-                    "log_probs are not finite: action=%s, alpha=%s, beta=%s",
-                    action,
-                    action_dist.base_dist.concentration1,
-                    action_dist.base_dist.concentration0,
-                )
-                raise ValueError("log_probs are not finite")
-
-        return (
-            action,
-            log_probs,
-            value
-        )
+        extras = {
+            "log_probs": log_probs,
+            "value": value,
+        }
+        return (action, extras)
 
     def bootstrap_value(self, observation: T.Tensor) -> T.Tensor:
         """Evaluate value of a successor observation without mutating history.
@@ -269,11 +266,17 @@ class Agent:
         with T.no_grad():
             features = self.feature_extract(observation)
             history_size = self._stack_size - 1
-            prior_features = list(self._obs_window)[-history_size:] if history_size else []
+            prior_features = (
+                list(self._obs_window)[-history_size:] if history_size else []
+            )
             windowed_features = T.stack([*prior_features, features], dim=1)
 
-            prior_dones = list(self._done_window)[-history_size:] if history_size else []
-            final_done = T.zeros(features.shape[0], dtype=T.bool, device=features.device)
+            prior_dones = (
+                list(self._done_window)[-history_size:] if history_size else []
+            )
+            final_done = T.zeros(
+                features.shape[0], dtype=T.bool, device=features.device
+            )
             windowed_dones = T.stack([*prior_dones, final_done], dim=1)
             mask = windowed_dones.logical_not() & (
                 windowed_dones.flip(1).cumsum(dim=1).flip(1) > 0
@@ -283,10 +286,7 @@ class Agent:
             return self._network.critic(temporal)
 
     def evaluate_actions(
-        self,
-        observation: T.Tensor,
-        action: T.Tensor,
-        dones: T.Tensor | None = None
+        self, observation: T.Tensor, action: T.Tensor, dones: T.Tensor | None = None
     ) -> tuple[T.Tensor, T.Tensor, T.Tensor, Distribution]:
         """Evaluate log-probs, values, and distribution for given observations/actions.
 
@@ -306,15 +306,18 @@ class Agent:
             - action_mean: (batch * seq, action_dim)
         """
         extracted_features = self.feature_extract(observation)
-        windowed_features = extracted_features.unfold(0, self._stack_size, self._stack_size).permute(0, 2, 1)
-        
+        windowed_features = extracted_features.unfold(
+            0, self._stack_size, self._stack_size
+        ).permute(0, 2, 1)
+
         windowed_dones = dones.unfold(0, self._stack_size, self._stack_size)
-        mask = windowed_dones.logical_not() & (windowed_dones.flip(1).cumsum(1).flip(1) > 0)
+        mask = windowed_dones.logical_not() & (
+            windowed_dones.flip(1).cumsum(1).flip(1) > 0
+        )
 
         temporal_encoding = self.temporal_encode(windowed_features, mask)
-        action_dist, action_mean, values = self.heads(temporal_encoding)
+        action_dist, action_mean, values, log_probs = self.heads(temporal_encoding)
 
-        log_probs = action_dist.log_prob(action)
         return log_probs, values, action_dist, action_mean
 
     def action_transform(self, action: T.Tensor) -> T.Tensor:
@@ -363,14 +366,20 @@ class Agent:
             decay: list[Parameter] = []
             no_decay: list[Parameter] = []
             for name, p in module.named_parameters():
-                (no_decay if "bias" in name or "norm" in name.lower() else decay).append(p)
+                (
+                    no_decay if "bias" in name or "norm" in name.lower() else decay
+                ).append(p)
             component_groups[f"{component}_decay"] = decay
             component_groups[f"{component}_no_decay"] = no_decay
 
         head_decay, head_no_decay = [], []
         for module in [self._network.actor, self._network.critic]:
             for name, p in module.named_parameters():
-                (head_no_decay if "bias" in name or "_log_std" in name else head_decay).append(p)
+                (
+                    head_no_decay
+                    if "bias" in name or "_log_std" in name
+                    else head_decay
+                ).append(p)
 
         return {
             **component_groups,
@@ -421,7 +430,9 @@ class Agent:
         }
 
         backbone_scale = self._clip_gradient_group(
-            gradients["backbone"], group_norms["grad_norm/backbone_total"], backbone_max_norm
+            gradients["backbone"],
+            group_norms["grad_norm/backbone_total"],
+            backbone_max_norm,
         )
         self._clip_gradient_group(
             gradients["actor"], group_norms["grad_norm/actor_total"], actor_max_norm
@@ -458,7 +469,9 @@ class Agent:
             "critic": list(self._network.critic.parameters()),
         }
         gradients: dict[str, list[T.Tensor]] = {
-            name: [parameter.grad for parameter in parameters if parameter.grad is not None]
+            name: [
+                parameter.grad for parameter in parameters if parameter.grad is not None
+            ]
             for name, parameters in modules.items()
         }
         active_parameters = [
@@ -486,7 +499,9 @@ class Agent:
                 f"grad_norm/{name}": self._combine_norms(module_norms[name], zero)
                 for name in modules
             }
-            norms["grad_norm/max"] = self._combine_norms(list(per_parameter_norms), zero)
+            norms["grad_norm/max"] = self._combine_norms(
+                list(per_parameter_norms), zero
+            )
             for layer_name, parameters in self._cnn_layer_parameter_groups().items():
                 layer_norms = [
                     parameter_norms[id(parameter)]
@@ -560,7 +575,7 @@ class Agent:
         state: NDArray,
         done: T.Tensor,
         temperature: float | None = None,
-    ) -> tuple:
+    ) -> tuple[Transition, dict[str, Any]]:
         """Step the environment using this agent's policy.
 
         Handles numpy<->tensor conversion and combines terminated/truncated
@@ -573,40 +588,33 @@ class Agent:
             temperature: Sampling temperature. Defaults to config.action_temperature.
 
         Returns:
-            Tuple of (next_state, state_t, action, log_probs, value, reward,
-            terminated, truncated, done, info).
+            # TODO
         """
-        with record_function("transfer/observation_to_device"):
-            state_t = T.from_numpy(state).to(self._device)
-        temperature = self.cfg.action_temperature if temperature is None else temperature
+        temperature = (
+            self.cfg.action_temperature if temperature is None else temperature
+        )
         with record_function("agent/policy"):
-            action, log_probs, value = self.act(
-                state_t, done, temperature, check_finite=False
-            )
+            action, extras = self.act(state, done, temperature)
 
-        with record_function("transfer/action_to_host"):
-            finite = T.isfinite(log_probs).all().to(dtype=action.dtype)
-            action_size = action.numel()
-            action_payload = T.cat((action.reshape(-1), finite.reshape(1)))
-            payload_np = action_payload.cpu().numpy()
-            action_np = payload_np[:action_size].reshape(action.shape)
-        if not payload_np[-1]:
-            logger.error(
-                "log_probs are not finite: action=%s, log_probs=%s",
-                action,
-                log_probs,
-            )
-            raise ValueError("log_probs are not finite")
         with record_function("environment/step"):
-            next_state, reward, terminated, truncated, info = env.step(action_np)
+            next_state, reward, terminated, truncated, info = env.step(action)
 
-        self._last_step_had_truncation = bool(np.any(truncated))
-        with record_function("transfer/flags_to_device"):
-            terminated_t = T.from_numpy(terminated).to(self._device)
-            truncated_t = T.from_numpy(truncated).to(self._device)
-        done_t = T.logical_or(terminated_t, truncated_t)
+        self._last_step_had_truncation = bool(T.any(truncated))
 
-        return next_state, state_t, action, log_probs, value, reward, terminated_t, truncated_t, done_t, info
+        transition = Transition(
+            obs=state,
+            action=action,
+            reward=reward.to(T.float32),
+            terminated=terminated,
+            truncated=truncated,
+            next_obs=next_state,
+            extras=extras,
+        )
+
+        return (
+            transition,
+            info,
+        )
 
     def network_config(self) -> dict[str, int | float | str]:
         """Flat, MLflow-loggable network hyperparameters."""

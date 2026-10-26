@@ -6,8 +6,8 @@ against the training configuration.
 
 from __future__ import annotations
 
-from contextlib import closing
 import logging
+from contextlib import closing
 from pathlib import Path
 
 from rl_lib.agent import Agent
@@ -15,13 +15,12 @@ from rl_lib.checkpoint_loaders import LocalCheckpointLoader, MLflowCheckpointLoa
 from rl_lib.device import resolve_device
 from rl_lib.envs.make_env import make_env
 from rl_lib.evaluation.inference import log_evaluation_results, run_inference
+from rl_lib.evaluation.runtime import _default_metrics_loggers, _episode_stats_key
 from rl_lib.networks.factory import Network
 from rl_lib.networks.mixed_precision import resolve_cnn_autocast_dtype
 from rl_lib.run_config import RunConfig, load_config
 from rl_lib.tracking.base import MetricsLogger
 from rl_lib.tracking.verbosity import filter_loggers
-from rl_lib.evaluation.runtime import _episode_stats_key, _default_metrics_loggers
-
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +29,13 @@ def _evaluation_environment(config: RunConfig, num_envs: int, record_video: bool
     """Build evaluation environment from config with optional video recording."""
     environment = config.evaluation_environment(num_envs)
     if record_video:
-        environment = environment.model_copy(update={
-            "record_video": True,
-            "video_folder": str(Path(config.video_folder) / "evaluation"),
-            "vectorization_mode": "sync",
-        })
+        environment = environment.model_copy(
+            update={
+                "record_video": True,
+                "video_folder": str(Path(config.video_folder) / "evaluation"),
+                "vectorization_mode": "sync",
+            }
+        )
     return environment
 
 
@@ -110,7 +111,7 @@ def _evaluate_configured_policy(
     env_config = _evaluation_environment(config, num_envs, record_video)
     metrics_loggers = filter_loggers(metrics_loggers, config.tracking.verbosity)
 
-    with closing(make_env(env_config)) as env:
+    with closing(make_env(env_config, device=device)) as env:
         network = Network(
             observation_dim=env.observation_space.shape[-1],
             action_dim=env.action_space.shape[-1],

@@ -6,15 +6,22 @@ and value estimates, with shape validation via describe_shapes().
 """
 
 import json
+
 import torch as T
 from torch import nn
 from torch.distributions import Distribution
 
 from rl_lib.networks.actor import Actor
-from rl_lib.networks.critic import Critic
 from rl_lib.networks.cnn import CNN
+from rl_lib.networks.config import (
+    NetworkConfig,
+    SACActorConfig,
+    SACNetworkConfig,
+    SACTwinCriticConfig,
+)
+from rl_lib.networks.critic import Critic
 from rl_lib.networks.temporal import TemporalCNN1D
-from rl_lib.networks.config import NetworkConfig
+from rl_lib.networks.utils import update_state_dict
 
 
 class Network(nn.Module):
@@ -74,7 +81,9 @@ class Network(nn.Module):
         if action_low is not None or action_high is not None:
             if action_low is None or action_high is None:
                 raise ValueError("action_low and action_high must be provided together")
-            actor_config = actor_config.model_copy(update={"action_low": action_low, "action_high": action_high})
+            actor_config = actor_config.model_copy(
+                update={"action_low": action_low, "action_high": action_high}
+            )
         self.actor = Actor(
             action_dim, in_dim=self.sequence_encoder.out_dim, config=actor_config
         )
@@ -109,7 +118,9 @@ class Network(nn.Module):
         """
         return self.sequence_encoder(x)
 
-    def heads(self, x: T.Tensor, temperature: float) -> tuple[Distribution, T.Tensor, T.Tensor]:
+    def heads(
+        self, x: T.Tensor, temperature: float
+    ) -> tuple[Distribution, T.Tensor, T.Tensor]:
         """Compute action distribution, mean action, and value from temporal encoding.
 
         Args:
@@ -122,7 +133,7 @@ class Network(nn.Module):
             - action_mean: Tensor of shape (batch, action_dim)
             - value: Tensor of shape (batch,)
         """
-        if temperature == 0.:
+        if temperature == 0.0:
             action_dist, action_mean = self.actor.forward_deterministic(x)
         else:
             action_dist, action_mean = self.actor(x, temperature)
@@ -157,22 +168,29 @@ class Network(nn.Module):
     def __repr__(self) -> str:
         n_params = sum(p.numel() for p in self.parameters())
         submodules = "\n".join(
-            f"  ({name}): {module!r}"
-            for name, module in self._submodules()
+            f"  ({name}): {module!r}" for name, module in self._submodules()
         )
-        return f"{self.__class__.__name__}(\n{submodules}\n  total_params={n_params:,}\n)"
+        return (
+            f"{self.__class__.__name__}(\n{submodules}\n  total_params={n_params:,}\n)"
+        )
 
     def config(self) -> dict[str, int | float | str]:
         """Flat, MLflow-loggable hyperparameters. Structural (env-derived) dims
         and param counts are reported separately from the pydantic config.
         """
         merged = {
-            f"{prefix}.{k}": (v if isinstance(v, (int, float, str, bool)) or v is None else json.dumps(v, sort_keys=True))
+            f"{prefix}.{k}": (
+                v
+                if isinstance(v, (int, float, str, bool)) or v is None
+                else json.dumps(v, sort_keys=True)
+            )
             for prefix, sub in self.cfg.model_dump().items()
             for k, v in sub.items()
         }
         merged["total_params"] = sum(p.numel() for p in self.parameters())
-        merged["total_trainable_params"] = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        merged["total_trainable_params"] = sum(
+            p.numel() for p in self.parameters() if p.requires_grad
+        )
         return merged
 
     def describe_shapes(self) -> str:
@@ -181,18 +199,23 @@ class Network(nn.Module):
         one module's output dim without updating the next module's input).
         """
         lines = [
-            f"observation_dim={self.cnn.observation_dim}"
-            f"  --[CNN]-->  cnn.out_dim={self.cnn.cfg.out_dim}",
-
-            f"cnn.out_dim={self.cnn.cfg.out_dim}"
-            f"  --[TemporalCNN1D, stack_size={self.sequence_encoder.stack_size}]-->  "
-            f"sequence_encoder.out_dim={self.sequence_encoder.cfg.out_dim}",
-
-            f"sequence_encoder.out_dim={self.sequence_encoder.cfg.out_dim}"
-            f"  --[Actor]-->  action_dim={self.actor.action_dim}",
-
-            f"sequence_encoder.out_dim={self.sequence_encoder.cfg.out_dim}"
-            f"  --[Critic]-->  value_dim=1",
+            (
+                f"observation_dim={self.cnn.observation_dim}"
+                f"  --[CNN]-->  cnn.out_dim={self.cnn.cfg.out_dim}"
+            ),
+            (
+                f"cnn.out_dim={self.cnn.cfg.out_dim}"
+                f"  --[TemporalCNN1D, stack_size={self.sequence_encoder.stack_size}]-->  "
+                f"sequence_encoder.out_dim={self.sequence_encoder.cfg.out_dim}"
+            ),
+            (
+                f"sequence_encoder.out_dim={self.sequence_encoder.cfg.out_dim}"
+                f"  --[Actor]-->  action_dim={self.actor.action_dim}"
+            ),
+            (
+                f"sequence_encoder.out_dim={self.sequence_encoder.cfg.out_dim}"
+                f"  --[Critic]-->  value_dim=1"
+            ),
         ]
 
         # Flag actual mismatches rather than just describing the happy path
@@ -215,5 +238,351 @@ class Network(nn.Module):
 
         report = "\n".join(lines)
         if mismatches:
-            report += "\n\n⚠ SHAPE MISMATCHES DETECTED:\n" + "\n".join(f"  - {m}" for m in mismatches)
+            report += "\n\n⚠ SHAPE MISMATCHES DETECTED:\n" + "\n".join(
+                f"  - {m}" for m in mismatches
+            )
         return report
+
+
+class SACActor(nn.Module):
+    def __init__(
+        self,
+        observation_dim: int,
+        action_dim: int,
+        stack_size: int,
+        config: SACActorConfig,
+        action_low: list[float] | None = None,
+        action_high: list[float] | None = None,
+        cnn_autocast_dtype: T.dtype | None = None,
+    ):
+        """Initialize the composed network.
+
+        Args:
+            observation_dim: Number of input channels (e.g., 1 for grayscale).
+            action_dim: Dimensionality of action space.
+            stack_size: Number of frames in temporal sequence.
+            config: SACActorConfig containing CNN, temporal, actor.
+            action_low: Optional override for actor action_low.
+            action_high: Optional override for actor action_high.
+            cnn_autocast_dtype: Optional autocast dtype used only by the CNN
+                feature extractor. CNN features are converted back to float32
+                before temporal encoding.
+
+        Raises:
+            ValueError: If action_low provided without action_high or vice versa.
+        """
+        super().__init__()
+        self.cfg = config
+        self.stack_size = stack_size
+        self.observation_dim = observation_dim
+        self.action_dim = action_dim
+        self.cnn_autocast_dtype = cnn_autocast_dtype
+
+        self.cnn = CNN(observation_dim, self.cfg.cnn)
+
+        self.sequence_encoder = TemporalCNN1D(
+            stack_size, in_dim=self.cnn.out_dim, config=self.cfg.temporal
+        )
+        actor_config = self.cfg.actor
+        if action_low is not None or action_high is not None:
+            if action_low is None or action_high is None:
+                raise ValueError("action_low and action_high must be provided together")
+            actor_config = actor_config.model_copy(
+                update={"action_low": action_low, "action_high": action_high}
+            )
+        self.actor = Actor(
+            action_dim, in_dim=self.sequence_encoder.out_dim, config=actor_config
+        )
+
+    def feature_extract(self, x: T.Tensor) -> T.Tensor:
+        """Extract CNN features from NCHW observation.
+
+        Args:
+            x: Tensor of shape (batch, channel, height, width).
+
+        Returns:
+            Tensor of shape (batch, cnn_out_dim).
+        """
+        autocast_dtype = getattr(self, "cnn_autocast_dtype", None)
+        if autocast_dtype is None:
+            return self.cnn(x).float()
+        with T.autocast(device_type="cuda", dtype=autocast_dtype):
+            features = self.cnn(x)
+        return features.float()
+
+    def temporal_encode(self, x: T.Tensor) -> T.Tensor:
+        """Encode temporal sequence of CNN features.
+
+        Args:
+            x: Tensor of shape (batch, stack_size, cnn_out_dim).
+
+        Returns:
+            Tensor of shape (batch, temporal_out_dim).
+        """
+        return self.sequence_encoder(x)
+
+    def heads(
+        self, x: T.Tensor, temperature: float
+    ) -> tuple[Distribution, T.Tensor, T.Tensor]:
+        """Compute action distribution, mean action, and value from temporal encoding.
+
+        Args:
+            x: Tensor of shape (batch, temporal_out_dim).
+            temperature: Sampling temperature for actor.
+
+        Returns:
+            Tuple of (action_distribution, action_mean, value) where:
+            - action_distribution: TransformedDistribution (Beta + AffineTransform)
+            - action_mean: Tensor of shape (batch, action_dim)
+            - value: Tensor of shape (batch,)
+        """
+        if temperature == 0.0:
+            action_dist, action_mean = self.actor.forward_deterministic(x)
+        else:
+            action_dist, action_mean = self.actor(x, temperature)
+
+        return action_dist, action_mean
+
+    def action_transform(self, action: T.Tensor) -> T.Tensor:
+        """Apply actor's affine transform from [0,1] to environment bounds.
+
+        Args:
+            action: Tensor in [0, 1] range.
+
+        Returns:
+            Tensor scaled to [action_low, action_high].
+        """
+        return self.actor.action_transform(action)
+
+    def save_state_dict(self, path: str) -> None:
+        """Save model state dict to disk."""
+        T.save(self.state_dict(), path)
+
+    def _submodules(self) -> list[tuple[str, nn.Module]]:
+        """Return named submodules for repr."""
+        return [
+            ("cnn", self.cnn),
+            ("sequence_encoder", self.sequence_encoder),
+            ("actor", self.actor),
+        ]
+
+    def __repr__(self) -> str:
+        n_params = sum(p.numel() for p in self.parameters())
+        submodules = "\n".join(
+            f"  ({name}): {module!r}" for name, module in self._submodules()
+        )
+        return (
+            f"{self.__class__.__name__}(\n{submodules}\n  total_params={n_params:,}\n)"
+        )
+
+    def config(self) -> dict[str, int | float | str]:
+        """Flat, MLflow-loggable hyperparameters. Structural (env-derived) dims
+        and param counts are reported separately from the pydantic config.
+        """
+        merged = {
+            f"{prefix}.{k}": (
+                v
+                if isinstance(v, (int, float, str, bool)) or v is None
+                else json.dumps(v, sort_keys=True)
+            )
+            for prefix, sub in self.cfg.model_dump().items()
+            for k, v in sub.items()
+        }
+        merged["total_params"] = sum(p.numel() for p in self.parameters())
+        merged["total_trainable_params"] = sum(
+            p.numel() for p in self.parameters() if p.requires_grad
+        )
+        return merged
+
+
+class SACTwinCritic(nn.Module):
+    def __init__(
+        self,
+        observation_dim: int,
+        action_dim: int,
+        stack_size: int,
+        config: SACTwinCriticConfig,
+        cnn_autocast_dtype: T.dtype | None = None,
+    ):
+        """Initialize the composed network.
+
+        Args:
+            observation_dim: Number of input channels (e.g., 1 for grayscale).
+            action_dim: Dimensionality of action space.
+            stack_size: Number of frames in temporal sequence.
+            config: SACCriticConfig containing CNN, temporal, critic.
+            cnn_autocast_dtype: Optional autocast dtype used only by the CNN
+                feature extractor. CNN features are converted back to float32
+                before temporal encoding.
+
+        Raises:
+            ValueError: If action_low provided without action_high or vice versa.
+        """
+        super().__init__()
+        self.cfg = config
+        self.stack_size = stack_size
+        self.observation_dim = observation_dim
+        self.action_dim = action_dim
+        self.cnn_autocast_dtype = cnn_autocast_dtype
+
+        self.cnn = CNN(observation_dim, self.cfg.cnn)
+
+        self.sequence_encoder = TemporalCNN1D(
+            stack_size, in_dim=self.cnn.out_dim, config=self.cfg.temporal
+        )
+        critic_config = self.cfg.critic
+        self.actor = Critic(
+            action_dim,
+            in_dim=self.sequence_encoder.out_dim + action_dim,
+            config=critic_config,
+        )
+
+    def feature_extract(self, x: T.Tensor) -> T.Tensor:
+        """Extract CNN features from NCHW observation.
+
+        Args:
+            x: Tensor of shape (batch, channel, height, width).
+
+        Returns:
+            Tensor of shape (batch, cnn_out_dim).
+        """
+        autocast_dtype = getattr(self, "cnn_autocast_dtype", None)
+        if autocast_dtype is None:
+            return self.cnn(x).float()
+        with T.autocast(device_type="cuda", dtype=autocast_dtype):
+            features = self.cnn(x)
+        return features.float()
+
+    def temporal_encode(self, x: T.Tensor) -> T.Tensor:
+        """Encode temporal sequence of CNN features.
+
+        Args:
+            x: Tensor of shape (batch, stack_size, cnn_out_dim).
+
+        Returns:
+            Tensor of shape (batch, temporal_out_dim).
+        """
+        return self.sequence_encoder(x)
+
+    def heads(self, x: T.Tensor, action: T.Tensor) -> tuple[T.Tensor]:
+        """Compute critic value
+
+        Args:
+            #TODO
+
+        Returns:
+            #TODO
+        """
+        x = T.cat([x, action], dim=-1)
+        critic_value = self.critic(x)
+
+        return critic_value
+
+    def save_state_dict(self, path: str) -> None:
+        """Save model state dict to disk."""
+        T.save(self.state_dict(), path)
+
+    def _submodules(self) -> list[tuple[str, nn.Module]]:
+        """Return named submodules for repr."""
+        return [
+            ("cnn", self.cnn),
+            ("sequence_encoder", self.sequence_encoder),
+            ("critic", self.critic),
+        ]
+
+    def __repr__(self) -> str:
+        n_params = sum(p.numel() for p in self.parameters())
+        submodules = "\n".join(
+            f"  ({name}): {module!r}" for name, module in self._submodules()
+        )
+        return (
+            f"{self.__class__.__name__}(\n{submodules}\n  total_params={n_params:,}\n)"
+        )
+
+    def config(self) -> dict[str, int | float | str]:
+        """Flat, MLflow-loggable hyperparameters. Structural (env-derived) dims
+        and param counts are reported separately from the pydantic config.
+        """
+        merged = {
+            f"{prefix}.{k}": (
+                v
+                if isinstance(v, (int, float, str, bool)) or v is None
+                else json.dumps(v, sort_keys=True)
+            )
+            for prefix, sub in self.cfg.model_dump().items()
+            for k, v in sub.items()
+        }
+        merged["total_params"] = sum(p.numel() for p in self.parameters())
+        merged["total_trainable_params"] = sum(
+            p.numel() for p in self.parameters() if p.requires_grad
+        )
+        return merged
+
+
+class SACNetwork(nn.Module):
+    def __init__(
+        self,
+        observation_dim: int,
+        action_dim: int,
+        stack_size: int,
+        config: SACNetworkConfig,
+        action_low: list[float] | None = None,
+        action_high: list[float] | None = None,
+        cnn_autocast_dtype: T.dtype | None = None,
+    ):
+        """Initialize the composed network.
+
+        Args:
+            observation_dim: Number of input channels (e.g., 1 for grayscale).
+            action_dim: Dimensionality of action space.
+            stack_size: Number of frames in temporal sequence.
+            config: SACNetworkConfig containing CNN, temporal, actor, twin_critic configs.
+            action_low: Optional override for actor action_low.
+            action_high: Optional override for actor action_high.
+            cnn_autocast_dtype: Optional autocast dtype used only by the CNN
+                feature extractor. CNN features are converted back to float32
+                before temporal encoding.
+
+        Raises:
+            ValueError: If action_low provided without action_high or vice versa.
+        """
+        super().__init__()
+        self.actor = SACActor(
+            observation_dim,
+            action_dim,
+            stack_size,
+            config.actor,
+            action_low=action_low,
+            action_high=action_high,
+            cnn_autocast_dtype=cnn_autocast_dtype,
+        )
+        self.twin_critic = SACTwinCritic(
+            observation_dim,
+            action_dim,
+            stack_size,
+            config.twin_critic,
+            cnn_autocast_dtype=cnn_autocast_dtype,
+        )
+        self.cfg = config
+        self.target_twin_critic = SACTwinCritic(
+            observation_dim,
+            action_dim,
+            stack_size,
+            config.twin_critic,
+            cnn_autocast_dtype=cnn_autocast_dtype,
+        )
+        update_state_dict(
+            self.target_twin_critic.state_dict(), self.twin_critic.state_dict()
+        )
+        self.target_twin_critic.eval()  # Target network is not trained directly
+
+    def save_state_dict(self, path: str) -> None:
+        """Save model state dict to disk."""
+        T.save(self.state_dict(), path)
+
+    def feature_extract(self, x: T.Tensor, train: bool = False) -> T.Tensor:
+        """Extract CNN features from NCHW observation.
+
+        Args:
+            x: Tensor of shape (batch, channel, height, width).
+        """

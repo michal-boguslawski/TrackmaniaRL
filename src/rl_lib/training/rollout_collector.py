@@ -5,16 +5,18 @@ the rollout buffer, and the PPO trainer. Manages callbacks for logging,
 video recording, and checkpointing at the rollout level.
 """
 
-from gymnasium.vector import VectorEnv
 import json
+
 import numpy as np
 import torch as T
+from gymnasium.vector import VectorEnv
 from torch.profiler import record_function
 from tqdm import tqdm
 
+from rl_lib.agent import Agent
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
 from rl_lib.run_config import RolloutSettings
-from rl_lib.training.factory import Trainer
+from rl_lib.training.base import Trainer
 from rl_lib.training.callbacks.base import Callback, CallbackList
 
 
@@ -29,7 +31,7 @@ class RolloutCollector:
     Attributes:
         env: Vectorized Gymnasium environment.
         buffer: RolloutBuffer for storing transitions.
-        trainer: Trainer implementation for policy updates.
+        # TODO
         cfg: RolloutSettings (buffer_size, epochs, minibatch_size, gamma, gae_lambda).
         seed: Environment seed.
         run_config: Full run config dict for MLflow logging.
@@ -39,6 +41,7 @@ class RolloutCollector:
         self,
         env: VectorEnv,
         buffer: RolloutBuffer,
+        agent: Agent,
         trainer: Trainer,
         config: RolloutSettings,
         callbacks: list[Callback] | None = None,
@@ -50,7 +53,7 @@ class RolloutCollector:
         Args:
             env: Vectorized environment (must match buffer/trainer config).
             buffer: RolloutBuffer instance.
-            trainer: Trainer instance created by the trainer factory.
+            agent # TODO
             config: RolloutSettings shared with buffer (validated for consistency).
             callbacks: Callbacks for rollout-level events.
             seed: Random seed for environment reset.
@@ -67,6 +70,7 @@ class RolloutCollector:
             )
         self.env = env
         self.buffer = buffer
+        self.agent = agent
         self.trainer = trainer
         self.cfg = config
         self.seed = seed
@@ -102,38 +106,31 @@ class RolloutCollector:
                 once per vector-environment iteration.
         """
         state, _ = self.env.reset(seed=self.seed)
-        done = T.zeros(self.env.num_envs, dtype=T.bool).to(self.trainer.device)
+        done = T.zeros(self.env.num_envs, dtype=T.bool).to(self.agent.device)
         self.buffer.reset()
         self._on_rollout_start(config=self.config(training_steps))
 
         for i in tqdm(range(training_steps)):
-            (
-                next_state,
-                state,
-                action,
-                log_probs,
-                critic_value,
-                reward,
-                terminated,
-                truncated,
-                done,
-                info,
-            ) = self.trainer.step_env(self.env, state, done)
+            transition, info = self.agent.step_env(self.env, state, done)
 
             truncated_value = T.zeros_like(
-                truncated,
+                transition.truncated,
                 dtype=T.float32,
-                device=self.trainer.device,
+                device=self.agent.device,
             )
-            if self.trainer.last_step_had_truncation:
-                final_observations = info.get("final_obs", info.get("final_observation"))
+            if self.agent.last_step_had_truncation:
+                final_observations = info.get(
+                    "final_obs", info.get("final_observation")
+                )
                 if final_observations is None:
                     raise RuntimeError(
                         "Vector environment truncated an episode without providing its final observation"
                     )
 
                 final_mask = info.get("_final_obs", info.get("_final_observation"))
-                truncated_indices = truncated.nonzero(as_tuple=True)[0].cpu().numpy()
+                truncated_indices = (
+                    transition.truncated.nonzero(as_tuple=True)[0].cpu().numpy()
+                )
                 if final_mask is not None:
                     mask = np.asarray(final_mask, dtype=np.bool_)
                     if not mask[truncated_indices].all():
@@ -141,30 +138,32 @@ class RolloutCollector:
                             "Vector environment did not provide a final observation for every truncated episode"
                         )
 
-                bootstrap_observations = next_state.copy()
+                bootstrap_observations = transition.next_obs.copy()
                 for env_index in truncated_indices:
                     bootstrap_observations[env_index] = final_observations[env_index]
                 with record_function("transfer/bootstrap_observation_to_device"):
-                    bootstrap_tensor = T.from_numpy(bootstrap_observations).to(self.trainer.device)
+                    bootstrap_tensor = T.from_numpy(bootstrap_observations).to(
+                        self.agent.device
+                    )
                 with record_function("rollout/truncation_bootstrap"):
-                    values = self.trainer.bootstrap_value(bootstrap_tensor)
-                truncated_value[truncated] = values[truncated]
+                    values = self.agent.bootstrap_value(bootstrap_tensor)
+                truncated_value[transition.truncated] = values[transition.truncated]
 
-            with record_function("transfer/reward_to_device"):
-                reward_t = T.from_numpy(reward).to(T.float32).to(self.trainer.device)
             with record_function("rollout/buffer_add"):
-                self.buffer.add(RolloutStep(
-                    observation=state,
-                    action=action,
-                    critic_value=critic_value,
-                    old_log_probs=log_probs,
-                    reward=reward_t,
-                    terminated=terminated,
-                    truncated=truncated,
-                    truncated_value=truncated_value,
-                ))
+                self.buffer.add(
+                    RolloutStep(
+                        observation=transition.obs,
+                        action=transition.action,
+                        critic_value=transition.extras["value"],
+                        old_log_probs=transition.extras["log_probs"],
+                        reward=transition.reward,
+                        terminated=transition.terminated,
+                        truncated=transition.truncated,
+                        truncated_value=truncated_value,
+                    )
+                )
 
-            state = next_state
+            state = transition.next_obs
             self._on_env_step(step=i, info=info)
 
             if self.buffer.is_full():
@@ -208,6 +207,7 @@ class RolloutCollector:
 
         if training_steps is not None:
             merged["training_steps"] = training_steps
+
         def flatten(prefix: str, value):
             if isinstance(value, dict):
                 for key, nested in value.items():
@@ -216,8 +216,11 @@ class RolloutCollector:
                 merged[prefix] = json.dumps(value, sort_keys=True)
             else:
                 merged[prefix] = value
+
         flatten("", self.run_config)
         merged.update({f"buffer.{k}": v for k, v in self.buffer.config().items()})
         merged.update({f"trainer.{k}": v for k, v in self.trainer.config().items()})
-        merged.update({f"network.{k}": v for k, v in self.trainer.network_config().items()})
+        merged.update(
+            {f"network.{k}": v for k, v in self.trainer.network_config().items()}
+        )
         return merged

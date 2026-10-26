@@ -123,12 +123,16 @@ class EnvironmentSettings(StrictModel):
     autoreset_mode: Literal["same_step", "next_step", "disabled"] = "same_step"
     record_video: bool = False
     video_folder: str = "./logs/videos"
-    wrappers: list[WrapperSettings] = Field(default_factory=lambda: [
-        make_wrapper_settings("record_episode_stats"),
-        make_wrapper_settings("grayscale"),
-        make_wrapper_settings("reward_on_done", on_terminated=None, on_truncated=-10.0, on_win=100.0),
-        make_wrapper_settings("max_and_skip"),
-    ])
+    wrappers: list[WrapperSettings] = Field(
+        default_factory=lambda: [
+            make_wrapper_settings("record_episode_stats"),
+            make_wrapper_settings("grayscale"),
+            make_wrapper_settings(
+                "reward_on_done", on_terminated=None, on_truncated=-10.0, on_win=100.0
+            ),
+            make_wrapper_settings("max_and_skip"),
+        ]
+    )
 
 
 class AgentSettings(StrictModel):
@@ -147,14 +151,13 @@ class RolloutSettings(StrictModel):
     gae_lambda: float = Field(default=0.95, ge=0, le=1)
 
 
-
-
 class TrackingSettings(StrictModel):
     """Which scalars reach the tracking backends.
 
     Attributes:
         console: Enable the console metrics logger.
         mlflow: Enable the MLflow tracking backend.
+        local_artifacts: Enable local artifact logging. Artifacts are stored in logs folder.
         experiment_name: MLflow experiment (defaults to the environment id).
         run_name: MLflow run name (defaults to "<run name>/<session id>").
         log_system_metrics: Let MLflow sample host metrics; only honoured at
@@ -165,6 +168,7 @@ class TrackingSettings(StrictModel):
 
     console: bool = True
     mlflow: bool = True
+    local_artifacts: bool = False
     experiment_name: str | None = None
     run_name: str | None = None
     log_system_metrics: bool = True
@@ -203,20 +207,32 @@ class RecordVideoCallbackConfig(StrictModel):
     folder: str = "./logs/videos"
     skip: PositiveInt | None = None
     normalize_rewards: bool = False
-    recording: RecordVideoWrapperSettings = Field(default_factory=RecordVideoWrapperSettings)
-    wrappers: list[WrapperSettings] = Field(default_factory=lambda: [
-        make_wrapper_settings("record_episode_stats"),
-        make_wrapper_settings("grayscale"),
-        make_wrapper_settings("max_and_skip"),
-    ])
+    recording: RecordVideoWrapperSettings = Field(
+        default_factory=RecordVideoWrapperSettings
+    )
+    wrappers: list[WrapperSettings] = Field(
+        default_factory=lambda: [
+            make_wrapper_settings("record_episode_stats"),
+            make_wrapper_settings("grayscale"),
+            make_wrapper_settings("max_and_skip"),
+        ]
+    )
 
     @model_validator(mode="after")
     def validate_video_wrapper(self):
         if self.recording.name != "record_video":
-            raise ValueError("record_video callback recording must have name='record_video'")
-        stats_wrappers = [wrapper for wrapper in self.wrappers if wrapper.name == "record_episode_stats"]
+            raise ValueError(
+                "record_video callback recording must have name='record_video'"
+            )
+        stats_wrappers = [
+            wrapper
+            for wrapper in self.wrappers
+            if wrapper.name == "record_episode_stats"
+        ]
         if len(stats_wrappers) != 1:
-            raise ValueError("record_video callback requires exactly one record_episode_stats wrapper")
+            raise ValueError(
+                "record_video callback requires exactly one record_episode_stats wrapper"
+            )
         return self
 
 
@@ -263,7 +279,8 @@ class VideoCallbackSettings(StrictModel):
     @property
     def stats_key(self) -> str:
         stats_wrappers = [
-            wrapper for wrapper in self.environment.wrappers
+            wrapper
+            for wrapper in self.environment.wrappers
             if wrapper.name == "record_episode_stats"
         ]
         if len(stats_wrappers) != 1:
@@ -304,7 +321,9 @@ class RunConfig(StrictModel):
     @classmethod
     def migrate_legacy_callback_settings(cls, values):
         """Accept the former callback mapping while writing the list format."""
-        if not isinstance(values, dict) or not isinstance(values.get("callbacks"), dict):
+        if not isinstance(values, dict) or not isinstance(
+            values.get("callbacks"), dict
+        ):
             return values
 
         old = values["callbacks"]
@@ -317,7 +336,10 @@ class RunConfig(StrictModel):
             ("metrics", {"granularity": old.get("metrics_granularity", "batch")}),
             (
                 "episode_statistics",
-                {"mode": old.get("episode_statistics_mode", "mean"), "stats_key": old.get("episode_statistics_key", "episode")},
+                {
+                    "mode": old.get("episode_statistics_mode", "mean"),
+                    "stats_key": old.get("episode_statistics_key", "episode"),
+                },
             ),
             (
                 "evaluation",
@@ -341,23 +363,36 @@ class RunConfig(StrictModel):
         )
         for name, options in legacy_callbacks:
             if old.get(name, True):
-                migrated.append({"name": name, **{k: v for k, v in options.items() if v is not None}})
+                migrated.append(
+                    {
+                        "name": name,
+                        **{k: v for k, v in options.items() if v is not None},
+                    }
+                )
         values["callbacks"] = migrated
         return values
 
     def callback(self, name: str):
-        return next((callback for callback in self.callbacks if callback.name == name), None)
+        return next(
+            (callback for callback in self.callbacks if callback.name == name), None
+        )
 
     def with_runtime(self, **updates) -> RunConfig:
         """Copy this config with resolved runtime facts folded in. Validation is
         intentionally skipped: every update is either a scalar this module
         already constrains or a re-validated settings model built here."""
-        return self.model_copy(update={"runtime": self.runtime.model_copy(update=updates)})
+        return self.model_copy(
+            update={"runtime": self.runtime.model_copy(update=updates)}
+        )
 
     @property
     def video_folder(self) -> str:
         callback = self.callback("record_video")
-        folder = callback.folder if isinstance(callback, RecordVideoCallbackConfig) else "./logs/videos"
+        folder = (
+            callback.folder
+            if isinstance(callback, RecordVideoCallbackConfig)
+            else "./logs/videos"
+        )
         return str(Path(folder) / self.runtime.session_id)
 
     @property
@@ -374,30 +409,45 @@ class RunConfig(StrictModel):
         callback = self.callback("record_video")
         if not isinstance(callback, RecordVideoCallbackConfig):
             raise ValueError("record_video callback is not configured")
-        return self.environment.model_copy(update={
-            "num_envs": 1,
-            "skip": callback.skip or self.environment.skip,
-            "vectorization_mode": "sync",
-            "record_video": True,
-            "video_folder": self.video_folder,
-            "normalize_rewards": callback.normalize_rewards,
-            "wrappers": [callback.recording, *callback.wrappers],
-        })
+        return self.environment.model_copy(
+            update={
+                "num_envs": 1,
+                "skip": callback.skip or self.environment.skip,
+                "vectorization_mode": "sync",
+                "record_video": True,
+                "video_folder": self.video_folder,
+                "normalize_rewards": callback.normalize_rewards,
+                "wrappers": [callback.recording, *callback.wrappers],
+            }
+        )
 
-    def evaluation_environment(self, num_envs: int | None = None) -> EnvironmentSettings:
+    def evaluation_environment(
+        self, num_envs: int | None = None
+    ) -> EnvironmentSettings:
         """Build a raw-reward evaluation environment matching training."""
-        wrappers = [wrapper for wrapper in self.environment.wrappers if wrapper.name != "reward_on_done"]
-        stats_wrappers = [wrapper for wrapper in wrappers if wrapper.name == "record_episode_stats"]
+        wrappers = [
+            wrapper
+            for wrapper in self.environment.wrappers
+            if wrapper.name != "reward_on_done"
+        ]
+        stats_wrappers = [
+            wrapper for wrapper in wrappers if wrapper.name == "record_episode_stats"
+        ]
         if stats_wrappers:
-            wrappers = [stats_wrappers[0], *[wrapper for wrapper in wrappers if wrapper is not stats_wrappers[0]]]
+            wrappers = [
+                stats_wrappers[0],
+                *[wrapper for wrapper in wrappers if wrapper is not stats_wrappers[0]],
+            ]
         else:
             wrappers.insert(0, make_wrapper_settings("record_episode_stats"))
-        return self.environment.model_copy(update={
-            "num_envs": self.environment.num_envs if num_envs is None else num_envs,
-            "normalize_rewards": False,
-            "record_video": False,
-            "wrappers": wrappers,
-        })
+        return self.environment.model_copy(
+            update={
+                "num_envs": self.environment.num_envs if num_envs is None else num_envs,
+                "normalize_rewards": False,
+                "record_video": False,
+                "wrappers": wrappers,
+            }
+        )
 
     def metrics_settings(self) -> MetricsCallbackSettings:
         callback = self.callback("metrics")
@@ -439,7 +489,9 @@ class RunConfig(StrictModel):
     @model_validator(mode="after")
     def validate_runtime_is_not_authored(self):
         if "runtime" in self.model_fields_set:
-            raise ValueError("run.runtime is resolved by the entrypoint and cannot be set in YAML")
+            raise ValueError(
+                "run.runtime is resolved by the entrypoint and cannot be set in YAML"
+            )
         return self
 
     @model_validator(mode="after")
@@ -471,37 +523,75 @@ class RunConfig(StrictModel):
         if len(names) != len(set(names)):
             raise ValueError("each callback may only be configured once")
         if not self.environment.continuous:
-            raise ValueError("the configured PPO actor supports continuous action spaces only")
+            raise ValueError(
+                "the configured PPO actor supports continuous action spaces only"
+            )
         episode_wrappers = [
-            wrapper for wrapper in self.environment.wrappers
+            wrapper
+            for wrapper in self.environment.wrappers
             if wrapper.name == "record_episode_stats"
         ]
         statistics_callback = self.callback("episode_statistics")
         if statistics_callback is not None and not episode_wrappers:
-            raise ValueError("callbacks.episode_statistics requires a record_episode_stats environment wrapper")
+            raise ValueError(
+                "callbacks.episode_statistics requires a record_episode_stats environment wrapper"
+            )
         if len(episode_wrappers) > 1 and statistics_callback is not None:
-            raise ValueError("callbacks.episode_statistics supports one record_episode_stats wrapper")
+            raise ValueError(
+                "callbacks.episode_statistics supports one record_episode_stats wrapper"
+            )
         if (
             statistics_callback is not None
             and episode_wrappers
             and statistics_callback.stats_key != episode_wrappers[0].stats_key
         ):
-            raise ValueError("callbacks.episode_statistics_key must match environment wrapper stats_key")
+            raise ValueError(
+                "callbacks.episode_statistics_key must match environment wrapper stats_key"
+            )
         video_callback = self.callback("record_video")
-        video_stats_wrappers = [
-            wrapper for wrapper in video_callback.wrappers
-            if wrapper.name == "record_episode_stats"
-        ] if isinstance(video_callback, RecordVideoCallbackConfig) else []
-        if isinstance(video_callback, RecordVideoCallbackConfig) and not video_stats_wrappers:
-            raise ValueError("record_video callback requires record_episode_stats in its wrappers")
-        if isinstance(video_callback, RecordVideoCallbackConfig) and len(video_stats_wrappers) > 1:
-            raise ValueError("record_video callback supports one record_episode_stats wrapper")
-        if self.rollout.minibatch_size > self.rollout.buffer_size * self.environment.num_envs:
-            raise ValueError("rollout.minibatch_size cannot exceed buffer_size * environment.num_envs")
+        video_stats_wrappers = (
+            [
+                wrapper
+                for wrapper in video_callback.wrappers
+                if wrapper.name == "record_episode_stats"
+            ]
+            if isinstance(video_callback, RecordVideoCallbackConfig)
+            else []
+        )
+        if (
+            isinstance(video_callback, RecordVideoCallbackConfig)
+            and not video_stats_wrappers
+        ):
+            raise ValueError(
+                "record_video callback requires record_episode_stats in its wrappers"
+            )
+        if (
+            isinstance(video_callback, RecordVideoCallbackConfig)
+            and len(video_stats_wrappers) > 1
+        ):
+            raise ValueError(
+                "record_video callback supports one record_episode_stats wrapper"
+            )
+        if (
+            self.rollout.minibatch_size
+            > self.rollout.buffer_size * self.environment.num_envs
+        ):
+            raise ValueError(
+                "rollout.minibatch_size cannot exceed buffer_size * environment.num_envs"
+            )
         if len(self.network.actor.action_low) != len(self.network.actor.action_high):
-            raise ValueError("network.actor.action_low and action_high must have equal lengths")
-        if any(low >= high for low, high in zip(self.network.actor.action_low, self.network.actor.action_high)):
-            raise ValueError("every network.actor.action_low value must be below action_high")
+            raise ValueError(
+                "network.actor.action_low and action_high must have equal lengths"
+            )
+        if any(
+            low >= high
+            for low, high in zip(
+                self.network.actor.action_low, self.network.actor.action_high
+            )
+        ):
+            raise ValueError(
+                "every network.actor.action_low value must be below action_high"
+            )
         optimizer = self.trainer.optimizer
         initial_lrs = (
             optimizer.cnn_lr or optimizer.backbone_lr,
@@ -510,12 +600,20 @@ class RunConfig(StrictModel):
         )
         scheduler = self.trainer.scheduler
         if isinstance(scheduler, (CosineSchedulerSettings, LinearSchedulerSettings)):
-            minimum_lr = scheduler.min_lr if isinstance(scheduler, LinearSchedulerSettings) else scheduler.eta_min
+            minimum_lr = (
+                scheduler.min_lr
+                if isinstance(scheduler, LinearSchedulerSettings)
+                else scheduler.eta_min
+            )
             if minimum_lr > min(initial_lrs):
-                raise ValueError("trainer.scheduler minimum learning rate cannot exceed any initial learning rate")
+                raise ValueError(
+                    "trainer.scheduler minimum learning rate cannot exceed any initial learning rate"
+                )
         if isinstance(scheduler, LinearSchedulerSettings):
             if scheduler.min_lr / max(initial_lrs) > scheduler.start_factor:
-                raise ValueError("linear scheduler minimum LR is above the configured starting LR")
+                raise ValueError(
+                    "linear scheduler minimum LR is above the configured starting LR"
+                )
         return self
 
 

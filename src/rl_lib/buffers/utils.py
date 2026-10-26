@@ -1,10 +1,12 @@
 """Buffer utilities for numpy/torch conversion."""
 
-from numpy.typing import NDArray
 import torch as T
+from numpy.typing import NDArray
 
 
-def to_tensor_batch(minibatch: dict[str, NDArray], device: T.device) -> dict[str, T.Tensor]:
+def to_tensor_batch(
+    minibatch: dict[str, NDArray], device: T.device
+) -> dict[str, T.Tensor]:
     """Convert numpy minibatch dict to torch tensors on device.
 
     Args:

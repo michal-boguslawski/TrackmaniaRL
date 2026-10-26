@@ -6,11 +6,19 @@ All configs use StrictConfig (extra="forbid") to catch typos in YAML.
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, PositiveFloat, PositiveInt
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    PositiveFloat,
+    PositiveInt,
+)
 
 
 class StrictConfig(BaseModel):
     """Base config with extra='forbid' to prevent silent typos in YAML."""
+
     model_config = ConfigDict(extra="forbid")
 
 
@@ -30,6 +38,7 @@ class ConvLayerConfig(StrictConfig):
         init_gain: Weight initialization gain (sqrt(2) for ReLU, 1 for linear).
         init_bias: Bias initialization value.
     """
+
     out_channels: PositiveInt
     kernel_size: PositiveInt
     stride: PositiveInt = 1
@@ -53,6 +62,7 @@ class LinearLayerConfig(StrictConfig):
         init_bias: Bias initialization value.
         bias: Whether to include bias term.
     """
+
     out_dim: PositiveInt
     activation: Literal["relu", "gelu", "tanh", "elu", "identity"] = "relu"
     init_gain: PositiveFloat = 2**0.5
@@ -71,16 +81,21 @@ class CNNConfig(StrictConfig):
         output_init_gain: Gain for final Linear layer weight init.
         output_init_bias: Bias for final Linear layer init.
     """
-    conv_layers: list[ConvLayerConfig] = Field(default_factory=lambda: [
-        ConvLayerConfig(out_channels=32, kernel_size=8, stride=4),
-        ConvLayerConfig(out_channels=64, kernel_size=4, stride=2),
-        ConvLayerConfig(out_channels=128, kernel_size=3),
-        ConvLayerConfig(out_channels=128, kernel_size=3, stride=2),
-    ])
+
+    conv_layers: list[ConvLayerConfig] = Field(
+        default_factory=lambda: [
+            ConvLayerConfig(out_channels=32, kernel_size=8, stride=4),
+            ConvLayerConfig(out_channels=64, kernel_size=4, stride=2),
+            ConvLayerConfig(out_channels=128, kernel_size=3),
+            ConvLayerConfig(out_channels=128, kernel_size=3, stride=2),
+        ]
+    )
     adaptive_pool_size: PositiveInt = 3
-    hidden_layers: list[LinearLayerConfig] = Field(default_factory=lambda: [
-        LinearLayerConfig(out_dim=256),
-    ])
+    hidden_layers: list[LinearLayerConfig] = Field(
+        default_factory=lambda: [
+            LinearLayerConfig(out_dim=256),
+        ]
+    )
     out_dim: PositiveInt = 256
     output_init_gain: PositiveFloat = 2**0.5
     output_init_bias: FiniteFloat = 0.0
@@ -97,6 +112,7 @@ class TemporalConfig(StrictConfig):
         norm_eps: LayerNorm epsilon.
         norm_affine: LayerNorm learnable affine parameters.
     """
+
     out_dim: PositiveInt = 256
     normalize_input: bool = True
     normalize_output: bool = True
@@ -121,9 +137,12 @@ class ActorConfig(StrictConfig):
         default_temperature: Default sampling temperature.
         deterministic_distribution_temperature: Temperature for deterministic eval.
     """
-    hidden_layers: list[LinearLayerConfig] = Field(default_factory=lambda: [
-        LinearLayerConfig(out_dim=256, activation="gelu"),
-    ])
+
+    hidden_layers: list[LinearLayerConfig] = Field(
+        default_factory=lambda: [
+            LinearLayerConfig(out_dim=256, activation="gelu"),
+        ]
+    )
     output_init_gain: PositiveFloat = 0.01
     output_init_bias: FiniteFloat = -2.0
     output_bias: bool = True
@@ -146,9 +165,12 @@ class CriticConfig(StrictConfig):
         output_bias: Include bias in output layer.
         huber_delta: Delta for Huber loss used in critic training.
     """
-    hidden_layers: list[LinearLayerConfig] = Field(default_factory=lambda: [
-        LinearLayerConfig(out_dim=256, activation="gelu"),
-    ])
+
+    hidden_layers: list[LinearLayerConfig] = Field(
+        default_factory=lambda: [
+            LinearLayerConfig(out_dim=256, activation="gelu"),
+        ]
+    )
     output_init_gain: PositiveFloat = 1.0
     output_init_bias: FiniteFloat = 0.0
     output_bias: bool = True
@@ -164,7 +186,25 @@ class NetworkConfig(StrictConfig):
         actor: Actor config.
         critic: Critic config.
     """
+
     cnn: CNNConfig = Field(default_factory=CNNConfig)
     temporal: TemporalConfig = Field(default_factory=TemporalConfig)
     actor: ActorConfig = Field(default_factory=ActorConfig)
     critic: CriticConfig = Field(default_factory=CriticConfig)
+
+
+class SACActorConfig(StrictConfig):
+    cnn: CNNConfig = Field(default_factory=CNNConfig)
+    temporal: TemporalConfig = Field(default_factory=TemporalConfig)
+    actor: ActorConfig = Field(default_factory=ActorConfig)
+
+
+class SACTwinCriticConfig(StrictConfig):
+    cnn: CNNConfig = Field(default_factory=CNNConfig)
+    temporal: TemporalConfig = Field(default_factory=TemporalConfig)
+    critic: CriticConfig = Field(default_factory=CriticConfig)
+
+
+class SACNetworkConfig(StrictConfig):
+    actor: SACActorConfig = Field(default_factory=SACActorConfig)
+    twin_critic: SACTwinCriticConfig = Field(default_factory=SACTwinCriticConfig)
