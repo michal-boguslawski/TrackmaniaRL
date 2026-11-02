@@ -10,7 +10,6 @@ from collections import deque
 from logging import getLogger
 from typing import Any
 
-import numpy as np
 import torch as T
 from gymnasium import Env
 from numpy.typing import NDArray
@@ -20,7 +19,11 @@ from torch.nn.parameter import Parameter
 from torch.profiler import record_function
 
 from rl_lib.checkpoint_loaders import LocalCheckpointLoader
+from rl_lib.networks.actor import Actor
+from rl_lib.networks.encoder import Encoder
 from rl_lib.networks.factory import Network
+from rl_lib.policy.history import History
+from rl_lib.policy.masks import episode_mask
 from rl_lib.run_config import AgentSettings
 from rl_lib.training.transitions import Transition
 
@@ -46,31 +49,34 @@ class Agent:
 
     def __init__(
         self,
-        network: Network,
+        encoder: Encoder,
+        actor: Actor,
+        # network: Network,
         device: T.device | str,
         config: AgentSettings,
     ):
         """Initialize the agent.
 
         Args:
-            network: Policy/value network with matching stack_size.
+            # TODO
             device: Target device for tensor operations.
             config: Agent configuration including stack_size and preprocessing params.
 
         Raises:
             ValueError: If config.stack_size != network.stack_size.
         """
-        if config.stack_size != network.stack_size:
+        if config.stack_size != encoder.stack_size:
             raise ValueError(
-                f"agent stack_size ({config.stack_size}) must match the network stack_size ({network.stack_size})"
+                f"agent stack_size ({config.stack_size}) must match the encoder stack_size ({encoder.stack_size})"
             )
         self.cfg = config
         self._stack_size = config.stack_size
         self._device = T.device(device)
         self._obs_window: deque[T.Tensor] = deque(maxlen=self._stack_size)
         self._done_window: deque[T.Tensor] = deque(maxlen=self._stack_size)
-        self._network = network
-        self._last_step_had_truncation = False
+        self._encoder = encoder
+        self._actor = actor
+        self._history = History(max_length=self._stack_size)
         # Cached 0-dim tensors so observation normalization is one addcdiv
         # kernel (offset + x / divisor) instead of separate div and add.
         self._observation_divisor = T.tensor(
@@ -89,11 +95,6 @@ class Agent:
     def device(self) -> T.device:
         """Compute device for tensor operations."""
         return self._device
-
-    @property
-    def last_step_had_truncation(self) -> bool:
-        """Whether the most recent environment step truncated any environment."""
-        return self._last_step_had_truncation
 
     def _preprocess_observation(self, observation: T.Tensor) -> T.Tensor:
         """Convert raw NHWC uint8 observation to normalized NCHW float32.
@@ -115,100 +116,6 @@ class Agent:
             )
         with record_function("agent/permute_to_nchw"):
             return observation_tensor.permute(0, 3, 1, 2)
-
-    def feature_extract(self, observation: T.Tensor) -> T.Tensor:
-        """Extract CNN features from raw observation.
-
-        Args:
-            observation: Tensor of shape (batch, height, width, channel), dtype uint8.
-
-        Returns:
-            Tensor of shape (batch, cnn_out_dim) from the CNN encoder.
-        """
-        obs = self._preprocess_observation(observation)
-        return self._network.feature_extract(obs)
-
-    def _get_features_window(self, features: T.Tensor) -> T.Tensor:
-        """Build temporal window of features, padding with copies of first frame.
-
-        Args:
-            features: Tensor of shape (batch, feature_dim) for current step.
-
-        Returns:
-            Tensor of shape (batch, stack_size, feature_dim).
-        """
-        while len(self._obs_window) < self._stack_size:
-            self._obs_window.append(features.clone())
-        self._obs_window.append(features)
-        return T.stack(list(self._obs_window), dim=1)
-
-    def _get_mask_window(self, done: T.Tensor) -> T.Tensor:
-        """Build temporal mask marking valid history positions per environment.
-
-        A position is valid (False) if no episode boundary precedes it within
-        the window. The mask is True for positions that should be zeroed out.
-
-        Args:
-            done: Boolean tensor of shape (batch,) indicating episode termination
-                at the current step.
-
-        Returns:
-            Boolean mask of shape (batch, stack_size) where True means
-            "mask this position (zero out features)".
-        """
-        while len(self._done_window) < self._stack_size:
-            self._done_window.append(T.zeros_like(done))
-        self._done_window.append(done)
-        stacked_done_window = T.stack(list(self._done_window), dim=1)
-        # True where a done has occurred at or before this position in the window
-        mask = stacked_done_window.logical_not() & (
-            stacked_done_window.flip(1).cumsum(dim=1).flip(1) > 0
-        )
-        return mask
-
-    def temporal_encode(self, x: T.Tensor, mask: T.Tensor | None = None) -> T.Tensor:
-        """Encode a sequence of features through the temporal encoder.
-
-        Args:
-            x: Tensor of shape (batch, stack_size, feature_dim).
-            mask: Optional boolean mask of shape (batch, stack_size). Positions
-                where True are zeroed before encoding.
-
-        Returns:
-            Tensor of shape (batch, temporal_out_dim) after temporal encoding
-            and squeezing the sequence dimension.
-        """
-        if mask is None:
-            masked_x = x
-        else:
-            assert mask.shape == x.shape[:2], f"mask: {mask.shape}, x: {x.shape}"
-            masked_x = x.masked_fill(mask.unsqueeze(-1), 0.0)
-        return self._network.temporal_encode(masked_x).squeeze(1)
-
-    def heads(
-        self, temporal: T.Tensor, temperature: float | None = None
-    ) -> tuple[Distribution, T.Tensor, T.Tensor, T.Tensor]:
-        """Compute action distribution and value from temporal encoding.
-
-        Args:
-            temporal: Tensor of shape (batch, temporal_out_dim).
-            temperature: Sampling temperature for the Beta distribution actor.
-                Defaults to config.action_temperature.
-
-        Returns:
-            Tuple of (action_distribution, action_mean, value).
-        """
-        temperature = (
-            self.cfg.action_temperature if temperature is None else temperature
-        )
-
-        action_dist, action, value = self._network.heads(temporal, temperature)
-
-        if temperature != 0.0:
-            action = action_dist.sample()
-
-        log_probs = action_dist.log_prob(action)
-        return action_dist, action, value, log_probs
 
     def act(
         self,
@@ -234,11 +141,13 @@ class Agent:
             temperature = (
                 self.cfg.action_temperature if temperature is None else temperature
             )
-            features = self.feature_extract(observation)
+            features = self._encoder.frame_features(observation)
+            self._history.append(features, done)
+            windowed_features, windowed_done = self._history.peek()
 
-            temporal = self.temporal_encode(
-                self._get_features_window(features),
-                self._get_mask_window(done),
+            temporal = self._encoder.aggregate(
+                windowed_features,
+                episode_mask(windowed_done),
             )
 
             _, action, value, log_probs = self.heads(temporal, temperature)
@@ -248,42 +157,6 @@ class Agent:
             "value": value,
         }
         return (action, extras)
-
-    def bootstrap_value(self, observation: T.Tensor) -> T.Tensor:
-        """Evaluate value of a successor observation without mutating history.
-
-        Used for GAE bootstrap when an episode truncates (time limit). The
-        current history already contains the observation that produced the
-        action; we append the final observation to a temporary window.
-
-        Args:
-            observation: Tensor of shape (batch, height, width, channel), uint8.
-                The final observation from a truncated episode.
-
-        Returns:
-            Tensor of shape (batch,) bootstrap value estimate.
-        """
-        with T.no_grad():
-            features = self.feature_extract(observation)
-            history_size = self._stack_size - 1
-            prior_features = (
-                list(self._obs_window)[-history_size:] if history_size else []
-            )
-            windowed_features = T.stack([*prior_features, features], dim=1)
-
-            prior_dones = (
-                list(self._done_window)[-history_size:] if history_size else []
-            )
-            final_done = T.zeros(
-                features.shape[0], dtype=T.bool, device=features.device
-            )
-            windowed_dones = T.stack([*prior_dones, final_done], dim=1)
-            mask = windowed_dones.logical_not() & (
-                windowed_dones.flip(1).cumsum(dim=1).flip(1) > 0
-            )
-
-            temporal = self.temporal_encode(windowed_features, mask)
-            return self._network.critic(temporal)
 
     def evaluate_actions(
         self, observation: T.Tensor, action: T.Tensor, dones: T.Tensor | None = None
@@ -305,31 +178,15 @@ class Agent:
             - action_dist: Beta-based TransformedDistribution
             - action_mean: (batch * seq, action_dim)
         """
-        extracted_features = self.feature_extract(observation)
-        windowed_features = extracted_features.unfold(
-            0, self._stack_size, self._stack_size
-        ).permute(0, 2, 1)
-
-        windowed_dones = dones.unfold(0, self._stack_size, self._stack_size)
-        mask = windowed_dones.logical_not() & (
-            windowed_dones.flip(1).cumsum(1).flip(1) > 0
+        temporal_encoding = self._encoder(
+            observation, episode_mask(dones) if dones is not None else None
         )
 
-        temporal_encoding = self.temporal_encode(windowed_features, mask)
-        action_dist, action_mean, values, log_probs = self.heads(temporal_encoding)
+        action_dist, action_mean, values, log_probs = self.heads(
+            temporal_encoding
+        )  # TODO
 
         return log_probs, values, action_dist, action_mean
-
-    def action_transform(self, action: T.Tensor) -> T.Tensor:
-        """Apply affine transform from Beta [0,1] to environment action bounds.
-
-        Args:
-            action: Tensor in [0, 1] range from Beta distribution.
-
-        Returns:
-            Tensor scaled to [action_low, action_high] per dimension.
-        """
-        return self._network.action_transform(action)
 
     @property
     def stack_size(self) -> int:
@@ -598,8 +455,6 @@ class Agent:
 
         with record_function("environment/step"):
             next_state, reward, terminated, truncated, info = env.step(action)
-
-        self._last_step_had_truncation = bool(T.any(truncated))
 
         transition = Transition(
             obs=state,

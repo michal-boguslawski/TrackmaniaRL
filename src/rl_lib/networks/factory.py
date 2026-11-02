@@ -19,7 +19,7 @@ from rl_lib.networks.config import (
     SACNetworkConfig,
     SACTwinCriticConfig,
 )
-from rl_lib.networks.critic import Critic
+from rl_lib.networks.critic import VCritic
 from rl_lib.networks.temporal import TemporalCNN1D
 from rl_lib.networks.utils import update_state_dict
 
@@ -87,7 +87,7 @@ class Network(nn.Module):
         self.actor = Actor(
             action_dim, in_dim=self.sequence_encoder.out_dim, config=actor_config
         )
-        self.critic = Critic(
+        self.critic = VCritic(
             in_dim=self.sequence_encoder.out_dim, config=self.cfg.critic
         )
 
@@ -431,7 +431,7 @@ class SACTwinCritic(nn.Module):
             stack_size, in_dim=self.cnn.out_dim, config=self.cfg.temporal
         )
         critic_config = self.cfg.critic
-        self.actor = Critic(
+        self.actor = VCritic(
             action_dim,
             in_dim=self.sequence_encoder.out_dim + action_dim,
             config=critic_config,

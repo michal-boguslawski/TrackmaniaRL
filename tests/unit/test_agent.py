@@ -14,18 +14,17 @@ import pytest
 import torch as T
 
 from rl_lib.agent import Agent
-from rl_lib.networks.factory import Network
-from rl_lib.run_config import AgentSettings
 from rl_lib.networks.config import (
     ActorConfig,
     CNNConfig,
-    CriticConfig,
     ConvLayerConfig,
+    CriticConfig,
     LinearLayerConfig,
     NetworkConfig,
     TemporalConfig,
 )
-
+from rl_lib.networks.factory import Network
+from rl_lib.run_config import AgentSettings
 
 BATCH = 2
 ACTION_DIM = 3
@@ -47,14 +46,20 @@ def big_stack_agent() -> Agent:
             out_dim=FEATURE_DIM,
         ),
         temporal=TemporalConfig(out_dim=FEATURE_DIM),
-        actor=ActorConfig(hidden_layers=[LinearLayerConfig(out_dim=8, activation="gelu")]),
-        critic=CriticConfig(hidden_layers=[LinearLayerConfig(out_dim=8, activation="gelu")]),
+        actor=ActorConfig(
+            hidden_layers=[LinearLayerConfig(out_dim=8, activation="gelu")]
+        ),
+        critic=CriticConfig(
+            hidden_layers=[LinearLayerConfig(out_dim=8, activation="gelu")]
+        ),
     )
     network = Network(1, ACTION_DIM, 4, config)
     return Agent(network, device="cpu", config=AgentSettings(stack_size=4))
 
 
-def test_preprocess_observation_normalises_and_moves_channels_first(agent: Agent, observations):
+def test_preprocess_observation_normalises_and_moves_channels_first(
+    agent: Agent, observations
+):
     obs = T.stack([observations(1, fill=0)[0], observations(1, fill=255)[0]])
 
     result = agent._preprocess_observation(obs)
@@ -74,7 +79,9 @@ def test_preprocess_observation_requires_uint8(agent: Agent):
         agent._preprocess_observation(T.zeros(BATCH, 1, 96, 96))
 
 
-def test_preprocess_observation_normalisation_is_bitwise_identical_to_div_add(agent: Agent, observations):
+def test_preprocess_observation_normalisation_is_bitwise_identical_to_div_add(
+    agent: Agent, observations
+):
     # The fused addcdiv kernel must round exactly like the previous
     # x / divisor + offset sequence; anything else silently perturbs every
     # observation the policy sees.
@@ -82,7 +89,9 @@ def test_preprocess_observation_normalisation_is_bitwise_identical_to_div_add(ag
 
     result = agent._preprocess_observation(obs)
 
-    reference = obs.to(T.float32) / agent.cfg.observation_divisor + agent.cfg.observation_offset
+    reference = (
+        obs.to(T.float32) / agent.cfg.observation_divisor + agent.cfg.observation_offset
+    )
     T.testing.assert_close(result, reference.permute(0, 3, 1, 2), atol=0, rtol=0)
 
 
@@ -197,7 +206,9 @@ def test_temporal_encode_ignores_masked_frames(agent: Agent):
 
 def test_temporal_encode_rejects_a_mismatched_mask(agent: Agent):
     with pytest.raises(AssertionError):
-        agent.temporal_encode(T.rand(BATCH, 2, FEATURE_DIM), T.zeros(BATCH, 3, dtype=T.bool))
+        agent.temporal_encode(
+            T.rand(BATCH, 2, FEATURE_DIM), T.zeros(BATCH, 3, dtype=T.bool)
+        )
 
 
 def test_act_returns_action_log_probs_and_value(agent: Agent):
@@ -212,7 +223,11 @@ def test_act_returns_action_log_probs_and_value(agent: Agent):
     assert (action > -1.0).all() and (action < 1.0).all()
     assert T.isfinite(log_probs).all()
     # collection runs under no_grad
-    assert not action.requires_grad and not log_probs.requires_grad and not value.requires_grad
+    assert (
+        not action.requires_grad
+        and not log_probs.requires_grad
+        and not value.requires_grad
+    )
 
 
 def test_act_is_deterministic_at_zero_temperature(agent: Agent):
@@ -238,7 +253,9 @@ def test_act_at_zero_temperature_returns_the_policy_mean(agent: Agent):
 
     agent.reset()
     features = agent.feature_extract(obs)
-    _, expected_mean, _ = agent.heads(agent.temporal_encode(agent._get_features_window(features)))
+    _, expected_mean, _ = agent.heads(
+        agent.temporal_encode(agent._get_features_window(features))
+    )
 
     T.testing.assert_close(action, expected_mean)
 
@@ -308,7 +325,9 @@ def test_heads_delegates_to_the_network(agent: Agent):
     T.testing.assert_close(agent_dist.log_prob(probe), net_dist.log_prob(probe))
 
 
-def test_bootstrap_value_does_not_advance_the_policy_history(agent: Agent, observations):
+def test_bootstrap_value_does_not_advance_the_policy_history(
+    agent: Agent, observations
+):
     obs = observations(BATCH)
     done = T.zeros(BATCH, dtype=T.bool)
     agent.act(obs, done)
@@ -327,7 +346,9 @@ def test_bootstrap_value_does_not_advance_the_policy_history(agent: Agent, obser
         assert T.equal(before, after)
 
 
-def test_bootstrap_value_appends_the_successor_with_a_false_done(agent: Agent, observations):
+def test_bootstrap_value_appends_the_successor_with_a_false_done(
+    agent: Agent, observations
+):
     obs = observations(BATCH)
     done = T.zeros(BATCH, dtype=T.bool)
     agent.act(obs, done)
@@ -341,7 +362,9 @@ def test_bootstrap_value_appends_the_successor_with_a_false_done(agent: Agent, o
     dones = T.stack([*prior_dones, T.zeros(BATCH, dtype=T.bool)], dim=1)
     mask = dones.logical_not() & (dones.flip(1).cumsum(1).flip(1) > 0)
 
-    T.testing.assert_close(value, agent._network.critic(agent.temporal_encode(window, mask)))
+    T.testing.assert_close(
+        value, agent._network.critic(agent.temporal_encode(window, mask))
+    )
 
 
 def test_bootstrap_value_is_deterministic(agent: Agent, observations):
@@ -350,7 +373,10 @@ def test_bootstrap_value_is_deterministic(agent: Agent, observations):
     successor = observations(BATCH)
 
     T.testing.assert_close(
-        agent.bootstrap_value(successor), agent.bootstrap_value(successor), atol=0, rtol=0
+        agent.bootstrap_value(successor),
+        agent.bootstrap_value(successor),
+        atol=0,
+        rtol=0,
     )
 
 
@@ -413,7 +439,9 @@ def test_network_parameter_groups_partition_the_parameters(agent: Agent):
     }
 
     by_id = {id(p): group for group, params in groups.items() for p in params}
-    assert len(by_id) == len(list(agent._network.parameters())), "every parameter is grouped once"
+    assert len(by_id) == len(list(agent._network.parameters())), (
+        "every parameter is grouped once"
+    )
     for params in groups.values():
         assert params, "no parameter group may be empty, the optimizer would reject it"
 
@@ -438,7 +466,11 @@ def test_network_parameter_groups_exclude_biases_and_norms_from_decay(agent: Age
         assert not component_decay & component_no_decay
         for name, param in module.named_parameters():
             should_decay = "bias" not in name and "norm" not in name.lower()
-            grouped = (id(param) in component_decay) if should_decay else (id(param) in component_no_decay)
+            grouped = (
+                (id(param) in component_decay)
+                if should_decay
+                else (id(param) in component_no_decay)
+            )
             assert grouped, f"{prefix}.{name} landed in the wrong weight-decay group"
 
     head_no_decay = {id(p) for p in groups["head_no_decay"]}
@@ -582,9 +614,3 @@ def test_eval_and_train_toggle_the_network(agent: Agent):
 def test_device_and_stack_size_properties(agent: Agent):
     assert agent.stack_size == 2
     assert T.device(agent.device).type == "cpu"
-
-
-def test_action_transform_delegates_to_the_network(agent: Agent):
-    action = agent.action_transform(T.rand(BATCH, ACTION_DIM))
-
-    assert action.shape == (BATCH, ACTION_DIM)

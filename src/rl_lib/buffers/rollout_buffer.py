@@ -25,18 +25,16 @@ class RolloutStep:
         reward: Scalar reward, shape (num_envs,).
         terminated: Boolean, true if episode terminated at this step.
         truncated: Boolean, true if episode truncated (time limit) at this step.
-        truncated_value: Bootstrap value for truncated episodes, shape (num_envs,)
             or None if no truncation occurred.
     """
 
     observation: T.Tensor
     action: T.Tensor
-    critic_value: T.Tensor
     old_log_probs: T.Tensor
     reward: T.Tensor
     terminated: T.Tensor
     truncated: T.Tensor
-    truncated_value: T.Tensor | None = None
+    critic_value: T.Tensor | None = None
 
 
 class RolloutBuffer:
@@ -91,11 +89,6 @@ class RolloutBuffer:
             "reward": step.reward,
             "terminated": step.terminated,
             "truncated": step.truncated,
-            "truncated_value": (
-                T.zeros_like(step.reward)
-                if step.truncated_value is None
-                else step.truncated_value
-            ),
         }
         window_capacity = self.size + self._stack_size - 1
         window_fields = {"observation", "terminated", "truncated"}
@@ -172,11 +165,6 @@ class RolloutBuffer:
             "reward": step.reward,
             "terminated": step.terminated,
             "truncated": step.truncated,
-            "truncated_value": (
-                T.zeros_like(step.reward)
-                if step.truncated_value is None
-                else step.truncated_value
-            ),
         }
 
         if self._window_count == 0:
@@ -189,7 +177,6 @@ class RolloutBuffer:
             "critic_value",
             "old_log_probs",
             "reward",
-            "truncated_value",
         ):
             self._write(key, values[key], self._transition_index)
 
@@ -206,11 +193,10 @@ class RolloutBuffer:
         truncated: T.Tensor,
         gamma: float,
         gae_lambda: float,
-        truncated_value: T.Tensor | None = None,
     ) -> tuple[T.Tensor, T.Tensor]:
         """Compute GAE returns and advantages.
 
-        Bootstraps through truncation (uses truncated_value) but stops
+        Bootstraps through truncation but stops
         advantage recursion at either termination or truncation.
 
         Args:
@@ -220,16 +206,11 @@ class RolloutBuffer:
             truncated: Boolean tensor of shape (batch, length - 1).
             gamma: Discount factor.
             gae_lambda: GAE lambda parameter.
-            truncated_value: Optional bootstrap values for truncated steps,
-                shape (batch, length - 1).
-
         Returns:
             Tuple of (returns, advantages), each shape (batch, length - 1).
         """
         dones = T.logical_or(terminated, truncated)
         next_value = critic_value[:, 1:]
-        if truncated_value is not None:
-            next_value = T.where(truncated, truncated_value, next_value)
         delta = (
             reward
             + gamma * next_value * T.logical_not(terminated)
@@ -295,7 +276,6 @@ class RolloutBuffer:
             buffer["truncated"][:, (self._stack_size - 1) : -1],
             gamma,
             gae_lambda,
-            buffer["truncated_value"][:, :-1],
         )
         episode_ends = T.logical_or(buffer["terminated"], buffer["truncated"])
         # `dones` has to answer "is this frame the first of a new episode", the

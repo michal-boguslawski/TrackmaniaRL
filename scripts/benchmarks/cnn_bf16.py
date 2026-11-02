@@ -9,11 +9,11 @@ starting an environment or compiling the model.
 from __future__ import annotations
 
 import argparse
-from importlib import resources
 import json
 import math
-from pathlib import Path
 import sys
+from importlib import resources
+from pathlib import Path
 from typing import Callable
 
 import torch as T
@@ -42,7 +42,9 @@ def _gradient_summary(
     """Summarize gradient norm difference and cosine similarity."""
     paired_gradients = [
         (reference_gradient, candidate_gradient)
-        for reference_gradient, candidate_gradient in zip(reference, candidate, strict=True)
+        for reference_gradient, candidate_gradient in zip(
+            reference, candidate, strict=True
+        )
         if reference_gradient is not None and candidate_gradient is not None
     ]
     reference_flat = T.cat(
@@ -120,15 +122,17 @@ def run_benchmark(
     )
     dones = T.zeros(sample_count, dtype=T.bool, device=device)
     with T.no_grad():
-        fp32_log_probs, fp32_values, fp32_dist, fp32_means = fp32_agent.evaluate_actions(
-            observations, T.full((batch_size, 3), 0.5, device=device), dones
+        fp32_log_probs, fp32_values, fp32_dist, fp32_means = (
+            fp32_agent.evaluate_actions(
+                observations, T.full((batch_size, 3), 0.5, device=device), dones
+            )
         )
         actions = fp32_dist.sample()
-        fp32_log_probs, fp32_values, fp32_dist, fp32_means = fp32_agent.evaluate_actions(
-            observations, actions, dones
+        fp32_log_probs, fp32_values, fp32_dist, fp32_means = (
+            fp32_agent.evaluate_actions(observations, actions, dones)
         )
-        bf16_log_probs, bf16_values, bf16_dist, bf16_means = bf16_agent.evaluate_actions(
-            observations, actions, dones
+        bf16_log_probs, bf16_values, bf16_dist, bf16_means = (
+            bf16_agent.evaluate_actions(observations, actions, dones)
         )
 
     act_observations = observations[:batch_size]
@@ -180,14 +184,18 @@ def run_benchmark(
         ):
             metrics = trainer.train_step(**batch)
             loss_value = (
-                metrics.get("metrics/actor_loss", math.nan)
-                + run_config.trainer.loss.critic_beta * metrics.get("loss/critic", math.nan)
-                - run_config.trainer.loss.entropy.coefficient * metrics.get("loss/entropy", math.nan)
+                metrics.get("loss/actor", math.nan)
+                + run_config.trainer.loss.critic_beta
+                * metrics.get("loss/critic", math.nan)
+                - run_config.trainer.loss.entropy.coefficient
+                * metrics.get("loss/entropy", math.nan)
             )
             if not math.isfinite(loss_value) or not all(
                 T.isfinite(parameter).all().item() for parameter in network.parameters()
             ):
-                raise RuntimeError(f"Non-finite PPO update in {network.cnn_autocast_dtype}")
+                raise RuntimeError(
+                    f"Non-finite PPO update in {network.cnn_autocast_dtype}"
+                )
             history.append(loss_value)
 
     # Restart both optimizers and networks from the same state for a fair timing.
@@ -210,6 +218,7 @@ def run_benchmark(
 
     def cnn_forward(network: Network) -> Callable[[], object]:
         """Create an inference-only CNN closure over preprocessed input."""
+
         def operation() -> T.Tensor:
             with T.no_grad():
                 return network.feature_extract(prepared_observations)
@@ -252,17 +261,21 @@ def run_benchmark(
             "gradient": gradient_comparison,
         },
         "stability": {
-            "fp32_loss_finite": all(math.isfinite(value) for value in fp32_stability_losses),
-            "cnn_bf16_loss_finite": all(math.isfinite(value) for value in bf16_stability_losses),
+            "fp32_loss_finite": all(
+                math.isfinite(value) for value in fp32_stability_losses
+            ),
+            "cnn_bf16_loss_finite": all(
+                math.isfinite(value) for value in bf16_stability_losses
+            ),
             "fp32_losses": fp32_stability_losses,
             "cnn_bf16_losses": bf16_stability_losses,
         },
-        "timings": {
-            name: result.to_dict() for name, result in timings.items()
-        },
+        "timings": {name: result.to_dict() for name, result in timings.items()},
         "speedup": {
             "cnn_forward": timings["fp32_cnn"].speedup_over(timings["cnn_bf16_cnn"]),
-            "ppo_update": timings["cnn_bf16_update"].speedup_over(timings["fp32_update"]),
+            "ppo_update": timings["cnn_bf16_update"].speedup_over(
+                timings["fp32_update"]
+            ),
         },
     }
 

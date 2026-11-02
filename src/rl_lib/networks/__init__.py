@@ -9,33 +9,33 @@ Provides:
 - Config classes: NetworkConfig, CNNConfig, TemporalConfig, ActorConfig, CriticConfig (config.py)
 """
 
-from rl_lib.networks.factory import Network
 from rl_lib.networks.actor import Actor, StableTanhTransform
-from rl_lib.networks.critic import Critic
 from rl_lib.networks.cnn import CNN
-from rl_lib.networks.temporal import TemporalCNN1D
 from rl_lib.networks.config import (
-    NetworkConfig,
-    CNNConfig,
-    TemporalConfig,
     ActorConfig,
-    CriticConfig,
+    CNNConfig,
     ConvLayerConfig,
     LinearLayerConfig,
+    NetworkConfig,
+    TemporalConfig,
+    VCriticConfig,
 )
+from rl_lib.networks.critic import VCritic
+from rl_lib.networks.factory import Network
+from rl_lib.networks.temporal import TemporalCNN1D
 
 __all__ = [
-    "Network",
-    "Actor",
-    "StableTanhTransform",
-    "Critic",
     "CNN",
-    "TemporalCNN1D",
-    "NetworkConfig",
-    "CNNConfig",
-    "TemporalConfig",
+    "Actor",
     "ActorConfig",
-    "CriticConfig",
+    "CNNConfig",
     "ConvLayerConfig",
     "LinearLayerConfig",
+    "Network",
+    "NetworkConfig",
+    "StableTanhTransform",
+    "TemporalCNN1D",
+    "TemporalConfig",
+    "VCritic",
+    "VCriticConfig",
 ]

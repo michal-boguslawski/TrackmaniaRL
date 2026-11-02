@@ -8,7 +8,7 @@ This provides bounded continuous actions with differentiable log-prob gradients.
 import torch as T
 import torch.nn.functional as F
 from torch import nn
-from torch.distributions import Distribution, Beta, TransformedDistribution
+from torch.distributions import Beta, Distribution, TransformedDistribution
 from torch.distributions.transforms import AffineTransform, TanhTransform
 
 from rl_lib.networks.config import ActorConfig
@@ -58,7 +58,10 @@ class Actor(nn.Module):
         self.action_dim = action_dim
         self.in_dim = in_dim
         self.cfg = config
-        if len(self.cfg.action_low) != action_dim or len(self.cfg.action_high) != action_dim:
+        if (
+            len(self.cfg.action_low) != action_dim
+            or len(self.cfg.action_high) != action_dim
+        ):
             raise ValueError(
                 f"actor action bounds must each have action_dim={action_dim} values; "
                 f"got {len(self.cfg.action_low)} and {len(self.cfg.action_high)}"
@@ -68,20 +71,24 @@ class Actor(nn.Module):
         modules: list[nn.Module] = []
         current_dim = in_dim
         for layer_cfg in hidden_layers:
-            modules.extend((
-                init_layer(
-                    nn.Linear(current_dim, layer_cfg.out_dim, bias=layer_cfg.bias),
-                    layer_cfg.init_gain,
-                    layer_cfg.init_bias,
-                ),
-                make_activation(layer_cfg.activation),
-            ))
+            modules.extend(
+                (
+                    init_layer(
+                        nn.Linear(current_dim, layer_cfg.out_dim, bias=layer_cfg.bias),
+                        layer_cfg.init_gain,
+                        layer_cfg.init_bias,
+                    ),
+                    make_activation(layer_cfg.activation),
+                )
+            )
             current_dim = layer_cfg.out_dim
-        modules.append(init_layer(
-            nn.Linear(current_dim, 2 * action_dim, bias=self.cfg.output_bias),
-            self.cfg.output_init_gain,
-            self.cfg.output_init_bias,
-        ))
+        modules.append(
+            init_layer(
+                nn.Linear(current_dim, 2 * action_dim, bias=self.cfg.output_bias),
+                self.cfg.output_init_gain,
+                self.cfg.output_init_bias,
+            )
+        )
         self._network = nn.Sequential(*modules)
         low = T.tensor(self.cfg.action_low)
         high = T.tensor(self.cfg.action_high)
@@ -104,7 +111,9 @@ class Actor(nn.Module):
         """
         return self._affine_loc + self._affine_scale * action
 
-    def _distribution(self, x: T.Tensor, temperature: float) -> tuple[Distribution, T.Tensor]:
+    def _distribution(
+        self, alpha: T.Tensor, beta: T.Tensor
+    ) -> tuple[Distribution, T.Tensor]:
         """Construct Beta distribution and compute mean action.
 
         Args:
@@ -116,19 +125,17 @@ class Actor(nn.Module):
             Tuple of (TransformedDistribution, mean_action) where mean_action
             is the affine-transformed Beta mean.
         """
-        raw = self._network(x)
-        alpha_raw, beta_raw = raw.chunk(2, dim=-1)
-        alpha = F.softplus(alpha_raw, beta=self.cfg.softplus_beta, threshold=self.cfg.softplus_threshold) / temperature
-        beta = F.softplus(beta_raw, beta=self.cfg.softplus_beta, threshold=self.cfg.softplus_threshold) / temperature
-        alpha = alpha + self.cfg.concentration_offset
-        beta = beta + self.cfg.concentration_offset
         base_dist = Beta(alpha, beta)
         # A Beta sample can round to 0/1 after the affine map in float32. Clamp
         # the inverse in that case so replayed log-probs stay finite.
-        transform = _StableAffineTransform(loc=self._affine_loc, scale=self._affine_scale)
+        transform = _StableAffineTransform(
+            loc=self._affine_loc, scale=self._affine_scale
+        )
         return TransformedDistribution(base_dist, transform), transform(base_dist.mean)
 
-    def forward(self, x: T.Tensor, temperature: float | None = None) -> tuple[Distribution, T.Tensor]:
+    def forward(
+        self, x: T.Tensor, temperature: float | None = None
+    ) -> tuple[Distribution, T.Tensor]:
         """Stochastic forward pass: sample from Beta distribution.
 
         Args:
@@ -142,24 +149,33 @@ class Actor(nn.Module):
         Raises:
             ValueError: If temperature <= 0.
         """
-        temperature = self.cfg.default_temperature if temperature is None else temperature
+        temperature = temperature or 1
+        raw = self._network(x)
+        alpha_raw, beta_raw = raw.chunk(2, dim=-1)
+        alpha = (
+            F.softplus(
+                alpha_raw,
+                beta=self.cfg.softplus_beta,
+                threshold=self.cfg.softplus_threshold,
+            )
+            / temperature
+        )
+        beta = (
+            F.softplus(
+                beta_raw,
+                beta=self.cfg.softplus_beta,
+                threshold=self.cfg.softplus_threshold,
+            )
+            / temperature
+        )
+        alpha = alpha + self.cfg.concentration_offset
+        beta = beta + self.cfg.concentration_offset
+        dist, action_mean = self._distribution(alpha, beta)
         if temperature <= 0:
-            raise ValueError("temperature must be positive for stochastic actor evaluation")
-        return self._distribution(x, temperature)
-
-    def forward_deterministic(self, x: T.Tensor) -> tuple[Distribution, T.Tensor]:
-        """Deterministic forward pass: return mean of Beta distribution.
-
-        Uses config.deterministic_distribution_temperature (typically small
-        but non-zero to avoid degenerate Beta at boundaries).
-
-        Args:
-            x: Input tensor of shape (batch, in_dim).
-
-        Returns:
-            Tuple of (action_distribution, action_mean).
-        """
-        return self._distribution(x, self.cfg.deterministic_distribution_temperature)
+            raise ValueError(
+                "temperature must be positive for stochastic actor evaluation"
+            )
+        return dist, action_mean
 
     def __repr__(self) -> str:
         n_params = sum(p.numel() for p in super().parameters())

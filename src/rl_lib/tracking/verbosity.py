@@ -75,8 +75,6 @@ def as_verbosity(verbosity: int | Verbosity) -> Verbosity:
 # Losses are the ``loss/`` family; the actor surrogate loss is the one loss
 # reported under the ``metrics/`` prefix, so it is named explicitly.
 CORE_LOSS_PREFIXES: tuple[str, ...] = ("loss/",)
-CORE_LOSS_METRICS: frozenset[str] = frozenset({"metrics/actor_loss"})
-
 
 
 def is_core_loss(name: str) -> bool:
@@ -88,7 +86,7 @@ def is_core_loss(name: str) -> bool:
     Returns:
         True for total, actor, critic, and entropy losses.
     """
-    return name.startswith(CORE_LOSS_PREFIXES) or name in CORE_LOSS_METRICS
+    return name.startswith(CORE_LOSS_PREFIXES)
 
 
 def filter_metrics(
@@ -175,7 +173,9 @@ class VerbosityMetricsLogger(MetricsLogger):
         """Delegate parameter logging; parameters are not metrics."""
         self.logger.log_parameters(parameters)
 
-    def log_config(self, config: dict, artifact_file: str = "config/run_config.yaml") -> None:
+    def log_config(
+        self, config: dict, artifact_file: str = "config/run_config.yaml"
+    ) -> None:
         """Delegate config artifact logging; configs are not metrics."""
         self.logger.log_config(config, artifact_file)
 
@@ -199,7 +199,9 @@ class VerbosityMetricsLogger(MetricsLogger):
         """Delegate model artifact logging."""
         self.logger.log_model(model, artifact_path, registered_model_name)
 
-    def log_state_dict(self, state_dict: dict, artifact_path: str = "checkpoints") -> None:
+    def log_state_dict(
+        self, state_dict: dict, artifact_path: str = "checkpoints"
+    ) -> None:
         """Delegate state-dict artifact logging."""
         self.logger.log_state_dict(state_dict, artifact_path)
 

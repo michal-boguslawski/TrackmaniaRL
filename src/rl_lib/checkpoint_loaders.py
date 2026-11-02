@@ -9,8 +9,8 @@ import mlflow
 import torch as T
 from torch import nn
 
+from rl_lib.run_config import RunSettings
 from rl_lib.tracking.artifacts import step_artifact_path
-
 
 FINAL_MODEL_ARTIFACT = "final_model"
 
@@ -22,21 +22,33 @@ def _load_checkpoint_object(network: nn.Module, checkpoint: object) -> nn.Module
     if isinstance(checkpoint, nn.Module):
         checkpoint = checkpoint.state_dict()
     if not isinstance(checkpoint, Mapping):
-        raise ValueError("Checkpoint is neither a model nor a state dict")
+        raise TypeError("Checkpoint is neither a model nor a state dict")
 
     state_dict = checkpoint.get("state_dict", checkpoint)
     if not isinstance(state_dict, Mapping):
-        raise ValueError("Checkpoint does not contain a model state dict")
+        raise TypeError("Checkpoint does not contain a model state dict")
     if state_dict and all(
-        isinstance(key, str) and key.startswith("_orig_mod.")
-        for key in state_dict
+        isinstance(key, str) and key.startswith("_orig_mod.") for key in state_dict
     ):
         state_dict = {
-            key.removeprefix("_orig_mod."): value
-            for key, value in state_dict.items()
+            key.removeprefix("_orig_mod."): value for key, value in state_dict.items()
         }
     nn.Module.load_state_dict(network, state_dict, strict=True)
     return network
+
+
+def load_pretrained(
+    network: nn.Module, run_settings: RunSettings, device: T.device
+) -> None:
+    if run_settings.pretrained_checkpoint is None:
+        return
+
+    checkpoint = T.load(
+        run_settings.pretrained_checkpoint,
+        map_location=device,
+        weights_only=False,
+    )
+    network.load_state_dict(checkpoint)
 
 
 class LocalCheckpointLoader:
@@ -76,7 +88,9 @@ class LocalCheckpointLoader:
         try:
             return _load_checkpoint_object(network, checkpoint)
         except ValueError as exc:
-            raise ValueError(f"Invalid checkpoint {self.checkpoint_path}: {exc}") from exc
+            raise ValueError(
+                f"Invalid checkpoint {self.checkpoint_path}: {exc}"
+            ) from exc
 
 
 class MLflowCheckpointLoader:

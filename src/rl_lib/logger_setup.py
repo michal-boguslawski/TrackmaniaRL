@@ -14,7 +14,7 @@ import logging.handlers
 import os
 import socket
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
@@ -32,7 +32,7 @@ def _generate_session_id() -> str:
         Session ID string.
     """
     host = socket.gethostname().split(".")[0]
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     short_id = uuid.uuid4().hex[:6]
     return f"{host}-{ts}-{short_id}"
 
@@ -73,7 +73,9 @@ def setup_logging(
         - Starts queue handler listener thread
         - Registers shutdown_logging at exit
     """
-    session_id = session_id or os.environ.get("RL_LIB_SESSION_ID") or _generate_session_id()
+    session_id = (
+        session_id or os.environ.get("RL_LIB_SESSION_ID") or _generate_session_id()
+    )
     _install_session_id_factory(session_id)
 
     config_path = Path(config_path)
@@ -108,5 +110,9 @@ def shutdown_logging() -> None:
     Safe to call multiple times; checks listener state before stopping.
     """
     queue_handler = logging.getHandlerByName("queue_handler")
-    if queue_handler is not None and queue_handler.listener is not None and queue_handler.listener._thread is not None:
+    if (
+        queue_handler is not None
+        and queue_handler.listener is not None
+        and queue_handler.listener._thread is not None
+    ):
         queue_handler.listener.stop()

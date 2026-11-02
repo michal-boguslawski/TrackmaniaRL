@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 import yaml
 from pydantic import Field, FiniteFloat, NonNegativeInt, PositiveInt, model_validator
@@ -139,7 +139,6 @@ class AgentSettings(StrictModel):
     stack_size: PositiveInt = 4
     observation_divisor: float = Field(default=127.5, gt=0)
     observation_offset: FiniteFloat = -1.0
-    action_temperature: float = Field(default=1.0, ge=0)
     deterministic_temperature: float = Field(default=0.0, ge=0)
 
 
@@ -237,13 +236,11 @@ class RecordVideoCallbackConfig(StrictModel):
 
 
 CallbackSettings = Annotated[
-    Union[
-        CheckpointsCallbackConfig,
-        MetricsCallbackConfig,
-        EpisodeStatisticsCallbackConfig,
-        EvaluationCallbackConfig,
-        RecordVideoCallbackConfig,
-    ],
+    CheckpointsCallbackConfig
+    | MetricsCallbackConfig
+    | EpisodeStatisticsCallbackConfig
+    | EvaluationCallbackConfig
+    | RecordVideoCallbackConfig,
     Field(discriminator="name"),
 ]
 
@@ -317,61 +314,6 @@ class RunConfig(StrictModel):
         values["trainer"] = trainer
         return values
 
-    @model_validator(mode="before")
-    @classmethod
-    def migrate_legacy_callback_settings(cls, values):
-        """Accept the former callback mapping while writing the list format."""
-        if not isinstance(values, dict) or not isinstance(
-            values.get("callbacks"), dict
-        ):
-            return values
-
-        old = values["callbacks"]
-        migrated = []
-        legacy_callbacks = (
-            (
-                "checkpoints",
-                {"interval": old.get("checkpoint_interval", 200)},
-            ),
-            ("metrics", {"granularity": old.get("metrics_granularity", "batch")}),
-            (
-                "episode_statistics",
-                {
-                    "mode": old.get("episode_statistics_mode", "mean"),
-                    "stats_key": old.get("episode_statistics_key", "episode"),
-                },
-            ),
-            (
-                "evaluation",
-                {
-                    "interval": old.get("evaluation_interval", 50_000),
-                    "episodes": old.get("evaluation_episodes", 10),
-                    "final_episodes": old.get("final_evaluation_episodes", 1_000),
-                },
-            ),
-            (
-                "record_video",
-                {
-                    "interval": old.get("video_interval", 50_000),
-                    "folder": old.get("video_folder", "./logs/videos"),
-                    "skip": old.get("video_skip"),
-                    "normalize_rewards": old.get("video_normalize_rewards", False),
-                    "recording": old.get("video_recording", {"name": "record_video"}),
-                    "wrappers": old.get("video_wrappers"),
-                },
-            ),
-        )
-        for name, options in legacy_callbacks:
-            if old.get(name, True):
-                migrated.append(
-                    {
-                        "name": name,
-                        **{k: v for k, v in options.items() if v is not None},
-                    }
-                )
-        values["callbacks"] = migrated
-        return values
-
     def callback(self, name: str):
         return next(
             (callback for callback in self.callbacks if callback.name == name), None
@@ -408,7 +350,7 @@ class RunConfig(StrictModel):
         evaluation rollouts."""
         callback = self.callback("record_video")
         if not isinstance(callback, RecordVideoCallbackConfig):
-            raise ValueError("record_video callback is not configured")
+            raise TypeError("record_video callback is not configured")
         return self.environment.model_copy(
             update={
                 "num_envs": 1,
@@ -452,13 +394,13 @@ class RunConfig(StrictModel):
     def metrics_settings(self) -> MetricsCallbackSettings:
         callback = self.callback("metrics")
         if not isinstance(callback, MetricsCallbackConfig):
-            raise ValueError("metrics callback is not configured")
+            raise TypeError("metrics callback is not configured")
         return MetricsCallbackSettings(granularity=callback.granularity)
 
     def episode_statistics_settings(self) -> EpisodeStatisticsCallbackSettings:
         callback = self.callback("episode_statistics")
         if not isinstance(callback, EpisodeStatisticsCallbackConfig):
-            raise ValueError("episode_statistics callback is not configured")
+            raise TypeError("episode_statistics callback is not configured")
         return EpisodeStatisticsCallbackSettings(
             mode=callback.mode,
             stats_key=callback.stats_key,
@@ -467,7 +409,7 @@ class RunConfig(StrictModel):
     def video_settings(self) -> VideoCallbackSettings:
         callback = self.callback("record_video")
         if not isinstance(callback, RecordVideoCallbackConfig):
-            raise ValueError("record_video callback is not configured")
+            raise TypeError("record_video callback is not configured")
         return VideoCallbackSettings(
             environment=self.video_environment(),
             interval=callback.interval,
@@ -477,7 +419,7 @@ class RunConfig(StrictModel):
     def evaluation_settings(self) -> EvaluationCallbackSettings:
         callback = self.callback("evaluation")
         if not isinstance(callback, EvaluationCallbackConfig):
-            raise ValueError("evaluation callback is not configured")
+            raise TypeError("evaluation callback is not configured")
         return EvaluationCallbackSettings(
             environment=self.evaluation_environment(),
             interval=callback.interval,
@@ -609,11 +551,13 @@ class RunConfig(StrictModel):
                 raise ValueError(
                     "trainer.scheduler minimum learning rate cannot exceed any initial learning rate"
                 )
-        if isinstance(scheduler, LinearSchedulerSettings):
-            if scheduler.min_lr / max(initial_lrs) > scheduler.start_factor:
-                raise ValueError(
-                    "linear scheduler minimum LR is above the configured starting LR"
-                )
+        if (
+            isinstance(scheduler, LinearSchedulerSettings)
+            and scheduler.min_lr / max(initial_lrs) > scheduler.start_factor
+        ):
+            raise ValueError(
+                "linear scheduler minimum LR is above the configured starting LR"
+            )
         return self
 
 
@@ -630,5 +574,5 @@ def load_config(path: str) -> RunConfig:
     if raw is None:
         raw = {}
     if not isinstance(raw, dict):
-        raise ValueError(f"Config file {config_path} must contain a YAML mapping")
+        raise TypeError(f"Config file {config_path} must contain a YAML mapping")
     return RunConfig.model_validate(raw)

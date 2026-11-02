@@ -13,13 +13,12 @@ import torch as T
 
 from rl_lib.agent import Agent
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
-from rl_lib.training.callbacks.base import Callback
 from rl_lib.run_config import RolloutSettings, RunSettings
+from rl_lib.training.callbacks.base import Callback
 from rl_lib.training.ppo.losses import PPOLosses
 from rl_lib.training.ppo.minibatches import get_iid_minibatches
 from rl_lib.training.ppo.trainer import PPOTrainer
 from rl_lib.training.settings import OptimizerSettings, TrainerSettings
-
 
 NUM_ENVS = 2
 SIZE = 6
@@ -34,7 +33,9 @@ class SpyCallback(Callback):
         self.events: list[tuple] = []
 
     def on_start(self, *args, **kwargs):
-        self.events.append(("start", kwargs.get("step"), sorted(kwargs.get("metrics", {}))))
+        self.events.append(
+            ("start", kwargs.get("step"), sorted(kwargs.get("metrics", {})))
+        )
 
     def on_minibatch(self, *args, **kwargs):
         self.events.append(("minibatch", kwargs.get("step")))
@@ -43,7 +44,9 @@ class SpyCallback(Callback):
         self.events.append(("epoch",))
 
     def on_end(self, *args, **kwargs):
-        self.events.append(("end", kwargs.get("step"), sorted(kwargs.get("metrics", {}))))
+        self.events.append(
+            ("end", kwargs.get("step"), sorted(kwargs.get("metrics", {})))
+        )
 
 
 def _copy_settings(settings, path: str, **updates):
@@ -138,7 +141,9 @@ def tagged_batch() -> dict[str, T.Tensor]:
     }
 
 
-def test_minibatch_shapes_follow_the_rollout(trainer: PPOTrainer, rollout: dict[str, T.Tensor]):
+def test_minibatch_shapes_follow_the_rollout(
+    trainer: PPOTrainer, rollout: dict[str, T.Tensor]
+):
     minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
 
     assert minibatch["observation"].shape == (4 * STACK_SIZE, *OBSERVATION_SHAPE)
@@ -161,13 +166,18 @@ def test_minibatches_cover_every_transition_exactly_once(trainer: PPOTrainer, ro
 
 
 def test_minibatch_count_and_tail_size(trainer: PPOTrainer, rollout):
-    sizes = [mb["action"].shape[0] for mb in get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True)]
+    sizes = [
+        mb["action"].shape[0]
+        for mb in get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True)
+    ]
 
     assert sizes == [4, 4, 2]
     assert sum(sizes) == NUM_ENVS * (SIZE - 1)
 
 
-def test_minibatches_cover_every_tagged_transition_once(trainer: PPOTrainer, tagged_batch):
+def test_minibatches_cover_every_tagged_transition_once(
+    trainer: PPOTrainer, tagged_batch
+):
     seen: list[int] = []
     for minibatch in get_iid_minibatches(tagged_batch, 4, STACK_SIZE, shuffle=True):
         seen.extend(int(value) for value in minibatch["action"][:, 0].tolist())
@@ -197,7 +207,8 @@ def test_vectorized_minibatches_match_legacy_assembly(shuffle: bool):
         "critic_value": transition_indices.float() + 0.25,
         "returns": transition_indices.float() + 10.5,
         "advantages": transition_indices.float() - 7.25,
-        "dones": (T.arange(num_envs * observation_length).reshape(num_envs, -1) % 3) == 1,
+        "dones": (T.arange(num_envs * observation_length).reshape(num_envs, -1) % 3)
+        == 1,
     }
 
     def legacy_minibatches() -> list[dict[str, T.Tensor]]:
@@ -253,11 +264,7 @@ def test_vectorized_minibatches_match_legacy_assembly(shuffle: bool):
         np.random.seed(1234)
         expected = legacy_minibatches()
         np.random.seed(1234)
-        actual = list(
-            get_iid_minibatches(
-                batch, minibatch_size, stack_size, shuffle
-            )
-        )
+        actual = list(get_iid_minibatches(batch, minibatch_size, stack_size, shuffle))
     finally:
         np.random.set_state(rng_state)
 
@@ -274,7 +281,9 @@ def test_vectorized_minibatches_match_legacy_assembly(shuffle: bool):
             )
 
 
-def test_minibatch_observation_windows_match_their_transition(trainer: PPOTrainer, tagged_batch):
+def test_minibatch_observation_windows_match_their_transition(
+    trainer: PPOTrainer, tagged_batch
+):
     for minibatch in get_iid_minibatches(tagged_batch, 4, STACK_SIZE, shuffle=True):
         window = minibatch["observation"][:, 0, 0, 0]
         for index, tag in enumerate(minibatch["action"][:, 0].tolist()):
@@ -286,9 +295,12 @@ def test_minibatch_observation_windows_match_their_transition(trainer: PPOTraine
                 ],
                 dtype=T.uint8,
             )
-            T.testing.assert_close(
-                window[index * STACK_SIZE : (index + 1) * STACK_SIZE], expected
-            ), f"window for transition (env={env}, step={step})"
+            (
+                T.testing.assert_close(
+                    window[index * STACK_SIZE : (index + 1) * STACK_SIZE], expected
+                ),
+                f"window for transition (env={env}, step={step})",
+            )
 
 
 def test_minibatch_generation_leaves_the_batch_alone(rollout):
@@ -298,7 +310,9 @@ def test_minibatch_generation_leaves_the_batch_alone(rollout):
 
     assert minibatch["observation"].shape == (4 * STACK_SIZE, *OBSERVATION_SHAPE)
     for key, value in rollout.items():
-        T.testing.assert_close(value, before[key], msg=lambda text, key=key: f"{key}: {text}")
+        T.testing.assert_close(
+            value, before[key], msg=lambda text, key=key: f"{key}: {text}"
+        )
 
 
 def test_actor_loss_with_an_unchanged_policy_is_the_plain_surrogate(
@@ -321,7 +335,10 @@ def test_actor_loss_with_an_unchanged_policy_is_the_plain_surrogate(
 def test_actor_loss_normalises_advantages_per_minibatch(
     agent: Agent, ppo_losses: PPOLosses
 ):
-    trainer = PPOTrainer(agent, TrainerSettings(advantage_normalization_strategy="batch", mean_reg_coef=0.0))
+    trainer = PPOTrainer(
+        agent,
+        TrainerSettings(advantage_normalization_strategy="batch", mean_reg_coef=0.0),
+    )
     advantages = T.tensor([1.0, 2.0, 3.0])
     log_probs = T.rand(3, ACTION_DIM)
     action_mean = T.zeros(3, ACTION_DIM)
@@ -445,7 +462,9 @@ def test_entropy_loss_sums_the_beta_entropies(
     assert "loss/entropy" in metrics
     for index in range(ACTION_DIM):
         expected = dist.base_dist.variance[:, index].pow(0.5).log().mean()
-        assert metrics[f"metrics/log_std_{index}"] == pytest.approx(expected.item(), rel=1e-4)
+        assert metrics[f"metrics/log_std_{index}"] == pytest.approx(
+            expected.item(), rel=1e-4
+        )
         assert metrics[f"metrics/entropy_{index}"] == pytest.approx(
             dist.base_dist.entropy()[:, index].mean().item(), rel=1e-4
         )
@@ -516,7 +535,9 @@ def test_beta_mean_reports_support_saturation_per_action(ppo_losses: PPOLosses):
     assert metrics["metrics/beta_mean_1"] == pytest.approx(0.002, abs=1e-4)
 
 
-def test_calculate_losses_combines_every_term(agent: Agent, trainer: PPOTrainer, rollout):
+def test_calculate_losses_combines_every_term(
+    agent: Agent, trainer: PPOTrainer, rollout
+):
     minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
 
     (actor_loss, critic_loss, entropy_loss), metrics = trainer.calculate_losses(
@@ -531,13 +552,21 @@ def test_calculate_losses_combines_every_term(agent: Agent, trainer: PPOTrainer,
 
     for loss in (actor_loss, critic_loss, entropy_loss):
         assert loss.ndim == 0 and T.isfinite(loss)
-    for key in ("loss/critic", "loss/entropy", "metrics/approx_kl", "metrics/actor_loss"):
+    for key in (
+        "loss/critic",
+        "loss/entropy",
+        "metrics/approx_kl",
+        "metrics/actor_loss",
+    ):
         assert key in metrics
 
 
 def test_train_step_updates_the_parameters(trainer: PPOTrainer, rollout):
     minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
-    before = {name: param.clone() for name, param in trainer._agent._network.named_parameters()}
+    before = {
+        name: param.clone()
+        for name, param in trainer._agent._network.named_parameters()
+    }
     cnn_before = [
         parameter.detach().clone()
         for parameter in trainer._agent.network.cnn.parameters()
@@ -545,9 +574,14 @@ def test_train_step_updates_the_parameters(trainer: PPOTrainer, rollout):
 
     metrics = trainer.train_step(**minibatch)
 
-    assert any(not T.equal(param, before[name]) for name, param in trainer._agent._network.named_parameters())
+    assert any(
+        not T.equal(param, before[name])
+        for name, param in trainer._agent._network.named_parameters()
+    )
     assert metrics["loss/total"] == pytest.approx(
-        metrics["metrics/actor_loss"] + 0.5 * metrics["loss/critic"] - 0.001 * metrics["loss/entropy"],
+        metrics["metrics/actor_loss"]
+        + 0.5 * metrics["loss/critic"]
+        - 0.001 * metrics["loss/entropy"],
         rel=1e-4,
     )
     assert "grad_norm/max" in metrics
@@ -625,12 +659,11 @@ def test_diagnostics_are_deferred_and_emitted_as_epoch_metrics(
     trainer._defer_diagnostics = False
 
 
-def test_beta_concentrations_reach_the_metrics_backend(
-    trainer: PPOTrainer, rollout
-):
+def test_beta_concentrations_reach_the_metrics_backend(trainer: PPOTrainer, rollout):
     """The concentrations are deferred diagnostics, so they only surface on an
     epoch boundary; this checks the whole path to the logging backend rather
     than the losses alone."""
+
     class _EpochMetricCapture(Callback):
         metrics: dict[str, float] = {}
 
@@ -657,7 +690,9 @@ def test_beta_concentrations_reach_the_metrics_backend(
         np.mean([capture.metrics[f"metrics/alpha_{i}"] for i in range(ACTION_DIM)]),
         rel=1e-4,
     )
-    assert capture.metrics["metrics/concentration_max"] >= capture.metrics["metrics/alpha"]
+    assert (
+        capture.metrics["metrics/concentration_max"] >= capture.metrics["metrics/alpha"]
+    )
     trainer._defer_diagnostics = False
 
 
@@ -667,7 +702,12 @@ def test_train_step_clips_gradients(trainer: PPOTrainer, rollout):
 
     norms = trainer._agent.get_partial_clip_grad_norms()
 
-    for key in ("grad_norm/cnn", "grad_norm/sequence_encoder", "grad_norm/actor", "grad_norm/critic"):
+    for key in (
+        "grad_norm/cnn",
+        "grad_norm/sequence_encoder",
+        "grad_norm/actor",
+        "grad_norm/critic",
+    ):
         assert norms[key] <= 0.5 + 1e-4, f"{key} was not clipped to 0.5"
 
 
@@ -721,7 +761,12 @@ def test_core_verbosity_does_not_transfer_the_diagnostics_to_the_host(
 
     metrics = trainer.train_step(**minibatch)
 
-    for key in ("loss/total", "grad_norm/max", "metrics/clip_fraction", "metrics/log_std_0"):
+    for key in (
+        "loss/total",
+        "grad_norm/max",
+        "metrics/clip_fraction",
+        "metrics/log_std_0",
+    ):
         assert key not in metrics
 
 
@@ -730,7 +775,10 @@ def test_core_verbosity_keeps_the_losses_finite_and_updates_the_parameters(
 ):
     trainer = PPOTrainer(agent, trainer_settings, verbosity=1)
     minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
-    before = {name: param.clone() for name, param in trainer._agent._network.named_parameters()}
+    before = {
+        name: param.clone()
+        for name, param in trainer._agent._network.named_parameters()
+    }
 
     metrics = trainer.train_step(**minibatch)
 
@@ -762,9 +810,7 @@ def test_full_verbosity_keeps_the_rollout_batch_metrics(
 
 
 @pytest.mark.parametrize("verbosity", [0, 1])
-def test_low_verbosity_losses_omit_the_per_action_diagnostics(
-    agent: Agent, verbosity
-):
+def test_low_verbosity_losses_omit_the_per_action_diagnostics(agent: Agent, verbosity):
     losses = _losses_at(agent, verbosity)
     dist = _uniform_beta_distribution()
 
@@ -807,14 +853,19 @@ def test_full_verbosity_losses_keep_the_per_action_diagnostics(agent: Agent):
         assert entropy_metrics[f"metrics/beta_mean_{index}"] == pytest.approx(0.5)
 
 
-def test_trainer_rejects_an_unknown_verbosity(agent: Agent, trainer_settings: TrainerSettings):
+def test_trainer_rejects_an_unknown_verbosity(
+    agent: Agent, trainer_settings: TrainerSettings
+):
     with pytest.raises(ValueError, match="verbosity must be one of"):
         PPOTrainer(agent, trainer_settings, verbosity=7)
 
 
 def test_train_step_skips_a_non_finite_loss(trainer: PPOTrainer, rollout, monkeypatch):
     minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
-    before = {name: param.clone() for name, param in trainer._agent._network.named_parameters()}
+    before = {
+        name: param.clone()
+        for name, param in trainer._agent._network.named_parameters()
+    }
     monkeypatch.setattr(
         trainer,
         "calculate_losses",
@@ -846,7 +897,9 @@ def test_train_runs_every_epoch_and_drives_the_callbacks(trainer: PPOTrainer, ro
 
 
 def test_train_normalises_advantages_globally(agent: Agent, rollout):
-    trainer = PPOTrainer(agent, TrainerSettings(advantage_normalization_strategy="global"))
+    trainer = PPOTrainer(
+        agent, TrainerSettings(advantage_normalization_strategy="global")
+    )
     before = rollout["advantages"].clone()
 
     trainer.train(rollout, epochs=1, minibatch_size=4, training_step=0)
@@ -856,7 +909,9 @@ def test_train_normalises_advantages_globally(agent: Agent, rollout):
     assert not T.allclose(rollout["advantages"], before)
 
 
-def test_train_leaves_advantages_untouched_without_normalisation(trainer: PPOTrainer, rollout):
+def test_train_leaves_advantages_untouched_without_normalisation(
+    trainer: PPOTrainer, rollout
+):
     before = rollout["advantages"].clone()
 
     trainer.train(rollout, epochs=1, minibatch_size=4, training_step=0)
@@ -864,7 +919,9 @@ def test_train_leaves_advantages_untouched_without_normalisation(trainer: PPOTra
     T.testing.assert_close(rollout["advantages"], before)
 
 
-def test_train_stops_mid_epoch_when_the_kl_spikes(trainer: PPOTrainer, rollout, monkeypatch):
+def test_train_stops_mid_epoch_when_the_kl_spikes(
+    trainer: PPOTrainer, rollout, monkeypatch
+):
     trainer.cfg = _copy_settings(trainer.cfg, "kl", hard_stop=True)
     trainer.cfg = _copy_settings(trainer.cfg, "kl", target_kl=0.01)
     trainer.cfg = _copy_settings(trainer.cfg, "kl", warmup_steps=0)
@@ -885,7 +942,9 @@ def test_train_stops_mid_epoch_when_the_kl_spikes(trainer: PPOTrainer, rollout, 
     assert kinds.count("epoch") == 1, "the epoch is still closed out"
 
 
-def test_train_keeps_going_while_the_kl_stays_below_target(trainer: PPOTrainer, rollout, monkeypatch):
+def test_train_keeps_going_while_the_kl_stays_below_target(
+    trainer: PPOTrainer, rollout, monkeypatch
+):
     trainer.cfg = _copy_settings(trainer.cfg, "kl", hard_stop=True)
     trainer.cfg = _copy_settings(trainer.cfg, "kl", target_kl=0.01)
     trainer.cfg = _copy_settings(trainer.cfg, "kl", warmup_steps=0)
@@ -979,7 +1038,9 @@ def test_setup_train_builds_a_linear_schedule_with_its_own_options(agent: Agent)
 
 def test_train_steps_the_scheduler(agent: Agent, rollout):
     trainer = PPOTrainer(agent, TrainerSettings())
-    trainer.setup_train(RunSettings(total_steps=10_000), RolloutSettings(buffer_size=SIZE))
+    trainer.setup_train(
+        RunSettings(total_steps=10_000), RolloutSettings(buffer_size=SIZE)
+    )
     before = [group["lr"] for group in trainer._optimizer.param_groups]
 
     trainer.train(rollout, epochs=1, minibatch_size=4, training_step=0)
@@ -989,7 +1050,12 @@ def test_train_steps_the_scheduler(agent: Agent, rollout):
 
 
 def test_optimizer_groups_use_the_configured_learning_rates(agent: Agent):
-    trainer = PPOTrainer(agent, TrainerSettings(backbone_lr=1e-3, head_lr=1e-5, weight_decay=1e-2, optimizer_eps=1e-6))
+    trainer = PPOTrainer(
+        agent,
+        TrainerSettings(
+            backbone_lr=1e-3, head_lr=1e-5, weight_decay=1e-2, optimizer_eps=1e-6
+        ),
+    )
     groups = trainer._optimizer.param_groups
 
     assert [group["lr"] for group in groups] == [1e-3] * 4 + [1e-5] * 2
@@ -1022,7 +1088,9 @@ def test_optimizer_supports_distinct_cnn_and_sequence_encoder_rates(agent: Agent
 
 
 def test_fused_optimizer_is_requested_but_cuda_only(agent: Agent):
-    trainer = PPOTrainer(agent, TrainerSettings(optimizer=OptimizerSettings(fused=True)))
+    trainer = PPOTrainer(
+        agent, TrainerSettings(optimizer=OptimizerSettings(fused=True))
+    )
     # The fixture agent lives on CPU, so the fused CUDA kernel must not be
     # selected; on a CUDA agent the same flag passes fused=True instead.
     assert trainer._optimizer.defaults.get("fused") in (None, False)
@@ -1067,11 +1135,17 @@ def test_metrics_from_batch_summarise_the_rollout(trainer: PPOTrainer, rollout):
         assert f"rollout/action_mean_{index}" in metrics
         assert f"rollout/action_std_{index}" in metrics
 
-    assert metrics["rollout/returns"] == pytest.approx(rollout["returns"].mean().item(), rel=1e-5)
-    assert metrics["rollout/advantages_mean"] == pytest.approx(rollout["advantages"].mean().item(), rel=1e-5)
+    assert metrics["rollout/returns"] == pytest.approx(
+        rollout["returns"].mean().item(), rel=1e-5
+    )
+    assert metrics["rollout/advantages_mean"] == pytest.approx(
+        rollout["advantages"].mean().item(), rel=1e-5
+    )
 
 
-def test_clip_grad_norm_returns_one_norm_per_parameter_group(trainer: PPOTrainer, rollout):
+def test_clip_grad_norm_returns_one_norm_per_parameter_group(
+    trainer: PPOTrainer, rollout
+):
     minibatch = next(get_iid_minibatches(rollout, 4, STACK_SIZE, shuffle=True))
     log_probs, values, _, _ = trainer._agent.evaluate_actions(
         minibatch["observation"], minibatch["action"], minibatch["dones"]
@@ -1107,7 +1181,9 @@ def test_combined_gradient_norm_pass_matches_torch_group_clipping(
     reference_grads: dict[int, T.Tensor] = {}
     expected_norms: dict[str, float] = {}
     for group, parameters in modules.items():
-        reference = [T.nn.Parameter(parameter.detach().clone()) for parameter in parameters]
+        reference = [
+            T.nn.Parameter(parameter.detach().clone()) for parameter in parameters
+        ]
         for parameter, reference_parameter in zip(parameters, reference, strict=True):
             reference_parameter.grad = parameter.grad.detach().clone()
             reference_grads[id(parameter)] = reference_parameter.grad
@@ -1121,7 +1197,9 @@ def test_combined_gradient_norm_pass_matches_torch_group_clipping(
 
     for group, parameters in modules.items():
         key = f"grad_norm/{group}_total"
-        assert actual_norms[key].item() == pytest.approx(expected_norms[group], rel=1e-5)
+        assert actual_norms[key].item() == pytest.approx(
+            expected_norms[group], rel=1e-5
+        )
         for parameter in parameters:
             T.testing.assert_close(parameter.grad, reference_grads[id(parameter)])
 
@@ -1136,16 +1214,6 @@ def test_act_delegates_to_the_agent(trainer: PPOTrainer, observations):
     assert action.shape == (NUM_ENVS, ACTION_DIM)
     assert log_probs.shape == (NUM_ENVS, ACTION_DIM)
     assert value.shape == (NUM_ENVS,)
-
-
-def test_bootstrap_value_delegates_to_the_agent(trainer: PPOTrainer, observations):
-    obs = observations(NUM_ENVS)
-    trainer._agent.reset()
-    trainer._agent.act(obs, T.zeros(NUM_ENVS, dtype=T.bool))
-
-    value = trainer.bootstrap_value(obs)
-
-    T.testing.assert_close(value, trainer._agent.bootstrap_value(obs))
 
 
 def test_step_env_delegates_to_the_agent(trainer: PPOTrainer, observations):
@@ -1166,8 +1234,16 @@ def test_step_env_delegates_to_the_agent(trainer: PPOTrainer, observations):
             )
 
     (
-        returned_state, state_t, action, log_probs, value,
-        reward, terminated, truncated, done_t, info,
+        returned_state,
+        state_t,
+        action,
+        log_probs,
+        value,
+        reward,
+        terminated,
+        truncated,
+        done_t,
+        info,
     ) = trainer.step_env(_FakeEnv(), state, done, temperature=0.0)
 
     assert returned_state is next_state

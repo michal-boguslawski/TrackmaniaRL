@@ -23,7 +23,7 @@ tracking:
   local_artifacts: false
   experiment_name: Trackmania-RL-manual-smoke
   log_system_metrics: false
-  verbosity: 2
+  verbosity: 1
 
 callbacks:
   - name: checkpoints

@@ -16,36 +16,54 @@ from rl_lib.training.settings.scheduler import (
 class KLControlSettings(StrictModel):
     """KL-based early stopping controls for PPO updates."""
 
-    target_kl: float = Field(default=0.03, gt=0, description="Target approximate KL per update.")
-    warmup_steps: int = Field(default=20_000, ge=0, description="Updates before KL stopping is enabled.")
-    stop_multiplier: float = Field(default=3.0, gt=0, description="Multiplier applied to target_kl for hard stopping.")
-    hard_stop: bool = Field(default=True, description="Stop PPO updates when the KL threshold is exceeded.")
+    target_kl: float = Field(
+        default=0.03, gt=0, description="Target approximate KL per update."
+    )
+    warmup_steps: int = Field(
+        default=20_000, ge=0, description="Updates before KL stopping is enabled."
+    )
+    stop_multiplier: float = Field(
+        default=3.0,
+        gt=0,
+        description="Multiplier applied to target_kl for hard stopping.",
+    )
+    hard_stop: bool = Field(
+        default=True, description="Stop PPO updates when the KL threshold is exceeded."
+    )
 
 
 class GradientSettings(StrictModel):
     """Gradient clipping limits for PPO network components."""
 
-    backbone_max_grad_norm: float = Field(default=0.5, gt=0, description="Maximum gradient norm for the CNN and sequence encoder.")
-    actor_max_grad_norm: float = Field(default=0.5, gt=0, description="Maximum gradient norm for the actor.")
-    critic_max_grad_norm: float = Field(default=0.5, gt=0, description="Maximum gradient norm for the critic.")
+    backbone_max_grad_norm: float = Field(
+        default=0.5,
+        gt=0,
+        description="Maximum gradient norm for the CNN and sequence encoder.",
+    )
+    actor_max_grad_norm: float = Field(
+        default=0.5, gt=0, description="Maximum gradient norm for the actor."
+    )
+    critic_max_grad_norm: float = Field(
+        default=0.5, gt=0, description="Maximum gradient norm for the critic."
+    )
 
 
-class StabilitySettings(StrictModel):
-    """Numerical guards used by PPO loss and metric calculations."""
+# class StabilitySettings(StrictModel):
+#     """Numerical guards used by PPO loss and metric calculations."""
 
-    advantage_epsilon: float = Field(default=1e-4, gt=0, description="Small constant used when normalizing advantages.")
-    explained_variance_epsilon: float = Field(default=1e-8, gt=0, description="Small constant preventing a zero variance denominator.")
-    log_ratio_min: FiniteFloat = Field(default=-5.0, description="Lower bound applied to policy log ratios.")
-    log_ratio_max: FiniteFloat = Field(default=5.0, description="Upper bound applied to policy log ratios.")
-    skip_nonfinite_updates: bool = Field(default=True, description="Skip optimizer updates with non-finite losses or gradients.")
-    tanh_saturation_threshold: float = Field(default=3.5, gt=0, description="Absolute action-mean threshold used for saturation diagnostics.")
+#     advantage_epsilon: float = Field(default=1e-4, gt=0, description="Small constant used when normalizing advantages.")
+#     explained_variance_epsilon: float = Field(default=1e-8, gt=0, description="Small constant preventing a zero variance denominator.")
+#     log_ratio_min: FiniteFloat = Field(default=-5.0, description="Lower bound applied to policy log ratios.")
+#     log_ratio_max: FiniteFloat = Field(default=5.0, description="Upper bound applied to policy log ratios.")
+#     skip_nonfinite_updates: bool = Field(default=True, description="Skip optimizer updates with non-finite losses or gradients.")
+#     tanh_saturation_threshold: float = Field(default=3.5, gt=0, description="Absolute action-mean threshold used for saturation diagnostics.")
 
-    @model_validator(mode="after")
-    def validate_log_ratio_range(self):
-        """Require an increasing interval for policy log-ratio clamping."""
-        if self.log_ratio_min >= self.log_ratio_max:
-            raise ValueError("trainer.stability.log_ratio_min must be lower than log_ratio_max")
-        return self
+#     @model_validator(mode="after")
+#     def validate_log_ratio_range(self):
+#         """Require an increasing interval for policy log-ratio clamping."""
+#         if self.log_ratio_min >= self.log_ratio_max:
+#             raise ValueError("trainer.stability.log_ratio_min must be lower than log_ratio_max")
+#         return self
 
 
 class TrainerSettings(StrictModel):
@@ -83,10 +101,10 @@ class TrainerSettings(StrictModel):
         default_factory=GradientSettings,
         description="Gradient clipping limits.",
     )
-    stability: StabilitySettings = Field(
-        default_factory=StabilitySettings,
-        description="Numerical stability and non-finite update behavior.",
-    )
+    # stability: StabilitySettings = Field(
+    #     default_factory=StabilitySettings,
+    #     description="Numerical stability and non-finite update behavior.",
+    # )
     optimizer: OptimizerSettings = Field(
         default_factory=OptimizerSettings,
         description="Optimizer implementation and parameter-group settings.",
@@ -215,7 +233,9 @@ class TrainerSettings(StrictModel):
                     scheduler_options["eta_min"] = values.pop("scheduler_min_lr")
                 values.pop("scheduler_start_factor", None)
                 if "scheduler_extra_iters" in values:
-                    scheduler_options["extra_iters"] = values.pop("scheduler_extra_iters")
+                    scheduler_options["extra_iters"] = values.pop(
+                        "scheduler_extra_iters"
+                    )
                 values["scheduler"] = scheduler_options
         return values
 

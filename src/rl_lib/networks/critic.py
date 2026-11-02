@@ -6,11 +6,11 @@ Maps temporal encoding features to a scalar state value estimate.
 import torch as T
 from torch import nn
 
-from rl_lib.networks.config import CriticConfig
+from rl_lib.networks.config import VCriticConfig
 from rl_lib.networks.utils import init_layer, make_activation
 
 
-class Critic(nn.Module):
+class VCritic(nn.Module):
     """MLP value head producing scalar state-value estimates.
 
     Attributes:
@@ -18,7 +18,7 @@ class Critic(nn.Module):
         cfg (CriticConfig): Configuration for hidden layers and initialization.
     """
 
-    def __init__(self, in_dim: int, config: CriticConfig):
+    def __init__(self, in_dim: int, config: VCriticConfig):
         super().__init__()
         self.in_dim = in_dim
         self.cfg = config
@@ -27,20 +27,24 @@ class Critic(nn.Module):
         modules: list[nn.Module] = []
         current_dim = in_dim
         for layer_cfg in hidden_layers:
-            modules.extend((
-                init_layer(
-                    nn.Linear(current_dim, layer_cfg.out_dim, bias=layer_cfg.bias),
-                    layer_cfg.init_gain,
-                    layer_cfg.init_bias,
-                ),
-                make_activation(layer_cfg.activation),
-            ))
+            modules.extend(
+                (
+                    init_layer(
+                        nn.Linear(current_dim, layer_cfg.out_dim, bias=layer_cfg.bias),
+                        layer_cfg.init_gain,
+                        layer_cfg.init_bias,
+                    ),
+                    make_activation(layer_cfg.activation),
+                )
+            )
             current_dim = layer_cfg.out_dim
-        modules.append(init_layer(
-            nn.Linear(current_dim, 1, bias=self.cfg.output_bias),
-            self.cfg.output_init_gain,
-            self.cfg.output_init_bias,
-        ))
+        modules.append(
+            init_layer(
+                nn.Linear(current_dim, 1, bias=self.cfg.output_bias),
+                self.cfg.output_init_gain,
+                self.cfg.output_init_bias,
+            )
+        )
         self._network = nn.Sequential(*modules)
 
     @property

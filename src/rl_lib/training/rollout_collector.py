@@ -10,14 +10,13 @@ import json
 import numpy as np
 import torch as T
 from gymnasium.vector import VectorEnv
-from torch.profiler import record_function
 from tqdm import tqdm
 
-from rl_lib.agent import Agent
-from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
+from rl_lib.policy.policy import Policy
 from rl_lib.run_config import RolloutSettings
 from rl_lib.training.base import Trainer
 from rl_lib.training.callbacks.base import Callback, CallbackList
+from rl_lib.training.transitions import Transition
 
 
 class RolloutCollector:
@@ -34,19 +33,16 @@ class RolloutCollector:
         # TODO
         cfg: RolloutSettings (buffer_size, epochs, minibatch_size, gamma, gae_lambda).
         seed: Environment seed.
-        run_config: Full run config dict for MLflow logging.
     """
 
     def __init__(
         self,
         env: VectorEnv,
-        buffer: RolloutBuffer,
-        agent: Agent,
+        policy: Policy,
         trainer: Trainer,
         config: RolloutSettings,
         callbacks: list[Callback] | None = None,
         seed: int | None = None,
-        run_config: dict | None = None,
     ):
         """Initialize the rollout collector.
 
@@ -57,24 +53,16 @@ class RolloutCollector:
             config: RolloutSettings shared with buffer (validated for consistency).
             callbacks: Callbacks for rollout-level events.
             seed: Random seed for environment reset.
-            run_config: Full config dict for MLflow parameter logging.
 
         Raises:
             ValueError: If buffer.cfg != config (epochs/minibatch_size or
                 gamma/gae_lambda would disagree).
         """
-        if buffer.cfg != config:
-            raise ValueError(
-                "the collector and its buffer must share one RolloutSettings; "
-                "epochs/minibatch_size and gamma/gae_lambda would otherwise disagree"
-            )
         self.env = env
-        self.buffer = buffer
-        self.agent = agent
+        self.policy = policy
         self.trainer = trainer
         self.cfg = config
         self.seed = seed
-        self.run_config = run_config or {}
         self._callbacks = CallbackList(callbacks)
 
     def _on_rollout_start(self, *args, **kwargs):
@@ -107,18 +95,17 @@ class RolloutCollector:
         """
         state, _ = self.env.reset(seed=self.seed)
         done = T.zeros(self.env.num_envs, dtype=T.bool).to(self.agent.device)
-        self.buffer.reset()
         self._on_rollout_start(config=self.config(training_steps))
 
         for i in tqdm(range(training_steps)):
-            transition, info = self.agent.step_env(self.env, state, done)
-
-            truncated_value = T.zeros_like(
-                transition.truncated,
-                dtype=T.float32,
-                device=self.agent.device,
+            action, extras = self.policy.act(state, done)
+            next_state, reward, terminated, truncated, info = self.env.step(action)
+            transition = Transition.from_step(
+                state, action, extras, next_state, reward, terminated, truncated, info
             )
-            if self.agent.last_step_had_truncation:
+            self.trainer.observe(transition)
+
+            if "final_obs" in info:
                 final_observations = info.get(
                     "final_obs", info.get("final_observation")
                 )
@@ -138,45 +125,35 @@ class RolloutCollector:
                             "Vector environment did not provide a final observation for every truncated episode"
                         )
 
-                bootstrap_observations = transition.next_obs.copy()
-                for env_index in truncated_indices:
-                    bootstrap_observations[env_index] = final_observations[env_index]
-                with record_function("transfer/bootstrap_observation_to_device"):
-                    bootstrap_tensor = T.from_numpy(bootstrap_observations).to(
-                        self.agent.device
-                    )
-                with record_function("rollout/truncation_bootstrap"):
-                    values = self.agent.bootstrap_value(bootstrap_tensor)
-                truncated_value[transition.truncated] = values[transition.truncated]
-
-            with record_function("rollout/buffer_add"):
-                self.buffer.add(
-                    RolloutStep(
-                        observation=transition.obs,
-                        action=transition.action,
-                        critic_value=transition.extras["value"],
-                        old_log_probs=transition.extras["log_probs"],
-                        reward=transition.reward,
-                        terminated=transition.terminated,
-                        truncated=transition.truncated,
-                        truncated_value=truncated_value,
-                    )
-                )
+            # with record_function("rollout/buffer_add"):
+            #     self.buffer.add(
+            #         RolloutStep(
+            #             observation=transition.obs,
+            #             action=transition.action,
+            #             critic_value=transition.extras["value"],
+            #             old_log_probs=transition.extras["log_probs"],
+            #             reward=transition.reward,
+            #             terminated=transition.terminated,
+            #             truncated=transition.truncated,
+            #         )
+            #     )
 
             state = transition.next_obs
             self._on_env_step(step=i, info=info)
 
-            if self.buffer.is_full():
-                with record_function("ppo/update"):
-                    self.trainer.train(
-                        self.buffer.get(),
-                        epochs=self.cfg.epochs,
-                        minibatch_size=self.cfg.minibatch_size,
-                        training_step=i,
-                    )
+            self.trainer.maybe_update(i)
 
-                self.buffer.reset_counter()
-                self._callback_flush()
+            # if self.buffer.is_full():
+            #     with record_function("ppo/update"):
+            #         self.trainer.train(
+            #             self.buffer.get(),
+            #             epochs=self.cfg.epochs,
+            #             minibatch_size=self.cfg.minibatch_size,
+            #             training_step=i,
+            #         )
+
+            #     self.buffer.reset_counter()
+            self._callback_flush()
 
             if profiler is not None:
                 profiler.step()
@@ -189,7 +166,6 @@ class RolloutCollector:
             f"epochs={self.cfg.epochs}, "
             f"minibatch_size={self.cfg.minibatch_size}, "
             f"num_envs={self.env.num_envs}, "
-            f"buffer={self.buffer!r}, "
             f"trainer={self.trainer!r})"
         )
 
@@ -217,7 +193,6 @@ class RolloutCollector:
             else:
                 merged[prefix] = value
 
-        flatten("", self.run_config)
         merged.update({f"buffer.{k}": v for k, v in self.buffer.config().items()})
         merged.update({f"trainer.{k}": v for k, v in self.trainer.config().items()})
         merged.update(

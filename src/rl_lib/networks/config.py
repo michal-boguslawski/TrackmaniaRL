@@ -134,7 +134,6 @@ class ActorConfig(StrictConfig):
         concentration_offset: Added to softplus output to ensure >= 1.
         softplus_beta: Beta parameter for softplus.
         softplus_threshold: Threshold parameter for softplus.
-        default_temperature: Default sampling temperature.
         deterministic_distribution_temperature: Temperature for deterministic eval.
     """
 
@@ -151,11 +150,10 @@ class ActorConfig(StrictConfig):
     concentration_offset: PositiveFloat = 1.0
     softplus_beta: PositiveFloat = 1.0
     softplus_threshold: PositiveFloat = 20.0
-    default_temperature: PositiveFloat = 1.0
     deterministic_distribution_temperature: PositiveFloat = 1.0
 
 
-class CriticConfig(StrictConfig):
+class VCriticConfig(StrictConfig):
     """Critic (value head) configuration.
 
     Attributes:
@@ -174,7 +172,6 @@ class CriticConfig(StrictConfig):
     output_init_gain: PositiveFloat = 1.0
     output_init_bias: FiniteFloat = 0.0
     output_bias: bool = True
-    huber_delta: PositiveFloat = 1.0
 
 
 class NetworkConfig(StrictConfig):
@@ -190,7 +187,7 @@ class NetworkConfig(StrictConfig):
     cnn: CNNConfig = Field(default_factory=CNNConfig)
     temporal: TemporalConfig = Field(default_factory=TemporalConfig)
     actor: ActorConfig = Field(default_factory=ActorConfig)
-    critic: CriticConfig = Field(default_factory=CriticConfig)
+    critic: VCriticConfig = Field(default_factory=VCriticConfig)
 
 
 class SACActorConfig(StrictConfig):
@@ -202,9 +199,14 @@ class SACActorConfig(StrictConfig):
 class SACTwinCriticConfig(StrictConfig):
     cnn: CNNConfig = Field(default_factory=CNNConfig)
     temporal: TemporalConfig = Field(default_factory=TemporalConfig)
-    critic: CriticConfig = Field(default_factory=CriticConfig)
+    critic: VCriticConfig = Field(default_factory=VCriticConfig)
 
 
 class SACNetworkConfig(StrictConfig):
     actor: SACActorConfig = Field(default_factory=SACActorConfig)
     twin_critic: SACTwinCriticConfig = Field(default_factory=SACTwinCriticConfig)
+
+
+class EncoderConfig(StrictConfig):
+    cnn: CNNConfig = Field(default_factory=CNNConfig)
+    temporal: TemporalConfig = Field(default_factory=TemporalConfig)

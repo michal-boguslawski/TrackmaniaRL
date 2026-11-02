@@ -9,7 +9,6 @@ import torch as T
 from rl_lib.training.ppo.minibatches import get_iid_minibatches
 from rl_lib.training.settings import TrainerSettings
 
-
 logger = getLogger(__name__)
 
 
@@ -21,9 +20,9 @@ def run_ppo_update_loop(
     cfg: TrainerSettings,
     training_step: int,
     train_step: Callable[..., dict[str, float]],
-    current_update_step: Callable[[], int],
-    on_minibatch: Callable[..., None],
-    on_epoch: Callable[..., None],
+    # current_update_step: Callable[[], int],
+    # on_minibatch: Callable[..., None],
+    # on_epoch: Callable[..., None],
 ) -> None:
     """Run PPO minibatch updates and apply configured KL early stopping.
 
@@ -76,12 +75,10 @@ def run_ppo_update_loop(
                 )
                 break
 
-            on_minibatch(
-                metrics=minibatch_metrics, step=current_update_step()
-            )
+            # on_minibatch(metrics=minibatch_metrics, step=current_update_step())
 
         mean_epoch_kl = float(np.mean(epoch_kls)) if epoch_kls else None
-        on_epoch()
+        # on_epoch()
         if (
             mean_epoch_kl is not None
             and mean_epoch_kl > cfg.kl.target_kl

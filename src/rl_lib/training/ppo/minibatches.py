@@ -56,9 +56,7 @@ def get_iid_minibatches(
             ]
             done_windows = batch["dones"][env_indices[:, None], window_indices]
         yield {
-            "observation": observation_windows.reshape(
-                -1, *batch["observation"].shape[2:]
-            ),
+            "observation": observation_windows,
             "action": batch["action"][env_indices, time_indices],
             "old_log_probs": batch["old_log_probs"][env_indices, time_indices],
             "old_values": batch["critic_value"][env_indices, time_indices],
