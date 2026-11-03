@@ -51,3 +51,7 @@ class Encoder(nn.Module):
         feats = self.frame_features(frames)  # (B*T,D)
         feats = feats.view(B, T, -1)  # (B,T,D)
         return self.aggregate(feats, mask)  # (B,D)
+
+    @property
+    def out_dim(self) -> int:
+        return self.cnn.out_dim

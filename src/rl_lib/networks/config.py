@@ -174,18 +174,21 @@ class VCriticConfig(StrictConfig):
     output_bias: bool = True
 
 
+class EncoderConfig(StrictConfig):
+    cnn: CNNConfig = Field(default_factory=CNNConfig)
+    temporal: TemporalConfig = Field(default_factory=TemporalConfig)
+
+
 class NetworkConfig(StrictConfig):
     """Complete network configuration composing all sub-configs.
 
     Attributes:
-        cnn: Convolutional encoder config.
-        temporal: Temporal encoder config.
+        encoder: # TODO
         actor: Actor config.
         critic: Critic config.
     """
 
-    cnn: CNNConfig = Field(default_factory=CNNConfig)
-    temporal: TemporalConfig = Field(default_factory=TemporalConfig)
+    encoder: EncoderConfig = Field(default_factory=EncoderConfig)
     actor: ActorConfig = Field(default_factory=ActorConfig)
     critic: VCriticConfig = Field(default_factory=VCriticConfig)
 
@@ -205,8 +208,3 @@ class SACTwinCriticConfig(StrictConfig):
 class SACNetworkConfig(StrictConfig):
     actor: SACActorConfig = Field(default_factory=SACActorConfig)
     twin_critic: SACTwinCriticConfig = Field(default_factory=SACTwinCriticConfig)
-
-
-class EncoderConfig(StrictConfig):
-    cnn: CNNConfig = Field(default_factory=CNNConfig)
-    temporal: TemporalConfig = Field(default_factory=TemporalConfig)

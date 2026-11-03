@@ -85,8 +85,8 @@ class RunSettings(StrictModel):
         default="reduce-overhead",
         description="Mode passed to torch.compile when torch_compile is enabled.",
     )
-    cnn_autocast: Literal["none", "bf16"] = Field(
-        default="none",
+    cnn_autocast: Literal["bf16"] | None = Field(
+        default=None,
         description=(
             "Autocast only the CNN feature extractor to BF16 on CUDA. Temporal, "
             "actor/critic heads, distribution math, and PPO losses remain FP32. "
@@ -317,14 +317,6 @@ class RunConfig(StrictModel):
     def callback(self, name: str):
         return next(
             (callback for callback in self.callbacks if callback.name == name), None
-        )
-
-    def with_runtime(self, **updates) -> RunConfig:
-        """Copy this config with resolved runtime facts folded in. Validation is
-        intentionally skipped: every update is either a scalar this module
-        already constrains or a re-validated settings model built here."""
-        return self.model_copy(
-            update={"runtime": self.runtime.model_copy(update=updates)}
         )
 
     @property

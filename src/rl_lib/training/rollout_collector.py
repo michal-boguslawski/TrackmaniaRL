@@ -40,7 +40,6 @@ class RolloutCollector:
         env: VectorEnv,
         policy: Policy,
         trainer: Trainer,
-        config: RolloutSettings,
         callbacks: list[Callback] | None = None,
         seed: int | None = None,
     ):
@@ -61,7 +60,6 @@ class RolloutCollector:
         self.env = env
         self.policy = policy
         self.trainer = trainer
-        self.cfg = config
         self.seed = seed
         self._callbacks = CallbackList(callbacks)
 
@@ -94,8 +92,8 @@ class RolloutCollector:
                 once per vector-environment iteration.
         """
         state, _ = self.env.reset(seed=self.seed)
-        done = T.zeros(self.env.num_envs, dtype=T.bool).to(self.agent.device)
-        self._on_rollout_start(config=self.config(training_steps))
+        done = T.zeros(self.env.num_envs, dtype=T.bool).to(self.env.device)
+        # self._on_rollout_start(config=self.config(training_steps))
 
         for i in tqdm(range(training_steps)):
             action, extras = self.policy.act(state, done)
@@ -125,77 +123,14 @@ class RolloutCollector:
                             "Vector environment did not provide a final observation for every truncated episode"
                         )
 
-            # with record_function("rollout/buffer_add"):
-            #     self.buffer.add(
-            #         RolloutStep(
-            #             observation=transition.obs,
-            #             action=transition.action,
-            #             critic_value=transition.extras["value"],
-            #             old_log_probs=transition.extras["log_probs"],
-            #             reward=transition.reward,
-            #             terminated=transition.terminated,
-            #             truncated=transition.truncated,
-            #         )
-            #     )
-
             state = transition.next_obs
             self._on_env_step(step=i, info=info)
 
             self.trainer.maybe_update(i)
 
-            # if self.buffer.is_full():
-            #     with record_function("ppo/update"):
-            #         self.trainer.train(
-            #             self.buffer.get(),
-            #             epochs=self.cfg.epochs,
-            #             minibatch_size=self.cfg.minibatch_size,
-            #             training_step=i,
-            #         )
-
-            #     self.buffer.reset_counter()
             self._callback_flush()
 
             if profiler is not None:
                 profiler.step()
 
         self._on_rollout_end()
-
-    def __repr__(self) -> str:
-        return (
-            f"{self.__class__.__name__}("
-            f"epochs={self.cfg.epochs}, "
-            f"minibatch_size={self.cfg.minibatch_size}, "
-            f"num_envs={self.env.num_envs}, "
-            f"trainer={self.trainer!r})"
-        )
-
-    def config(self, training_steps: int | None = None) -> dict[str, int | float | str]:
-        """Flat, MLflow-loggable config for the whole training run, merging
-        this collector's own params with buffer/trainer/network configs.
-        """
-        merged: dict[str, int | float | str] = {
-            "epochs": self.cfg.epochs,
-            "minibatch_size": self.cfg.minibatch_size,
-            "num_envs": self.env.num_envs,
-            "gamma": self.buffer.gamma,
-            "gae_lambda": self.buffer.gae_lambda,
-        }
-
-        if training_steps is not None:
-            merged["training_steps"] = training_steps
-
-        def flatten(prefix: str, value):
-            if isinstance(value, dict):
-                for key, nested in value.items():
-                    flatten(f"{prefix}.{key}" if prefix else key, nested)
-            elif isinstance(value, list):
-                merged[prefix] = json.dumps(value, sort_keys=True)
-            else:
-                merged[prefix] = value
-
-        merged.update({f"buffer.{k}": v for k, v in self.buffer.config().items()})
-        merged.update({f"trainer.{k}": v for k, v in self.trainer.config().items()})
-        merged.update(
-            {f"network.{k}": v for k, v in self.trainer.network_config().items()}
-        )
-        return merged

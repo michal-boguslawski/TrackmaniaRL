@@ -62,10 +62,68 @@ class PPOTrainer:
         self.rollout_buffer = RolloutBuffer(
             rollout_config, self.modules.encoder.stack_size
         )
+        self.rollout_config = rollout_config
+        self.stack_size = self.modules.encoder.stack_size
         # self._optimizer = self._build_optimizer(modules)
         # self._scheduler = None
-        # self._losses = PPOLosses(self._agent, self._verbosity)
+        self.losses = PPOLosses(config.loss, ctx.verbosity)
         # self._callbacks = CallbackList(callbacks)
+
+    def observe(self, t: Transition) -> None:
+        with T.no_grad():
+            value = self.modules.critic(t.extras["temporal"])
+        self.rollout_buffer.add(
+            RolloutStep(
+                observation=t.obs,
+                action=t.action,
+                old_log_probs=t.extras["log_probs"],
+                reward=t.reward,
+                terminated=t.terminated,
+                truncated=t.truncated,
+                critic_value=value,
+            )
+        )
+
+    def maybe_update(self, global_step: int) -> None:
+        if self.rollout_buffer.is_full():
+            batch = self.rollout_buffer.get()
+            run_ppo_update_loop(
+                batch=batch,
+                epochs=self.rollout_config.epochs,
+                minibatch_size=self.rollout_config.minibatch_size,
+                stack_size=self.stack_size,
+                cfg=self.cfg,
+                training_step=global_step,
+                train_step=self.train_step,
+            )
+
+            self.rollout_buffer.reset_counter()
+
+    def train_step(
+        self,
+        observation: T.Tensor,
+        action: T.Tensor,
+        old_log_probs: T.Tensor,
+        old_values: T.Tensor,
+        returns: T.Tensor,
+        advantages: T.Tensor,
+        dones: T.Tensor,
+    ) -> dict[str, float]:
+        """Single minibatch gradient step.
+
+        Args:
+            observation: Flattened observations (batch * seq, H, W, C).
+            action: Actions taken (batch * seq, action_dim).
+            old_log_probs: Log-probs under old policy (batch * seq,).
+            old_values: Value estimates under old policy (batch * seq,).
+            returns: GAE returns (batch * seq,).
+            advantages: GAE advantages (batch * seq,).
+            dones: Done flags for temporal masking (batch * seq,).
+
+        Returns:
+            Dict of loss and metric scalars for logging.
+        """
+        raise NotImplementedError
 
     # def _build_optimizer(self, modules: ActorCritic) -> Adam | AdamW:
     #     """Build optimizer with differential LR/weight_decay per parameter group.
@@ -172,77 +230,6 @@ class PPOTrainer:
     #         self._scheduler = ExponentialLR(self._optimizer, gamma=scheduler_cfg.gamma)
     #     else:
     #         self._scheduler = None
-
-    # @property
-    # def stack_size(self) -> int:
-    #     """Temporal window size (delegated to agent)."""
-    #     return self._agent.stack_size
-
-    # @property
-    # def device(self) -> T.device:
-    #     """Compute device (delegated to agent)."""
-    #     return self._agent.device
-
-    # def act(
-    #     self, observation: T.Tensor, done: T.Tensor
-    # ) -> tuple[T.Tensor, T.Tensor, T.Tensor]:
-    #     """Sample action, log-prob, and value (delegated to agent).
-
-    #     Args:
-    #         observation: NHWC uint8 tensor (batch, H, W, C).
-    #         done: Boolean tensor (batch,) episode termination flags.
-
-    #     Returns:
-    #         Tuple of (action, log_probs, value).
-    #     """
-    #     action, log_probs, critic_value = self._agent.act(observation, done)
-    #     return action, log_probs, critic_value
-
-    # def clip_grad_norm(
-    #     self,
-    #     backbone_max_norm: float | None = None,
-    #     actor_max_norm: float | None = None,
-    #     critic_max_norm: float | None = None,
-    # ) -> dict[str, float]:
-    #     """Clip gradients per parameter group and return norms.
-
-    #     Args:
-    #         backbone_max_norm: Max norm for CNN + temporal params.
-    #         actor_max_norm: Max norm for actor params.
-    #         critic_max_norm: Max norm for critic params.
-    #         (Defaults from config if None)
-
-    #     Returns:
-    #         Dict with clipped norms per group.
-    #     """
-    #     backbone_max_norm = (
-    #         self.cfg.gradients.backbone_max_grad_norm
-    #         if backbone_max_norm is None
-    #         else backbone_max_norm
-    #     )
-    #     actor_max_norm = (
-    #         self.cfg.gradients.actor_max_grad_norm
-    #         if actor_max_norm is None
-    #         else actor_max_norm
-    #     )
-    #     critic_max_norm = (
-    #         self.cfg.gradients.critic_max_grad_norm
-    #         if critic_max_norm is None
-    #         else critic_max_norm
-    #     )
-    #     norm_tensors = self._agent.clip_grad_norms(
-    #         backbone_max_norm, actor_max_norm, critic_max_norm
-    #     )
-    #     return _tensor_metrics_to_scalars(
-    #         {
-    #             key: norm_tensors[key]
-    #             for key in (
-    #                 "grad_norm/backbone_total",
-    #                 "grad_norm/actor_total",
-    #                 "grad_norm/critic_total",
-    #             )
-    #         }
-    #     )
 
     # def train_step(
     #     self,
@@ -671,22 +658,3 @@ class PPOTrainer:
     # def network_config(self) -> dict[str, int | float | str]:
     #     """Flat, MLflow-loggable network hyperparameters."""
     #     return self._agent.network_config()
-
-    def observe(self, t: Transition) -> None:
-        with T.no_grad():
-            value = self.modules.critic(t.extras["temporal"])
-        self.rollout_buffer.add(
-            RolloutStep(
-                observation=t.obs,
-                action=t.action,
-                old_log_probs=t.extras["log_probs"],
-                reward=t.reward,
-                terminated=t.terminated,
-                truncated=t.truncated,
-                critic_value=value,
-            )
-        )
-
-    def maybe_update(self, global_step: int) -> None:
-        if self.rollout_buffer.is_full():
-            pass

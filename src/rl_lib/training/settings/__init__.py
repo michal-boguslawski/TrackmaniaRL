@@ -12,7 +12,6 @@ from rl_lib.training.settings.scheduler import (
 from rl_lib.training.settings.trainer import (
     GradientSettings,
     KLControlSettings,
-    StabilitySettings,
     TrainerSettings,
 )
 
@@ -27,6 +26,5 @@ __all__ = [
     "OptimizerSettings",
     "PPOLossSettings",
     "SchedulerSettings",
-    "StabilitySettings",
     "TrainerSettings",
 ]

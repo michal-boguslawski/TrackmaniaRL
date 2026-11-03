@@ -3,7 +3,6 @@ from typing import Literal, Protocol
 
 import torch as T
 
-from rl_lib.policy.policy import Policy
 from rl_lib.run_config import RunConfig
 from rl_lib.training.callbacks.base import Callback
 from rl_lib.training.transitions import Transition

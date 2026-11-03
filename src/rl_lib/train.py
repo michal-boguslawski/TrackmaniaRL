@@ -26,7 +26,6 @@ from pathlib import Path
 import numpy as np
 import torch as T
 
-from rl_lib.agent import Agent
 from rl_lib.buffers.rollout_buffer import RolloutBuffer
 from rl_lib.checkpoint_loaders import LocalCheckpointLoader, MLflowCheckpointLoader
 from rl_lib.device import resolve_device
@@ -40,8 +39,10 @@ from rl_lib.tracking.console_logger import ConsoleMetricsLogger
 from rl_lib.tracking.local_artifact_logger import LocalArtifactLogger
 from rl_lib.tracking.mlflow_logger import MLflowLogger
 from rl_lib.tracking.verbosity import Verbosity, filter_loggers
+from rl_lib.training.base import BuildContext
 from rl_lib.training.callbacks.factory import create_callbacks
 from rl_lib.training.factory import create_trainer
+from rl_lib.training.ppo.builder import build_ppo
 from rl_lib.training.rollout_collector import RolloutCollector
 
 
@@ -83,15 +84,6 @@ def run_training(
     )
     logger = logging.getLogger(__name__)
     device = resolve_device(config)
-    config = config.with_runtime(
-        session_id=session_id,
-        config_path=str(config_path) if config_path is not None else None,
-        device=str(device),
-        mlflow_experiment_name=config.experiment_name
-        if config.tracking.mlflow
-        else None,
-        mlflow_run_name=config.run_name if config.tracking.mlflow else None,
-    )
     _seed_everything(config.run.seed)
     gc.collect()
     if device.type == "cuda":
@@ -132,73 +124,20 @@ def run_training(
             verbosity,
         )
         env = stack.enter_context(closing(make_env(config.environment, device=device)))
-        config = config.with_runtime(
-            observation_shape=list(env.observation_space.shape),
-            action_shape=list(env.action_space.shape),
-        )
-
-        network = Network(
-            observation_dim=config.runtime.observation_shape[-1],
-            action_dim=config.runtime.action_shape[-1],
-            stack_size=config.agent.stack_size,
-            config=config.network,
-            cnn_autocast_dtype=resolve_cnn_autocast_dtype(
-                config.run.cnn_autocast, device
-            ),
-        ).to(device)
-        checkpoint_loader = None
-        if config.run.pretrained_checkpoint is not None:
-            checkpoint_loader = LocalCheckpointLoader(config.run.pretrained_checkpoint)
-        elif config.run.pretrained_mlflow_run_id is not None:
-            checkpoint_loader = MLflowCheckpointLoader(
-                config.run.pretrained_mlflow_run_id,
-                config.run.pretrained_mlflow_checkpoint_step,
-            )
-        if checkpoint_loader is not None:
-            network = checkpoint_loader.load(network, device)
-            logger.info(
-                "Loaded pretrained network weights using %s",
-                type(checkpoint_loader).__name__,
-            )
-        if device.type == "cuda" and config.run.channels_last:
-            # The CNN's Conv2d layers are the only 2D operators in the network.
-            # NHWC weights match cuDNN's native kernel layout and the
-            # channels_last strides of the permuted NHWC observations, so the
-            # per-convolution NCHW<->NHWC conversion kernels disappear.
-            network.cnn.to(memory_format=T.channels_last)
-        if config.run.torch_compile:
-            network = T.compile(network, mode=config.run.torch_compile_mode)
-        agent = Agent(network, device, config.agent)
-        video_agent = Agent(network, device, config.agent)
-        buffer = RolloutBuffer(config.rollout, stack_size=config.agent.stack_size)
-
-        run_config_dump = config.model_dump(mode="json", exclude_unset=True)
-        callback_groups = create_callbacks(
+        build_ctx = BuildContext(
             config=config,
-            agent=agent,
-            video_agent=video_agent,
-            metrics_loggers=metrics_loggers,
-            run_config=run_config_dump,
-        )
-
-        trainer = create_trainer(
-            config.trainer.name,
-            agent=agent,
-            config=config.trainer,
-            callbacks=callback_groups.trainer,
+            device=device,
             verbosity=verbosity,
+            obs_shape=env.observation_space.shape,
+            action_shape=env.action_space.shape,
         )
-        trainer.setup_train(config.run, config.rollout)
+        policy, trainer = build_ppo(build_ctx)
 
         collector = RolloutCollector(
             env,
-            buffer,
-            agent,
+            policy,
             trainer,
-            config.rollout,
-            callbacks=callback_groups.collector,
             seed=config.run.seed,
-            run_config=run_config_dump,
         )
         logger.info(
             "Starting training with device=%s config=%s",
