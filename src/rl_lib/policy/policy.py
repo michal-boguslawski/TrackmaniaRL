@@ -15,7 +15,7 @@ class Policy:
 
     def encode(self, obs: T.Tensor, done: T.Tensor) -> T.Tensor:
         features = self._encoder.frame_features(obs)
-        self._history.append(features, done)
+        self._history.push(features, done)
         windowed_features, windowed_done = self._history.peek()
 
         temporal = self._encoder.aggregate(

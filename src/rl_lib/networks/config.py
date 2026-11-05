@@ -177,6 +177,8 @@ class VCriticConfig(StrictConfig):
 class EncoderConfig(StrictConfig):
     cnn: CNNConfig = Field(default_factory=CNNConfig)
     temporal: TemporalConfig = Field(default_factory=TemporalConfig)
+    observation_divisor: PositiveFloat = Field(default=127.5, gt=0)
+    observation_offset: FiniteFloat = -1.0
 
 
 class NetworkConfig(StrictConfig):

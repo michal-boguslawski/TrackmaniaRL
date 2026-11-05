@@ -4,8 +4,9 @@ Processes NCHW image tensors through configurable conv layers, adaptive pooling,
 and MLP head to produce fixed-dimensional feature vectors.
 """
 
-import torch as T
 import json
+
+import torch as T
 from torch import nn
 
 from rl_lib.networks.config import CNNConfig
@@ -47,23 +48,33 @@ class CNN(nn.Module):
                 bias=layer_cfg.bias,
                 padding_mode=layer_cfg.padding_mode,
             )
-            layers.extend((
-                init_layer(conv, layer_cfg.init_gain, layer_cfg.init_bias),
-                make_activation(layer_cfg.activation),
-            ))
+            layers.extend(
+                (
+                    init_layer(conv, layer_cfg.init_gain, layer_cfg.init_bias),
+                    make_activation(layer_cfg.activation),
+                )
+            )
             in_channels = layer_cfg.out_channels
-        layers.append(nn.AdaptiveAvgPool2d((self.cfg.adaptive_pool_size, self.cfg.adaptive_pool_size)))
+        layers.append(
+            nn.AdaptiveAvgPool2d(
+                (self.cfg.adaptive_pool_size, self.cfg.adaptive_pool_size)
+            )
+        )
         layers.append(nn.Flatten())
         in_dim = in_channels * self.cfg.adaptive_pool_size**2
         for hidden_cfg in self.cfg.hidden_layers:
             linear = nn.Linear(in_dim, hidden_cfg.out_dim, bias=hidden_cfg.bias)
-            layers.extend((
-                init_layer(linear, hidden_cfg.init_gain, hidden_cfg.init_bias),
-                make_activation(hidden_cfg.activation),
-            ))
+            layers.extend(
+                (
+                    init_layer(linear, hidden_cfg.init_gain, hidden_cfg.init_bias),
+                    make_activation(hidden_cfg.activation),
+                )
+            )
             in_dim = hidden_cfg.out_dim
         output = nn.Linear(in_dim, self.cfg.out_dim)
-        layers.append(init_layer(output, self.cfg.output_init_gain, self.cfg.output_init_bias))
+        layers.append(
+            init_layer(output, self.cfg.output_init_gain, self.cfg.output_init_bias)
+        )
         self._network = nn.Sequential(*layers)
 
     @property
@@ -117,7 +128,9 @@ class CNN(nn.Module):
             "observation_dim": self.observation_dim,
             "out_dim": self.out_dim,
             **{
-                key: value if isinstance(value, (int, float, str, bool)) else json.dumps(value, sort_keys=True)
+                key: value
+                if isinstance(value, (int, float, str, bool))
+                else json.dumps(value, sort_keys=True)
                 for key, value in self.cfg.model_dump().items()
             },
             "n_params": sum(p.numel() for p in super().parameters()),

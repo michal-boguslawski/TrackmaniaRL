@@ -25,15 +25,29 @@ class Encoder(nn.Module):
         self.sequence_encoder = TemporalCNN1D(
             stack_size, in_dim=self.cnn.out_dim, config=self.cfg.temporal
         )
+        self.register_buffer(
+            "_divisor", T.tensor(self.cfg.observation_divisor), persistent=False
+        )
+        self.register_buffer(
+            "_offset", T.tensor(self.cfg.observation_offset), persistent=False
+        )
+
+    def _normalize(self, frames_nhwc_uint8: T.Tensor) -> T.Tensor:
+        x = frames_nhwc_uint8.to(self._divisor.device, T.float32)
+        x = T.addcdiv(
+            self._offset, x, self._divisor
+        )  # same rounding as x / divisor + offset
+        return x.permute(0, 3, 1, 2)
 
     def frame_features(
         self, frames: T.Tensor
     ) -> T.Tensor:  # (N,H,W,C) uint8 -> (N,D), CNN only
+        normalized_frames = self._normalize(frames)  # (N,C,H,W)
         autocast_dtype = getattr(self, "cnn_autocast_dtype", None)
         if autocast_dtype is None:
-            return self.cnn(frames).float()
+            return self.cnn(normalized_frames).float()
         with T.autocast(device_type="cuda", dtype=autocast_dtype):
-            features = self.cnn(frames)
+            features = self.cnn(normalized_frames)
         return features.float()
 
     def aggregate(
