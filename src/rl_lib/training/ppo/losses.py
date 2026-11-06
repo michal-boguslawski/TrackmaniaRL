@@ -68,7 +68,6 @@ class PPOLosses:
         log_probs: T.Tensor,
         critic_values: T.Tensor,
         dist: Distribution,
-        entropy_decay: EntropyDecay,
         advantages: T.Tensor,
         returns: T.Tensor,
         old_log_probs: T.Tensor,
@@ -79,7 +78,11 @@ class PPOLosses:
             self.cfg.actor_loss_cfg, advantages, log_probs, old_log_probs
         )
         critic_loss, critic_metrics = self.critic_loss(
-            self.cfg.critic_loss_cfg, returns, critic_values, old_values
+            self.cfg.critic_loss_cfg,
+            self._critic_loss_fn,
+            returns,
+            critic_values,
+            old_values,
         )
         entropy_loss, entropy_metrics = self.entropy_loss(dist)
         metrics = {**actor_metrics, **critic_metrics, **entropy_metrics}
@@ -87,7 +90,7 @@ class PPOLosses:
         total_loss = (
             actor_loss
             + self.cfg.critic_loss_cfg.critic_beta * critic_loss
-            - entropy_decay.coefficient * entropy_loss
+            - self._entropy_decay.coefficient * entropy_loss
         )
         metrics["loss/total"] = total_loss.detach()
         return total_loss, metrics
@@ -132,8 +135,11 @@ class PPOLosses:
         """Compute critic loss and leave its diagnostic tensor on-device."""
         assert values.shape == old_values.shape == returns.shape
         value_clip_epsilon = critic_loss_cfg.value_clip_epsilon
-        clipped_values = old_values + (values - old_values).clamp(
-            -value_clip_epsilon, value_clip_epsilon
+        clipped_values = (
+            old_values
+            + (values - old_values).clamp(-value_clip_epsilon, value_clip_epsilon)
+            if value_clip_epsilon
+            else values
         )
         loss_unclipped = critic_loss_fn(values, returns)
         loss_clipped = critic_loss_fn(clipped_values, returns)

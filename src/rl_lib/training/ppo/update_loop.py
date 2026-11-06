@@ -61,34 +61,34 @@ def run_ppo_update_loop(
                 raise
             if not minibatch_metrics:
                 continue
-            epoch_kls.append(minibatch_metrics["metrics/approx_kl"])
+            # epoch_kls.append(minibatch_metrics["metrics/approx_kl"])
 
-            if (
-                minibatch_metrics["metrics/approx_kl"]
-                > cfg.kl.target_kl * cfg.kl.stop_multiplier
-                and training_step > cfg.kl.warmup_steps
-                and cfg.kl.hard_stop
-            ):
-                logger.warning(
-                    "Hard stop mid-epoch: KL %.4f",
-                    minibatch_metrics["metrics/approx_kl"],
-                )
-                break
+            # if (
+            #     minibatch_metrics["metrics/approx_kl"]
+            #     > cfg.kl.target_kl * cfg.kl.stop_multiplier
+            #     and training_step > cfg.kl.warmup_steps
+            #     and cfg.kl.hard_stop
+            # ):
+            #     logger.warning(
+            #         "Hard stop mid-epoch: KL %.4f",
+            #         minibatch_metrics["metrics/approx_kl"],
+            #     )
+            #     break
 
             # on_minibatch(metrics=minibatch_metrics, step=current_update_step())
 
-        mean_epoch_kl = float(np.mean(epoch_kls)) if epoch_kls else None
+        # mean_epoch_kl = float(np.mean(epoch_kls)) if epoch_kls else None
         # on_epoch()
-        if (
-            mean_epoch_kl is not None
-            and mean_epoch_kl > cfg.kl.target_kl
-            and training_step > cfg.kl.warmup_steps
-            and cfg.kl.hard_stop
-        ):
-            logger.warning(
-                "Early stop epoch %s: KL %.4f > %.4f",
-                epoch,
-                mean_epoch_kl,
-                cfg.kl.target_kl,
-            )
-            break
+        # if (
+        #     mean_epoch_kl is not None
+        #     and mean_epoch_kl > cfg.kl.target_kl
+        #     and training_step > cfg.kl.warmup_steps
+        #     and cfg.kl.hard_stop
+        # ):
+        #     logger.warning(
+        #         "Early stop epoch %s: KL %.4f > %.4f",
+        #         epoch,
+        #         mean_epoch_kl,
+        #         cfg.kl.target_kl,
+        #     )
+        #     break

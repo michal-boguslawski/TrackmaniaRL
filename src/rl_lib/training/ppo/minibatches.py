@@ -62,5 +62,5 @@ def get_iid_minibatches(
             "old_values": batch["critic_value"][env_indices, time_indices],
             "returns": batch["returns"][env_indices, time_indices],
             "advantages": batch["advantages"][env_indices, time_indices],
-            "dones": done_windows.reshape(-1),
+            "dones": done_windows,
         }
