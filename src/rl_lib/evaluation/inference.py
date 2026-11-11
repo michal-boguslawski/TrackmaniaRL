@@ -15,8 +15,7 @@ import torch as T
 from gymnasium.vector import VectorEnv
 from tqdm import tqdm
 
-from rl_lib.agent import Agent
-from rl_lib.tracking.sinks.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsSink
 
 logger = getLogger(__name__)
 
@@ -135,7 +134,6 @@ def summarize_returns(returns: Sequence[float]) -> dict[str, float]:
 
 
 def run_inference(
-    agent: Agent,
     env: VectorEnv,
     episodes: int,
     seed: int | None = None,
@@ -238,7 +236,7 @@ def run_inference(
 
 def log_evaluation_results(
     results: list[EpisodeResult],
-    metrics_loggers: list[MetricsLogger],
+    metrics_sinks: list[MetricsSink],
     step: int,
     scope: str = "",
 ) -> dict[str, float]:

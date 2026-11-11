@@ -12,8 +12,8 @@ from gymnasium import VectorizeMode, make_vec
 from gymnasium.vector import AutoresetMode, VectorEnv
 from gymnasium.wrappers.vector import NormalizeReward, NumpyToTorch
 
-from rl_lib.envs.settings.settings import make_wrapper_settings
-from rl_lib.envs.wrappers.registry import WRAPPERS
+from rl_lib.envs.wrappers.factory import make_wrapper
+from rl_lib.envs.wrappers.registry import WRAPPERS_REGISTRY
 from rl_lib.run_config import EnvironmentSettings
 
 
@@ -38,15 +38,13 @@ def make_env(config: EnvironmentSettings, device: T.device | str = "cpu") -> Vec
     if config.record_video and not configured_video:
         _wrappers.insert(
             0,
-            make_wrapper_settings("record_video", video_folder=config.video_folder),
+            make_wrapper(config),
         )
     record_enabled = config.record_video or configured_video
 
     wrappers_fn = []
     for wrapper in _wrappers:
-        settings = (
-            make_wrapper_settings(wrapper) if isinstance(wrapper, str) else wrapper
-        )
+        settings = make_wrapper(wrapper) if isinstance(wrapper, str) else wrapper
         options = settings.model_dump(exclude={"name"})
         for optional_key in ("skip", "stack_size", "video_folder"):
             if options.get(optional_key) is None:
@@ -55,7 +53,7 @@ def make_env(config: EnvironmentSettings, device: T.device | str = "cpu") -> Vec
         options.setdefault("skip", config.skip)
         if settings.name == "frame_stack" and "stack_size" not in options:
             raise ValueError("frame_stack wrapper requires stack_size")
-        wrappers_fn.append(partial(WRAPPERS[settings.name], **options))
+        wrappers_fn.append(partial(WRAPPERS_REGISTRY[settings.name], **options))
 
     env = make_vec(
         config.id,

@@ -1,10 +1,10 @@
 """Typed settings for supported learning-rate scheduler variants."""
 
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from pydantic import Field
 
-from rl_lib.training.settings.base import StrictModel
+from rl_lib.config_base import StrictModel
 
 
 class CosineSchedulerSettings(StrictModel):

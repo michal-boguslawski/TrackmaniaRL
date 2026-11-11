@@ -2,20 +2,20 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import Field, FiniteFloat, PositiveInt, model_validator
+from pydantic import Field, PositiveInt, model_validator
 
-from rl_lib.envs.settings.settings import (
+from rl_lib.config_base import StrictModel
+from rl_lib.envs.settings.wrappers import (
     RecordVideoWrapperSettings,
     WrapperSettings,
-    make_wrapper_settings,
 )
-from rl_lib.training.ppo.config import PPONetworkConfig
+
+# from rl_lib.training.ppo.config import PPONetworkConfig
 from rl_lib.training.settings import (
     CosineSchedulerSettings,
     LinearSchedulerSettings,
     TrainerSettings,
 )
-from rl_lib.training.settings.base import StrictModel
 
 
 class RunSettings(StrictModel):
@@ -61,16 +61,7 @@ class EnvironmentSettings(StrictModel):
     reward_normalization_epsilon: float = Field(default=1e-8, gt=0)
     vectorization_mode: Literal["async", "sync"] = "async"
     autoreset_mode: Literal["same_step", "next_step", "disabled"] = "same_step"
-    wrappers: list[WrapperSettings] = Field(
-        default_factory=lambda: [
-            make_wrapper_settings("record_episode_stats"),
-            make_wrapper_settings("grayscale"),
-            make_wrapper_settings(
-                "reward_on_done", on_terminated=None, on_truncated=-10.0, on_win=100.0
-            ),
-            make_wrapper_settings("max_and_skip"),
-        ]
-    )
+    wrappers: list[WrapperSettings] = Field(default_factory=lambda: [list])
 
 
 class TrackingSettings(StrictModel):
@@ -132,13 +123,7 @@ class RecordVideoCallbackConfig(StrictModel):
     recording: RecordVideoWrapperSettings = Field(
         default_factory=RecordVideoWrapperSettings
     )
-    wrappers: list[WrapperSettings] = Field(
-        default_factory=lambda: [
-            make_wrapper_settings("record_episode_stats"),
-            make_wrapper_settings("grayscale"),
-            make_wrapper_settings("max_and_skip"),
-        ]
-    )
+    wrappers: list[WrapperSettings] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_video_wrapper(self):
@@ -210,16 +195,10 @@ class VideoCallbackSettings(StrictModel):
         return stats_wrappers[0].stats_key
 
 
-NetworkSettings = Annotated[
-    PPONetworkConfig,
-    Field(discriminator="name"),
-]
-
-
 class RunConfig(StrictModel):
     run: RunSettings = Field(default_factory=RunSettings)
     environment: EnvironmentSettings = Field(default_factory=EnvironmentSettings)
-    network: NetworkSettings = Field(default_factory=PPONetworkConfig)
+    # network: NetworkSettings = Field(default_factory=PPONetworkConfig)
     trainer: TrainerSettings = Field(default_factory=TrainerSettings)
     tracking: TrackingSettings = Field(default_factory=TrackingSettings)
     callbacks: list[CallbackSettings] = Field(default_factory=list)

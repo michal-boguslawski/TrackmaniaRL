@@ -5,12 +5,14 @@ from torch import nn
 from torch.distributions import Distribution
 
 from rl_lib.tracking.verbosity import Verbosity, as_verbosity
-from rl_lib.training.ppo.metrics import calc_approx_kl_divergence
-from rl_lib.training.settings.loss import (
-    EntropySettings,
+from rl_lib.training.ppo.config.loss import (
     PPOActorLossSettings,
     PPOCriticLossSettings,
     PPOLossSettings,
+)
+from rl_lib.training.ppo.metrics import calc_approx_kl_divergence
+from rl_lib.training.settings.loss import (
+    EntropySettings,
 )
 
 

@@ -11,7 +11,7 @@ from rl_lib.tracking.sinks.base import MetricsSink
 logger = getLogger(__name__)
 
 
-class ConsoleMetricsLogger(MetricsSink):
+class ConsoleMetricsSink(MetricsSink):
     """Simple console logger for metrics and parameters.
 
     Formats metrics with 6 decimal places and logs at DEBUG level.

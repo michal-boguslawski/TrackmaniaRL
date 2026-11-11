@@ -6,7 +6,6 @@ environment, logs the video as an artifact, and logs episode metrics.
 
 from logging import getLogger
 
-from rl_lib.agent import Agent
 from rl_lib.envs.make_env import make_env
 from rl_lib.evaluation.inference import log_evaluation_results, run_inference
 from rl_lib.run_config import VideoCallbackSettings
@@ -36,7 +35,6 @@ class RecordVideoCallback(Callback):
 
     def __init__(
         self,
-        agent: Agent,
         metrics_loggers: list[MetricsSink],
         config: VideoCallbackSettings,
     ):

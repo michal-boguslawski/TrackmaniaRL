@@ -19,7 +19,7 @@ from rl_lib.checkpoint_loaders import FINAL_MODEL_ARTIFACT, MLflowCheckpointLoad
 from rl_lib.evaluation.checkpoint import _evaluate_configured_policy
 from rl_lib.evaluation.runtime import _default_metrics_loggers
 from rl_lib.run_config import RunConfig
-from rl_lib.tracking.sinks.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsSink
 
 logger = logging.getLogger(__name__)
 
@@ -324,7 +324,7 @@ def evaluate_mlflow(
     episodes: int = 5,
     num_envs: int = 1,
     record_video: bool = False,
-    metrics_loggers: list[MetricsLogger] | None = None,
+    metrics_loggers: list[MetricsSink] | None = None,
     input_fn: Callable[[str], str] | None = None,
     checkpoint_step: int | None = None,
 ) -> list[float]:

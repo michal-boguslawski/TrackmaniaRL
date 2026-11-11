@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import Field, FiniteFloat, PositiveFloat, model_validator
 
-from rl_lib.training.settings.base import StrictModel
+from rl_lib.config_base import StrictModel
 from rl_lib.training.settings.loss import EntropySettings, LossSettings
 
 

@@ -2,10 +2,10 @@
 
 from typing import Literal
 
-from pydantic import Field, FiniteFloat, model_validator
+from pydantic import Field
 
-from rl_lib.training.settings.base import StrictModel
-from rl_lib.training.settings.loss import PPOLossSettings
+from rl_lib.config_base import StrictModel
+from rl_lib.training.settings.loss import LossSettings
 from rl_lib.training.settings.optimizer import OptimizerSettings
 from rl_lib.training.settings.scheduler import (
     CosineSchedulerSettings,
@@ -84,8 +84,8 @@ class TrainerSettings(StrictModel):
         minibatch_indexing_mode: Whether minibatch indices are IID or sequential.
     """
 
-    loss: PPOLossSettings = Field(
-        default_factory=PPOLossSettings,
+    loss: LossSettings = Field(
+        ...,
         description="Algorithm-specific loss configuration.",
     )
     kl: KLControlSettings = Field(

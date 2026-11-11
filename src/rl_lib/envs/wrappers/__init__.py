@@ -6,7 +6,7 @@ from config.
 
 from typing import Any
 
-from rl_lib.envs.settings.settings import (
+from rl_lib.envs.settings.wrappers import (
     FrameStackWrapperSettings,
     GrayscaleWrapperSettings,
     MaxAndSkipWrapperSettings,
@@ -15,20 +15,20 @@ from rl_lib.envs.settings.settings import (
     RecordVideoWrapperSettings,
     RewardOnDoneWrapperSettings,
     WrapperSettings,
-    make_wrapper_settings,
 )
 
 
 def __getattr__(name: str) -> Any:
     """Load the registry lazily to keep wrapper schemas dependency-light."""
     if name == "WRAPPERS":
-        from rl_lib.envs.wrappers.registry import WRAPPERS
+        from rl_lib.envs.wrappers.registry import WRAPPERS_REGISTRY
 
-        return WRAPPERS
+        return WRAPPERS_REGISTRY
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
+    "WRAPPERS_REGISTRY",
     "FrameStackWrapperSettings",
     "GrayscaleWrapperSettings",
     "MaxAndSkipWrapperSettings",
@@ -36,7 +36,5 @@ __all__ = [
     "RecordEpisodeStatisticsWrapperSettings",
     "RecordVideoWrapperSettings",
     "RewardOnDoneWrapperSettings",
-    "WRAPPERS",
     "WrapperSettings",
-    "make_wrapper_settings",
 ]

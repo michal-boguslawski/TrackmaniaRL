@@ -10,12 +10,15 @@ Provides MetricsLogger interface and implementations:
 from rl_lib.tracking.local_artifact_logger import LocalArtifactLogger
 from rl_lib.tracking.sinks.base import MetricsSink
 from rl_lib.tracking.sinks.console_sink import ConsoleMetricsSink
-from rl_lib.tracking.sinks.mlflow_sink import MLflowSink, run_status_for_exception
+from rl_lib.tracking.sinks.mlflow_sink import (
+    MLflowMetricsSink,
+    run_status_for_exception,
+)
 
 __all__ = [
     "ConsoleMetricsSink",
     "LocalArtifactLogger",
-    "MLflowSink",
+    "MLflowMetricsSink",
     "MetricsSink",
     "run_status_for_exception",
 ]

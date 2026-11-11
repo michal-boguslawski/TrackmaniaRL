@@ -21,3 +21,5 @@ mlruns
 
 nohup.out
 mlflow.db
+
+.venv*

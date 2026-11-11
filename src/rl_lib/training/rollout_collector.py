@@ -13,7 +13,8 @@ from gymnasium.vector import VectorEnv
 from tqdm import tqdm
 
 from rl_lib.policy.policy import Policy
-from rl_lib.run_config import RolloutSettings
+
+# from rl_lib.run_config import RolloutSettings
 from rl_lib.training.base import Trainer
 from rl_lib.training.callbacks.base import Callback, CallbackList
 from rl_lib.training.transitions import Transition

@@ -7,7 +7,6 @@ complete model plus final state dictionary when rollout collection finishes.
 from collections.abc import Iterable
 from logging import getLogger
 
-from rl_lib.agent import Agent
 from rl_lib.tracking.artifacts import step_artifact_path
 from rl_lib.tracking.sinks.base import MetricsSink
 from rl_lib.training.callbacks.base import Callback
@@ -31,7 +30,6 @@ class ModelCheckpointCallback(Callback):
 
     def __init__(
         self,
-        agent: Agent,
         metrics_loggers: Iterable[MetricsSink],
         interval: int | None = None,
     ) -> None:

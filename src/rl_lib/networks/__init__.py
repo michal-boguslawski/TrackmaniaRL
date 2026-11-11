@@ -21,7 +21,6 @@ from rl_lib.networks.config import (
     VCriticConfig,
 )
 from rl_lib.networks.critic import VCritic
-from rl_lib.networks.factory import Network
 from rl_lib.networks.temporal import TemporalCNN1D
 
 __all__ = [
@@ -31,7 +30,6 @@ __all__ = [
     "CNNConfig",
     "ConvLayerConfig",
     "LinearLayerConfig",
-    "Network",
     "NetworkConfig",
     "StableTanhTransform",
     "TemporalCNN1D",

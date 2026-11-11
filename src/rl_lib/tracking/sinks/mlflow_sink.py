@@ -47,7 +47,7 @@ def run_status_for_exception(
     return "FAILED"
 
 
-class MLflowLogger(MetricsSink):
+class MLflowMetricsSink(MetricsSink):
     """MLflow tracking backend for metrics, params, models, and artifacts.
 
     Creates an MLflow run on initialization. Supports context manager

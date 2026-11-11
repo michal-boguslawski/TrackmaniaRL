@@ -23,7 +23,7 @@ from collections.abc import Iterable
 from enum import IntEnum
 from typing import Any
 
-from rl_lib.tracking.sinks.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsSink
 
 
 class Verbosity(IntEnum):
@@ -138,7 +138,7 @@ def filter_loggers(
     ]
 
 
-class VerbosityMetricsLogger(MetricsLogger):
+class VerbosityMetricsLogger(MetricsSink):
     """MetricsLogger decorator that drops metrics above the verbosity budget.
 
     Every method other than ``log_metrics`` is delegated untouched, so

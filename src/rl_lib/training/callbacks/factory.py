@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from rl_lib.agent import Agent
 from rl_lib.run_config import CheckpointsCallbackConfig, RunConfig
 from rl_lib.tracking.sinks.base import MetricsSink
 from rl_lib.training.callbacks.base import Callback
@@ -46,8 +45,6 @@ class CallbackFactoryContext:
     """
 
     config: RunConfig
-    agent: Agent
-    video_agent: Agent
     metrics_loggers: list[MetricsSink]
 
 
@@ -126,8 +123,6 @@ CALLBACK_FACTORIES: dict[str, CallbackBuilder] = {
 
 def create_callbacks(
     config: RunConfig,
-    agent: Agent,
-    video_agent: Agent,
     metrics_loggers: list[MetricsSink],
     run_config: dict | None = None,
 ) -> CallbackGroups:
@@ -149,8 +144,6 @@ def create_callbacks(
     """
     context = CallbackFactoryContext(
         config=config,
-        agent=agent,
-        video_agent=video_agent,
         metrics_loggers=metrics_loggers,
     )
     groups = CallbackGroups(
@@ -166,5 +159,5 @@ def create_callbacks(
         groups.collector.extend(created.collector)
 
     if not config.callback("checkpoints"):
-        groups.collector.append(ModelCheckpointCallback(agent, metrics_loggers))
+        groups.collector.append(ModelCheckpointCallback(metrics_loggers))
     return groups

@@ -7,7 +7,6 @@ intervals and at the end of training.
 
 from __future__ import annotations
 
-from rl_lib.agent import Agent
 from rl_lib.envs.make_env import make_env
 from rl_lib.evaluation.inference import log_evaluation_results, run_inference
 from rl_lib.evaluation.runtime import _episode_stats_key
@@ -35,7 +34,6 @@ class EvaluationCallback(Callback):
 
     def __init__(
         self,
-        agent: Agent,
         metrics_loggers: list[MetricsSink],
         config: EvaluationCallbackSettings,
     ):
@@ -46,7 +44,6 @@ class EvaluationCallback(Callback):
             metrics_loggers: Tracking backends for result logging.
             config: Evaluation settings including environment, interval, episodes.
         """
-        self.agent = Agent(agent.network, agent.device, agent.cfg)
         self.cfg = config
         self._loggers = metrics_loggers
         self.env = make_env(config.environment, device=self.agent.device)

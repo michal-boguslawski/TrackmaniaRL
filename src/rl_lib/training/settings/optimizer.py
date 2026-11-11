@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from rl_lib.training.settings.base import StrictModel
+from rl_lib.config_base import StrictModel
 
 
 class OptimizerSettings(StrictModel):
@@ -58,9 +58,15 @@ class OptimizerSettings(StrictModel):
         ge=0,
         description="Weight decay for bias and normalization groups.",
     )
-    eps: float = Field(default=1e-5, gt=0, description="Adam numerical stability epsilon.")
-    beta1: float = Field(default=0.9, ge=0, lt=1, description="Adam first-moment coefficient.")
-    beta2: float = Field(default=0.999, ge=0, lt=1, description="Adam second-moment coefficient.")
+    eps: float = Field(
+        default=1e-5, gt=0, description="Adam numerical stability epsilon."
+    )
+    beta1: float = Field(
+        default=0.9, ge=0, lt=1, description="Adam first-moment coefficient."
+    )
+    beta2: float = Field(
+        default=0.999, ge=0, lt=1, description="Adam second-moment coefficient."
+    )
     amsgrad: bool = Field(default=False, description="Enable the Adam AMSGrad variant.")
     fused: bool = Field(
         default=True,

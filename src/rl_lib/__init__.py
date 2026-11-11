@@ -9,20 +9,18 @@ This package provides a PPO implementation with:
 """
 
 # Re-export main public classes for convenient imports
-from rl_lib.agent import Agent
+# from rl_lib.agent import Agent
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
-from rl_lib.networks.factory import Network
-from rl_lib.run_config import RunConfig, load_config
+
+# from rl_lib.networks.factory import Network
+from rl_lib.run_config import RunConfig
 from rl_lib.training.ppo import PPOTrainer
 from rl_lib.training.rollout_collector import RolloutCollector
 
 __all__ = [
-    "Agent",
-    "RolloutBuffer",
-    "RolloutStep",
-    "Network",
-    "RunConfig",
-    "load_config",
     "PPOTrainer",
+    "RolloutBuffer",
     "RolloutCollector",
+    "RolloutStep",
+    "RunConfig",
 ]

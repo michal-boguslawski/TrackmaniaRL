@@ -5,9 +5,9 @@ when an episode terminates, truncates, or wins (completes a lap).
 """
 
 # src/rl_lib/envs/reward_wrappers.py
-import gymnasium as gym
-from typing import Callable
+from collections.abc import Callable
 
+import gymnasium as gym
 
 RewardAdjustment = float | Callable[[float], float]
 

@@ -10,15 +10,13 @@ import logging
 from contextlib import closing
 from pathlib import Path
 
-from rl_lib.agent import Agent
 from rl_lib.checkpoint_loaders import LocalCheckpointLoader, MLflowCheckpointLoader
 from rl_lib.device import resolve_device
 from rl_lib.envs.make_env import make_env
 from rl_lib.evaluation.inference import log_evaluation_results, run_inference
 from rl_lib.evaluation.runtime import _default_metrics_loggers, _episode_stats_key
-from rl_lib.networks.factory import Network
 from rl_lib.networks.mixed_precision import resolve_cnn_autocast_dtype
-from rl_lib.run_config import RunConfig, load_config
+from rl_lib.run_config import RunConfig
 from rl_lib.tracking.sinks.base import MetricsSink
 from rl_lib.tracking.verbosity import filter_loggers
 
@@ -71,7 +69,7 @@ def evaluate_checkpoint(
     if num_envs < 1:
         raise ValueError("num_envs must be at least 1")
 
-    config = load_config(str(config_path))
+    # config = load_config(str(config_path))
     return _evaluate_configured_policy(
         config,
         episodes=episodes,
@@ -112,21 +110,7 @@ def _evaluate_configured_policy(
     metrics_loggers = filter_loggers(metrics_loggers, config.tracking.verbosity)
 
     with closing(make_env(env_config, device=device)) as env:
-        network = Network(
-            observation_dim=env.observation_space.shape[-1],
-            action_dim=env.action_space.shape[-1],
-            stack_size=config.agent.stack_size,
-            config=config.network,
-            cnn_autocast_dtype=resolve_cnn_autocast_dtype(
-                config.run.cnn_autocast, device
-            ),
-        ).to(device)
-        if checkpoint_loader is not None:
-            network = checkpoint_loader.load(network, device)
-        agent = Agent(network, device, config.agent)
-
         results = run_inference(
-            agent,
             env,
             episodes=episodes,
             seed=config.run.seed,
