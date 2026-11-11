@@ -2,11 +2,11 @@ from types import SimpleNamespace
 
 import torch as T
 
-from rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsSink
 from rl_lib.training.callbacks.model_checkpoint import ModelCheckpointCallback
 
 
-class _RecordingLogger(MetricsLogger):
+class _RecordingLogger(MetricsSink):
     def __init__(self):
         self.logged_models = []
         self.logged_state_dicts = []
@@ -61,9 +61,7 @@ def test_final_callback_logs_model_and_state_dict_through_loggers():
 
 def test_periodic_checkpoint_is_disabled_without_an_interval():
     logger = _RecordingLogger()
-    callback = ModelCheckpointCallback(
-        SimpleNamespace(network=object()), [logger]
-    )
+    callback = ModelCheckpointCallback(SimpleNamespace(network=object()), [logger])
 
     callback.on_env_step(step=1000)
 

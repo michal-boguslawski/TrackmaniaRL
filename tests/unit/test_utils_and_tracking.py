@@ -24,8 +24,7 @@ from rl_lib.logger_setup import (
     setup_logging,
     shutdown_logging,
 )
-from rl_lib.tracking.mlflow_logger import MLflowLogger
-
+from rl_lib.tracking.sinks.mlflow_sink import MetricsSink
 
 # ---------------------------------------------------------------- to_tensor_batch
 
@@ -159,13 +158,18 @@ def test_setup_logging_stamps_every_record_with_the_session_id(
         for handler in logging.getLogger().handlers
         for record in getattr(handler, "records", [])
     ]
-    assert logging.getLogRecordFactory()(  # the factory is the installed one
-        "n", logging.INFO, "p", 1, "m", None, None
-    ).session_id == "run-42"
+    assert (
+        logging.getLogRecordFactory()(  # the factory is the installed one
+            "n", logging.INFO, "p", 1, "m", None, None
+        ).session_id
+        == "run-42"
+    )
     assert records == [] or all(record.session_id == "run-42" for record in records)
 
 
-def test_setup_logging_creates_the_log_directory(restore_logging, logging_config, tmp_path):
+def test_setup_logging_creates_the_log_directory(
+    restore_logging, logging_config, tmp_path
+):
     setup_logging(logging_config, session_id="run-42")
 
     assert (tmp_path / "nested").is_dir()
@@ -256,12 +260,12 @@ def fake_mlflow(monkeypatch):
 
 
 @pytest.fixture
-def logger(fake_mlflow) -> MLflowLogger:
-    return MLflowLogger(experiment_name="test-experiment", run_name="run-1")
+def logger(fake_mlflow) -> MetricsSink:
+    return MetricsSink(experiment_name="test-experiment", run_name="run-1")
 
 
 def test_constructor_starts_the_experiment_and_the_run(fake_mlflow):
-    MLflowLogger(experiment_name="test-experiment", run_name="run-1")
+    MetricsSink(experiment_name="test-experiment", run_name="run-1")
 
     assert fake_mlflow.names() == ["set_experiment", "start_run"]
     assert fake_mlflow.calls[0][1] == ("test-experiment",)
@@ -269,19 +273,19 @@ def test_constructor_starts_the_experiment_and_the_run(fake_mlflow):
 
 
 def test_constructor_deduces_a_run_name_when_none_is_given(fake_mlflow):
-    MLflowLogger(experiment_name="test-experiment")
+    MetricsSink(experiment_name="test-experiment")
 
     run_name = fake_mlflow.calls[1][2]["run_name"]
     assert re.fullmatch(r".+-\d{8}T\d{6}Z-[0-9a-f]{6}", run_name)
 
 
-def test_log_metrics_forwards_the_step(logger: MLflowLogger, fake_mlflow):
+def test_log_metrics_forwards_the_step(logger: MetricsSink, fake_mlflow):
     logger.log_metrics({"loss/total": 1.5}, step=7)
 
     assert fake_mlflow.calls[-1] == ("log_metrics", ({"loss/total": 1.5},), {"step": 7})
 
 
-def test_log_parameters_stringifies_the_values(logger: MLflowLogger, fake_mlflow):
+def test_log_parameters_stringifies_the_values(logger: MetricsSink, fake_mlflow):
     logger.log_parameters({"lr": 1e-4, "optimizer": "AdamW", "flag": True})
 
     assert fake_mlflow.calls[-1] == (
@@ -291,7 +295,7 @@ def test_log_parameters_stringifies_the_values(logger: MLflowLogger, fake_mlflow
     )
 
 
-def test_log_model_uses_the_registered_model_name(logger: MLflowLogger, fake_mlflow):
+def test_log_model_uses_the_registered_model_name(logger: MetricsSink, fake_mlflow):
     logger._registered_model_name = "policy-v1"
     model = T.nn.Linear(2, 2)
 
@@ -307,7 +311,7 @@ def test_log_model_uses_the_registered_model_name(logger: MLflowLogger, fake_mlf
     }
 
 
-def test_log_model_registered_name_can_be_overridden(logger: MLflowLogger, fake_mlflow):
+def test_log_model_registered_name_can_be_overridden(logger: MetricsSink, fake_mlflow):
     logger._registered_model_name = "policy-v1"
 
     logger.log_model(T.nn.Linear(2, 2), registered_model_name="other")
@@ -315,7 +319,7 @@ def test_log_model_registered_name_can_be_overridden(logger: MLflowLogger, fake_
     assert fake_mlflow.calls[-1][2]["registered_model_name"] == "other"
 
 
-def test_log_state_dict(logger: MLflowLogger, fake_mlflow):
+def test_log_state_dict(logger: MetricsSink, fake_mlflow):
     state_dict = {"weight": T.ones(2)}
 
     logger.log_state_dict(state_dict)
@@ -326,7 +330,7 @@ def test_log_state_dict(logger: MLflowLogger, fake_mlflow):
     assert kwargs == {"artifact_path": "checkpoints"}
 
 
-def test_log_artifact(logger: MLflowLogger, fake_mlflow):
+def test_log_artifact(logger: MetricsSink, fake_mlflow):
     logger.log_artifact("/tmp/video.mp4", artifact_path="videos/step_0")
 
     assert fake_mlflow.calls[-1] == (
@@ -336,31 +340,35 @@ def test_log_artifact(logger: MLflowLogger, fake_mlflow):
     )
 
 
-def test_log_artifact_keeps_an_explicit_step_directory(logger: MLflowLogger, fake_mlflow):
+def test_log_artifact_keeps_an_explicit_step_directory(
+    logger: MetricsSink, fake_mlflow
+):
     logger.log_artifact("/tmp/video.mp4", artifact_path="videos/step_007")
 
     assert fake_mlflow.calls[-1][2] == {"artifact_path": "videos/step_007"}
 
 
-def test_log_artifact_leaves_paths_without_a_step_alone(logger: MLflowLogger, fake_mlflow):
+def test_log_artifact_leaves_paths_without_a_step_alone(
+    logger: MetricsSink, fake_mlflow
+):
     logger.log_artifact("/tmp/model.pt", artifact_path="final_model")
 
     assert fake_mlflow.calls[-1][2] == {"artifact_path": "final_model"}
 
 
-def test_close_ends_the_run_with_the_given_status(logger: MLflowLogger, fake_mlflow):
+def test_close_ends_the_run_with_the_given_status(logger: MetricsSink, fake_mlflow):
     logger.close(status="FAILED")
 
     assert fake_mlflow.calls[-1] == ("end_run", (), {"status": "FAILED"})
 
 
-def test_close_defaults_to_finished(logger: MLflowLogger, fake_mlflow):
+def test_close_defaults_to_finished(logger: MetricsSink, fake_mlflow):
     logger.close()
 
     assert fake_mlflow.calls[-1] == ("end_run", (), {"status": "FINISHED"})
 
 
-def test_context_manager_closes_the_run_on_success(logger: MLflowLogger, fake_mlflow):
+def test_context_manager_closes_the_run_on_success(logger: MetricsSink, fake_mlflow):
     with logger as entered:
         assert entered is logger
 
@@ -368,7 +376,7 @@ def test_context_manager_closes_the_run_on_success(logger: MLflowLogger, fake_ml
 
 
 def test_context_manager_closes_the_run_as_failed_on_error(
-    logger: MLflowLogger, fake_mlflow
+    logger: MetricsSink, fake_mlflow
 ):
     with pytest.raises(RuntimeError):
         with logger:
@@ -377,7 +385,7 @@ def test_context_manager_closes_the_run_as_failed_on_error(
     assert fake_mlflow.calls[-1] == ("end_run", (), {"status": "FAILED"})
 
 
-def test_logger_satisfies_the_metrics_logger_interface(logger: MLflowLogger):
-    from rl_lib.tracking.base import MetricsLogger
+def test_logger_satisfies_the_metrics_logger_interface(logger: MetricsSink):
+    from rl_lib.tracking.sinks.base import MetricsLogger
 
     assert isinstance(logger, MetricsLogger)

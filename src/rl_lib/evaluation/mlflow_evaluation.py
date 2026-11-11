@@ -6,21 +6,20 @@ resolve run identifiers, and evaluate loaded models with original config.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 import mlflow
-from mlflow.tracking import MlflowClient
 import yaml
+from mlflow.tracking import MlflowClient
 
 from rl_lib.checkpoint_loaders import FINAL_MODEL_ARTIFACT, MLflowCheckpointLoader
 from rl_lib.evaluation.checkpoint import _evaluate_configured_policy
-from rl_lib.run_config import RunConfig
-from rl_lib.tracking.base import MetricsLogger
 from rl_lib.evaluation.runtime import _default_metrics_loggers
-
+from rl_lib.run_config import RunConfig
+from rl_lib.tracking.sinks.base import MetricsLogger
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +35,7 @@ class MLflowModelRef:
         unique_prefix: Shortest unique prefix of run_id for CLI selection.
         start_time: Run start timestamp (ms since epoch).
     """
+
     run_id: str
     run_name: str
     experiment_name: str
@@ -140,13 +140,17 @@ def discover_mlflow_models(experiment_name: str) -> list[MLflowModelRef]:
     available = []
     for run in runs:
         run_id = run.info.run_id
-        if run_id not in logged_model_runs and not _has_final_model_artifact(client, run_id):
+        if run_id not in logged_model_runs and not _has_final_model_artifact(
+            client, run_id
+        ):
             continue
-        available.append((
-            run_id,
-            run.data.tags.get("mlflow.runName", run_id),
-            run.info.start_time or 0,
-        ))
+        available.append(
+            (
+                run_id,
+                run.data.tags.get("mlflow.runName", run_id),
+                run.info.start_time or 0,
+            )
+        )
 
     prefixes = _shortest_unique_prefixes([entry[0] for entry in available])
     return [
@@ -157,7 +161,9 @@ def discover_mlflow_models(experiment_name: str) -> list[MLflowModelRef]:
             unique_prefix=prefixes[run_id],
             start_time=start_time,
         )
-        for run_id, run_name, start_time in sorted(available, key=lambda item: item[2], reverse=True)
+        for run_id, run_name, start_time in sorted(
+            available, key=lambda item: item[2], reverse=True
+        )
     ]
 
 
@@ -208,7 +214,12 @@ def select_mlflow_run(
     if identifier is None:
         logger.info("Available MLflow models in experiment %s:", experiment_name)
         for model in models:
-            logger.info("  %s  %s  (run_id=%s)", model.unique_prefix, model.run_name, model.run_id)
+            logger.info(
+                "  %s  %s  (run_id=%s)",
+                model.unique_prefix,
+                model.run_name,
+                model.run_id,
+            )
         prompt = input_fn or input
         identifier = prompt("Select a model by its unique run-ID prefix: ").strip()
 
@@ -218,8 +229,12 @@ def select_mlflow_run(
         return matches[0]
     if len(matches) > 1:
         options = ", ".join(model.unique_prefix for model in matches)
-        raise ValueError(f"MLflow run prefix {requested!r} is ambiguous; use one of: {options}")
-    raise ValueError(f"No model run in {experiment_name!r} matches prefix {requested!r}")
+        raise ValueError(
+            f"MLflow run prefix {requested!r} is ambiguous; use one of: {options}"
+        )
+    raise ValueError(
+        f"No model run in {experiment_name!r} matches prefix {requested!r}"
+    )
 
 
 def _load_mlflow_config(run_id: str) -> RunConfig:
@@ -242,7 +257,9 @@ def _load_mlflow_config(run_id: str) -> RunConfig:
     with Path(config_path).open("rt", encoding="utf-8") as stream:
         raw_config = yaml.safe_load(stream)
     if not isinstance(raw_config, dict):
-        raise ValueError(f"MLflow run {run_id} has no valid config/run_config.yaml artifact")
+        raise ValueError(
+            f"MLflow run {run_id} has no valid config/run_config.yaml artifact"
+        )
     # Training logs resolved process facts as well; they are not authored config.
     raw_config.pop("runtime", None)
     # Older runs serialized every wrapper default. Keep only options supported
@@ -252,8 +269,13 @@ def _load_mlflow_config(run_id: str) -> RunConfig:
         "frame_stack": {"stack_size", "frame_padding_type"},
         "record_episode_stats": {"stats_buffer_length", "stats_key"},
         "record_video": {
-            "video_folder", "episode_trigger", "episode_interval", "video_length",
-            "video_name_prefix", "video_fps", "video_disable_logger",
+            "video_folder",
+            "episode_trigger",
+            "episode_interval",
+            "video_length",
+            "video_name_prefix",
+            "video_fps",
+            "video_disable_logger",
         },
         "max_and_skip": {"skip"},
         "reward_on_done": {"on_terminated", "on_truncated", "on_win"},
@@ -262,14 +284,20 @@ def _load_mlflow_config(run_id: str) -> RunConfig:
     def clean_wrapper(raw_wrapper: dict) -> dict:
         name = raw_wrapper.get("name")
         allowed = wrapper_options.get(name, set())
-        return {key: value for key, value in raw_wrapper.items() if key == "name" or key in allowed}
+        return {
+            key: value
+            for key, value in raw_wrapper.items()
+            if key == "name" or key in allowed
+        }
 
     # Runs are logged with unset fields omitted, so an absent wrapper list means
     # "use RunConfig defaults". Only rewrite lists that are actually present;
     # writing an empty list would drop the default wrappers the run trained with.
     environment = raw_config.get("environment", {})
     if "wrappers" in environment:
-        environment["wrappers"] = [clean_wrapper(item) for item in environment["wrappers"]]
+        environment["wrappers"] = [
+            clean_wrapper(item) for item in environment["wrappers"]
+        ]
     callbacks = raw_config.get("callbacks", {})
     if isinstance(callbacks, dict):
         if "video_recording" in callbacks:
@@ -363,4 +391,9 @@ def evaluate_mlflow(
 
 
 if __name__ == "__main__":
-    evaluate_mlflow(experiment_name="Trackmania-RL-manual-smoke", episodes=1, num_envs=1, record_video=False)
+    evaluate_mlflow(
+        experiment_name="Trackmania-RL-manual-smoke",
+        episodes=1,
+        num_envs=1,
+        record_video=False,
+    )

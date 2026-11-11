@@ -4,14 +4,13 @@ The callback logs state dictionaries at rollout-step intervals and records the
 complete model plus final state dictionary when rollout collection finishes.
 """
 
+from collections.abc import Iterable
 from logging import getLogger
-from typing import Iterable
 
 from rl_lib.agent import Agent
 from rl_lib.tracking.artifacts import step_artifact_path
-from rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsSink
 from rl_lib.training.callbacks.base import Callback
-
 
 logger = getLogger(__name__)
 
@@ -33,7 +32,7 @@ class ModelCheckpointCallback(Callback):
     def __init__(
         self,
         agent: Agent,
-        metrics_loggers: Iterable[MetricsLogger],
+        metrics_loggers: Iterable[MetricsSink],
         interval: int | None = None,
     ) -> None:
         """Initialize the callback.
@@ -66,8 +65,8 @@ class ModelCheckpointCallback(Callback):
             metrics_logger.log_state_dict(state_dict, artifact_path=artifact_path)
 
         intervals_elapsed = (
-            (completed_steps - self._next_checkpoint_step) // self._interval + 1
-        )
+            completed_steps - self._next_checkpoint_step
+        ) // self._interval + 1
         self._next_checkpoint_step += intervals_elapsed * self._interval
         logger.info("Logged model checkpoint at rollout step %s", completed_steps)
 

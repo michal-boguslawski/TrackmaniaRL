@@ -23,8 +23,7 @@ from rl_lib.run_config import (
     EvaluationCallbackSettings,
     RunConfig,
 )
-from rl_lib.tracking.base import MetricsLogger
-
+from rl_lib.tracking.sinks.base import MetricsSink
 
 OBSERVATION_SHAPE = (96, 96, 1)
 
@@ -73,7 +72,7 @@ def _vector_env(num_envs: int = 2, horizon: int = 2):
     )
 
 
-class _Logger(MetricsLogger):
+class _Logger(MetricsSink):
     def __init__(self):
         self.metrics: list[tuple[dict[str, float], int]] = []
         self.artifacts: list[tuple[str, str | None]] = []
@@ -86,21 +85,23 @@ class _Logger(MetricsLogger):
 
 
 def _config(network_config, num_envs: int = 2) -> RunConfig:
-    return RunConfig.model_validate({
-        "environment": {
-            "id": "test-episode-env",
-            "num_envs": num_envs,
-            "normalize_rewards": True,
-            "wrappers": [],
-        },
-        "agent": AgentSettings(stack_size=2).model_dump(),
-        "network": network_config.model_dump(),
-        "callbacks": {
-            "episode_statistics": False,
-            "record_video": False,
-            "evaluation": False,
-        },
-    })
+    return RunConfig.model_validate(
+        {
+            "environment": {
+                "id": "test-episode-env",
+                "num_envs": num_envs,
+                "normalize_rewards": True,
+                "wrappers": [],
+            },
+            "agent": AgentSettings(stack_size=2).model_dump(),
+            "network": network_config.model_dump(),
+            "callbacks": {
+                "episode_statistics": False,
+                "record_video": False,
+                "evaluation": False,
+            },
+        }
+    )
 
 
 def _save_config(config: RunConfig, path: Path) -> None:
@@ -217,7 +218,11 @@ def test_run_inference_prefers_episode_statistics_in_info(agent, info):
     [
         # No mask at all: the aggregated stats are unusable, so the caller must
         # fall back to accumulating steps and rewards itself.
-        {"final_info": {"episode": {"r": np.array([101.0, 202.0]), "l": np.array([11, 22])}}},
+        {
+            "final_info": {
+                "episode": {"r": np.array([101.0, 202.0]), "l": np.array([11, 22])}
+            }
+        },
         # Mask false for both envs.
         {
             "final_info": {
@@ -248,7 +253,10 @@ def test_run_inference_ignores_unusable_aggregated_final_info(agent, info):
     results = run_inference(agent, InfoRewardEnv(), episodes=2)
 
     # Fallback: one step, so length 1 and the raw step reward.
-    assert [(result.return_, result.length) for result in results] == [(3.0, 1), (4.0, 1)]
+    assert [(result.return_, result.length) for result in results] == [
+        (3.0, 1),
+        (4.0, 1),
+    ]
 
 
 def test_run_inference_reads_aggregated_final_info_per_env(agent):
@@ -304,9 +312,6 @@ def test_episode_stat_from_info_out_of_range_index_returns_none():
     }
 
     assert _episode_stat_from_info(info, 5, "episode", "l") is None
-
-
-
 
 
 def test_log_evaluation_results_sends_each_episode_and_summary_to_all_loggers():

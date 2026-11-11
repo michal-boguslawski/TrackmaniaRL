@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from rl_lib.run_config import EnvironmentSettings
-from rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsSink
 
 
 def _episode_stats_key(environment: EnvironmentSettings) -> str:
@@ -29,8 +29,8 @@ def _episode_stats_key(environment: EnvironmentSettings) -> str:
 
 
 def _default_metrics_loggers(
-    metrics_loggers: list[MetricsLogger] | None,
-) -> list[MetricsLogger]:
+    metrics_loggers: list[MetricsSink] | None,
+) -> list[MetricsSink]:
     """Return default metrics loggers if none provided.
 
     Defaults to ConsoleMetricsLogger for local development.
@@ -43,6 +43,6 @@ def _default_metrics_loggers(
     """
     if metrics_loggers is not None:
         return metrics_loggers
-    from rl_lib.tracking.console_logger import ConsoleMetricsLogger
+    from rl_lib.tracking.sinks.console_sink import ConsoleMetricsLogger
 
     return [ConsoleMetricsLogger()]

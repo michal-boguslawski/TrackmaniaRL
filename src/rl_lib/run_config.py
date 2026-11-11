@@ -1,68 +1,29 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Annotated, Literal
 
-import yaml
-from pydantic import Field, FiniteFloat, NonNegativeInt, PositiveInt, model_validator
+from pydantic import Field, FiniteFloat, PositiveInt, model_validator
 
-from rl_lib.config_base import StrictModel
-from rl_lib.envs.wrappers.settings import (
+from rl_lib.envs.settings.settings import (
     RecordVideoWrapperSettings,
     WrapperSettings,
     make_wrapper_settings,
 )
-from rl_lib.networks.config import NetworkConfig
+from rl_lib.training.ppo.config import PPONetworkConfig
 from rl_lib.training.settings import (
     CosineSchedulerSettings,
     LinearSchedulerSettings,
     TrainerSettings,
 )
+from rl_lib.training.settings.base import StrictModel
 
 
 class RunSettings(StrictModel):
-    algorithm: str = Field(
-        default="ppo",
-        min_length=1,
-        description="Registered training algorithm used by the trainer factory.",
-    )
-    name: str = "PPO"
+    experiment_name: str | None = None
     total_steps: PositiveInt = 3_000_000  # vector-environment steps
     seed: int = Field(default=1, ge=0, le=2**32 - 1)
     device: str = "auto"
-    clear_cuda_cache: bool = True
-    log_config: str | None = None
-    pretrained_checkpoint: str | None = Field(
-        default=None,
-        min_length=1,
-        description=(
-            "Optional local model or state-dict checkpoint to load before training. "
-            "Optimizer state and training progress are not restored."
-        ),
-    )
-    pretrained_mlflow_run_id: str | None = Field(
-        default=None,
-        min_length=1,
-        description=(
-            "Optional MLflow run ID or runs:/ URI used to initialize network weights."
-        ),
-    )
-    pretrained_mlflow_checkpoint_step: NonNegativeInt | None = Field(
-        default=None,
-        description=(
-            "Optional periodic checkpoint step from pretrained_mlflow_run_id. "
-            "When omitted, the MLflow run's final_model artifact is loaded."
-        ),
-    )
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "DEBUG"
-    cudnn_benchmark: bool = Field(
-        default=True,
-        description=(
-            "Enable cuDNN's autotuner for convolution algorithms (CUDA only). "
-            "Convolution shapes are static across PPO updates, so the cached "
-            "algorithm choice amortizes over the whole run."
-        ),
-    )
     channels_last: bool = Field(
         default=True,
         description=(
@@ -70,27 +31,6 @@ class RunSettings(StrictModel):
             "format (CUDA only). cuDNN's fastest kernels are NHWC-native; this "
             "removes the per-call NCHW<->NHWC conversion kernels. The permuted "
             "NHWC observations already arrive with channels_last strides."
-        ),
-    )
-    torch_compile: bool = Field(
-        default=False,
-        description=(
-            "Wrap the policy/value Network in torch.compile. Fuses elementwise "
-            "chains and reduces kernel-launch overhead; with mode "
-            "'reduce-overhead' on CUDA it also captures CUDA graphs. Adds a "
-            "one-time compilation cost per input shape."
-        ),
-    )
-    torch_compile_mode: Literal["default", "reduce-overhead", "max-autotune"] = Field(
-        default="reduce-overhead",
-        description="Mode passed to torch.compile when torch_compile is enabled.",
-    )
-    cnn_autocast: Literal["bf16"] | None = Field(
-        default=None,
-        description=(
-            "Autocast only the CNN feature extractor to BF16 on CUDA. Temporal, "
-            "actor/critic heads, distribution math, and PPO losses remain FP32. "
-            "Requires a CUDA GPU with BF16 support."
         ),
     )
 
@@ -113,7 +53,7 @@ class RuntimeSettings(StrictModel):
 
 class EnvironmentSettings(StrictModel):
     id: str = "CarRacing-v3"
-    num_envs: PositiveInt = 16
+    num_envs: PositiveInt = 8
     skip: PositiveInt = 2
     continuous: bool = True
     normalize_rewards: bool = True
@@ -121,8 +61,6 @@ class EnvironmentSettings(StrictModel):
     reward_normalization_epsilon: float = Field(default=1e-8, gt=0)
     vectorization_mode: Literal["async", "sync"] = "async"
     autoreset_mode: Literal["same_step", "next_step", "disabled"] = "same_step"
-    record_video: bool = False
-    video_folder: str = "./logs/videos"
     wrappers: list[WrapperSettings] = Field(
         default_factory=lambda: [
             make_wrapper_settings("record_episode_stats"),
@@ -133,21 +71,6 @@ class EnvironmentSettings(StrictModel):
             make_wrapper_settings("max_and_skip"),
         ]
     )
-
-
-class AgentSettings(StrictModel):
-    stack_size: PositiveInt = 4
-    observation_divisor: float = Field(default=127.5, gt=0)
-    observation_offset: FiniteFloat = -1.0
-    deterministic_temperature: float = Field(default=0.0, ge=0)
-
-
-class RolloutSettings(StrictModel):
-    buffer_size: PositiveInt = 1024
-    epochs: PositiveInt = 3
-    minibatch_size: PositiveInt = 512
-    gamma: float = Field(default=0.99, ge=0, le=1)
-    gae_lambda: float = Field(default=0.95, ge=0, le=1)
 
 
 class TrackingSettings(StrictModel):
@@ -287,284 +210,17 @@ class VideoCallbackSettings(StrictModel):
         return stats_wrappers[0].stats_key
 
 
+NetworkSettings = Annotated[
+    PPONetworkConfig,
+    Field(discriminator="name"),
+]
+
+
 class RunConfig(StrictModel):
     run: RunSettings = Field(default_factory=RunSettings)
     environment: EnvironmentSettings = Field(default_factory=EnvironmentSettings)
-    agent: AgentSettings = Field(default_factory=AgentSettings)
-    rollout: RolloutSettings = Field(default_factory=RolloutSettings)
-    network: NetworkConfig = Field(default_factory=NetworkConfig)
+    network: NetworkSettings = Field(default_factory=PPONetworkConfig)
     trainer: TrainerSettings = Field(default_factory=TrainerSettings)
     tracking: TrackingSettings = Field(default_factory=TrackingSettings)
     callbacks: list[CallbackSettings] = Field(default_factory=list)
     runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
-
-    @model_validator(mode="before")
-    @classmethod
-    def default_trainer_name_from_run_algorithm(cls, values):
-        """Keep the trainer identity aligned with the selected run algorithm."""
-        if not isinstance(values, dict):
-            return values
-        run = values.get("run", {})
-        trainer = values.get("trainer", {})
-        if not isinstance(run, dict) or not isinstance(trainer, dict):
-            return values
-        trainer = dict(trainer)
-        trainer.setdefault("name", run.get("algorithm", "ppo"))
-        values = dict(values)
-        values["trainer"] = trainer
-        return values
-
-    def callback(self, name: str):
-        return next(
-            (callback for callback in self.callbacks if callback.name == name), None
-        )
-
-    @property
-    def video_folder(self) -> str:
-        callback = self.callback("record_video")
-        folder = (
-            callback.folder
-            if isinstance(callback, RecordVideoCallbackConfig)
-            else "./logs/videos"
-        )
-        return str(Path(folder) / self.runtime.session_id)
-
-    @property
-    def experiment_name(self) -> str:
-        return self.tracking.experiment_name or self.environment.id
-
-    @property
-    def run_name(self) -> str:
-        return self.tracking.run_name or f"{self.run.name}/{self.runtime.session_id}"
-
-    def video_environment(self) -> EnvironmentSettings:
-        """The single-environment, frame-recording environment used for
-        evaluation rollouts."""
-        callback = self.callback("record_video")
-        if not isinstance(callback, RecordVideoCallbackConfig):
-            raise TypeError("record_video callback is not configured")
-        return self.environment.model_copy(
-            update={
-                "num_envs": 1,
-                "skip": callback.skip or self.environment.skip,
-                "vectorization_mode": "sync",
-                "record_video": True,
-                "video_folder": self.video_folder,
-                "normalize_rewards": callback.normalize_rewards,
-                "wrappers": [callback.recording, *callback.wrappers],
-            }
-        )
-
-    def evaluation_environment(
-        self, num_envs: int | None = None
-    ) -> EnvironmentSettings:
-        """Build a raw-reward evaluation environment matching training."""
-        wrappers = [
-            wrapper
-            for wrapper in self.environment.wrappers
-            if wrapper.name != "reward_on_done"
-        ]
-        stats_wrappers = [
-            wrapper for wrapper in wrappers if wrapper.name == "record_episode_stats"
-        ]
-        if stats_wrappers:
-            wrappers = [
-                stats_wrappers[0],
-                *[wrapper for wrapper in wrappers if wrapper is not stats_wrappers[0]],
-            ]
-        else:
-            wrappers.insert(0, make_wrapper_settings("record_episode_stats"))
-        return self.environment.model_copy(
-            update={
-                "num_envs": self.environment.num_envs if num_envs is None else num_envs,
-                "normalize_rewards": False,
-                "record_video": False,
-                "wrappers": wrappers,
-            }
-        )
-
-    def metrics_settings(self) -> MetricsCallbackSettings:
-        callback = self.callback("metrics")
-        if not isinstance(callback, MetricsCallbackConfig):
-            raise TypeError("metrics callback is not configured")
-        return MetricsCallbackSettings(granularity=callback.granularity)
-
-    def episode_statistics_settings(self) -> EpisodeStatisticsCallbackSettings:
-        callback = self.callback("episode_statistics")
-        if not isinstance(callback, EpisodeStatisticsCallbackConfig):
-            raise TypeError("episode_statistics callback is not configured")
-        return EpisodeStatisticsCallbackSettings(
-            mode=callback.mode,
-            stats_key=callback.stats_key,
-        )
-
-    def video_settings(self) -> VideoCallbackSettings:
-        callback = self.callback("record_video")
-        if not isinstance(callback, RecordVideoCallbackConfig):
-            raise TypeError("record_video callback is not configured")
-        return VideoCallbackSettings(
-            environment=self.video_environment(),
-            interval=callback.interval,
-            seed=self.run.seed,
-        )
-
-    def evaluation_settings(self) -> EvaluationCallbackSettings:
-        callback = self.callback("evaluation")
-        if not isinstance(callback, EvaluationCallbackConfig):
-            raise TypeError("evaluation callback is not configured")
-        return EvaluationCallbackSettings(
-            environment=self.evaluation_environment(),
-            interval=callback.interval,
-            episodes=callback.episodes,
-            final_episodes=callback.final_episodes,
-            seed=self.run.seed,
-        )
-
-    @model_validator(mode="after")
-    def validate_runtime_is_not_authored(self):
-        if "runtime" in self.model_fields_set:
-            raise ValueError(
-                "run.runtime is resolved by the entrypoint and cannot be set in YAML"
-            )
-        return self
-
-    @model_validator(mode="after")
-    def validate_relationships(self):
-        if self.trainer.name != self.run.algorithm:
-            raise ValueError("trainer.name must match run.algorithm")
-        if (
-            self.run.pretrained_checkpoint is not None
-            and self.run.pretrained_mlflow_run_id is not None
-        ):
-            raise ValueError(
-                "configure only one of run.pretrained_checkpoint and "
-                "run.pretrained_mlflow_run_id"
-            )
-        if (
-            self.run.pretrained_mlflow_checkpoint_step is not None
-            and self.run.pretrained_mlflow_run_id is None
-        ):
-            raise ValueError(
-                "run.pretrained_mlflow_checkpoint_step requires "
-                "run.pretrained_mlflow_run_id"
-            )
-        if (
-            self.run.pretrained_mlflow_run_id is not None
-            and not self.run.pretrained_mlflow_run_id.strip()
-        ):
-            raise ValueError("run.pretrained_mlflow_run_id cannot be blank")
-        names = [callback.name for callback in self.callbacks]
-        if len(names) != len(set(names)):
-            raise ValueError("each callback may only be configured once")
-        if not self.environment.continuous:
-            raise ValueError(
-                "the configured PPO actor supports continuous action spaces only"
-            )
-        episode_wrappers = [
-            wrapper
-            for wrapper in self.environment.wrappers
-            if wrapper.name == "record_episode_stats"
-        ]
-        statistics_callback = self.callback("episode_statistics")
-        if statistics_callback is not None and not episode_wrappers:
-            raise ValueError(
-                "callbacks.episode_statistics requires a record_episode_stats environment wrapper"
-            )
-        if len(episode_wrappers) > 1 and statistics_callback is not None:
-            raise ValueError(
-                "callbacks.episode_statistics supports one record_episode_stats wrapper"
-            )
-        if (
-            statistics_callback is not None
-            and episode_wrappers
-            and statistics_callback.stats_key != episode_wrappers[0].stats_key
-        ):
-            raise ValueError(
-                "callbacks.episode_statistics_key must match environment wrapper stats_key"
-            )
-        video_callback = self.callback("record_video")
-        video_stats_wrappers = (
-            [
-                wrapper
-                for wrapper in video_callback.wrappers
-                if wrapper.name == "record_episode_stats"
-            ]
-            if isinstance(video_callback, RecordVideoCallbackConfig)
-            else []
-        )
-        if (
-            isinstance(video_callback, RecordVideoCallbackConfig)
-            and not video_stats_wrappers
-        ):
-            raise ValueError(
-                "record_video callback requires record_episode_stats in its wrappers"
-            )
-        if (
-            isinstance(video_callback, RecordVideoCallbackConfig)
-            and len(video_stats_wrappers) > 1
-        ):
-            raise ValueError(
-                "record_video callback supports one record_episode_stats wrapper"
-            )
-        if (
-            self.rollout.minibatch_size
-            > self.rollout.buffer_size * self.environment.num_envs
-        ):
-            raise ValueError(
-                "rollout.minibatch_size cannot exceed buffer_size * environment.num_envs"
-            )
-        if len(self.network.actor.action_low) != len(self.network.actor.action_high):
-            raise ValueError(
-                "network.actor.action_low and action_high must have equal lengths"
-            )
-        if any(
-            low >= high
-            for low, high in zip(
-                self.network.actor.action_low, self.network.actor.action_high
-            )
-        ):
-            raise ValueError(
-                "every network.actor.action_low value must be below action_high"
-            )
-        optimizer = self.trainer.optimizer
-        initial_lrs = (
-            optimizer.cnn_lr or optimizer.backbone_lr,
-            optimizer.sequence_encoder_lr or optimizer.backbone_lr,
-            optimizer.head_lr,
-        )
-        scheduler = self.trainer.scheduler
-        if isinstance(scheduler, (CosineSchedulerSettings, LinearSchedulerSettings)):
-            minimum_lr = (
-                scheduler.min_lr
-                if isinstance(scheduler, LinearSchedulerSettings)
-                else scheduler.eta_min
-            )
-            if minimum_lr > min(initial_lrs):
-                raise ValueError(
-                    "trainer.scheduler minimum learning rate cannot exceed any initial learning rate"
-                )
-        if (
-            isinstance(scheduler, LinearSchedulerSettings)
-            and scheduler.min_lr / max(initial_lrs) > scheduler.start_factor
-        ):
-            raise ValueError(
-                "linear scheduler minimum LR is above the configured starting LR"
-            )
-        return self
-
-
-def load_config(path: str) -> RunConfig:
-    """Load and validate a training configuration from YAML."""
-    config_path = Path(path)
-    try:
-        with config_path.open("rt", encoding="utf-8") as stream:
-            raw = yaml.safe_load(stream)
-    except OSError as exc:
-        raise ValueError(f"Cannot read config file {config_path}: {exc}") from exc
-    except yaml.YAMLError as exc:
-        raise ValueError(f"Invalid YAML in {config_path}: {exc}") from exc
-    if raw is None:
-        raw = {}
-    if not isinstance(raw, dict):
-        raise TypeError(f"Config file {config_path} must contain a YAML mapping")
-    return RunConfig.model_validate(raw)

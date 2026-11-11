@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import torch as T
 
-from rl_lib.run_config import RolloutSettings
+from rl_lib.buffers.settings.rollout import RolloutSettings
 
 
 @dataclass(slots=True, frozen=True)

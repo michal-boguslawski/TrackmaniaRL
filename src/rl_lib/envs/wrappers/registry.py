@@ -12,15 +12,15 @@ from gymnasium.wrappers import (
     RecordVideo,
 )
 
-from rl_lib.envs.wrappers.off_track_penalty_wrapper import OffTrackPenaltyWrapper
-from rl_lib.envs.wrappers.reward_wrappers import RewardOnEpisodeEndWrapper
-from rl_lib.envs.wrappers.settings import (
+from rl_lib.envs.settings.settings import (
     FrameStackWrapperSettings,
     GrayscaleWrapperSettings,
     RecordEpisodeStatisticsWrapperSettings,
     RecordVideoWrapperSettings,
     RewardOnDoneWrapperSettings,
 )
+from rl_lib.envs.wrappers.off_track_penalty_wrapper import OffTrackPenaltyWrapper
+from rl_lib.envs.wrappers.reward_wrappers import RewardOnEpisodeEndWrapper
 
 _UNSET = object()
 

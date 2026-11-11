@@ -4,7 +4,7 @@ Logs the collector config (merged buffer/trainer/network settings) and
 optionally the full run config dict to all metrics loggers.
 """
 
-from rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsSink
 from rl_lib.training.callbacks.base import Callback
 
 
@@ -16,7 +16,7 @@ class ParamsLoggingCallback(Callback):
     - Full run config dict (if provided at construction)
     """
 
-    def __init__(self, logger: MetricsLogger, run_config: dict | None = None):
+    def __init__(self, logger: MetricsSink, run_config: dict | None = None):
         """Initialize parameter logging callback.
 
         Args:

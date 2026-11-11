@@ -7,7 +7,7 @@ the process exit status. These tests pin both halves of that contract.
 
 import pytest
 
-from rl_lib.tracking.mlflow_logger import MLflowLogger, run_status_for_exception
+from rl_lib.tracking.sinks.mlflow_sink import MLflowSink, run_status_for_exception
 
 
 @pytest.mark.parametrize(
@@ -28,7 +28,7 @@ def test_run_status_for_exception(exc_type, exc_val, expected):
 
 def _logger_without_run():
     """An MLflowLogger with no live run, so `close` is the only thing under test."""
-    logger = object.__new__(MLflowLogger)
+    logger = object.__new__(MLflowSink)
     logger._registered_model_name = None
     return logger
 
@@ -43,7 +43,9 @@ def _logger_without_run():
 )
 def test_exit_closes_run_with_matching_status(monkeypatch, exc_type, exc_val, expected):
     recorded = []
-    monkeypatch.setattr(MLflowLogger, "close", lambda self, status: recorded.append(status))
+    monkeypatch.setattr(
+        MLflowSink, "close", lambda self, status: recorded.append(status)
+    )
     logger = _logger_without_run()
 
     logger.__exit__(exc_type, exc_val, None)
@@ -53,16 +55,15 @@ def test_exit_closes_run_with_matching_status(monkeypatch, exc_type, exc_val, ex
 
 def test_exit_does_not_suppress_exception(monkeypatch):
     """`__exit__` must return falsy, or the entrypoint's re-raise is pointless."""
-    monkeypatch.setattr(MLflowLogger, "close", lambda self, status: None)
+    monkeypatch.setattr(MLflowSink, "close", lambda self, status: None)
     logger = _logger_without_run()
 
     assert not logger.__exit__(RuntimeError, RuntimeError("boom"), None)
 
 
 def test_exit_propagates_exception_through_with_block(monkeypatch):
-    monkeypatch.setattr(MLflowLogger, "close", lambda self, status: None)
+    monkeypatch.setattr(MLflowSink, "close", lambda self, status: None)
     logger = _logger_without_run()
 
-    with pytest.raises(RuntimeError, match="boom"):
-        with logger:
-            raise RuntimeError("boom")
+    with pytest.raises(RuntimeError, match="boom"), logger:
+        raise RuntimeError("boom")

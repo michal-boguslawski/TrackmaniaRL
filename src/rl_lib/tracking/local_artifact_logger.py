@@ -9,10 +9,10 @@ import yaml
 from torch import nn
 
 from rl_lib.tracking.artifacts import normalize_artifact_path
-from rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsSink
 
 
-class LocalArtifactLogger(MetricsLogger):
+class LocalArtifactLogger(MetricsSink):
     """Persist model artifacts to a run-specific local directory.
 
     Artifact paths supplied by callbacks are preserved beneath ``root`` and
@@ -47,7 +47,9 @@ class LocalArtifactLogger(MetricsLogger):
             encoding="utf-8",
         )
 
-    def log_config(self, config: dict, artifact_file: str = "config/run_config.yaml") -> None:
+    def log_config(
+        self, config: dict, artifact_file: str = "config/run_config.yaml"
+    ) -> None:
         """Save the full run configuration as YAML.
 
         Args:
@@ -119,7 +121,9 @@ class LocalArtifactLogger(MetricsLogger):
         """Create and return the local file path for an artifact."""
         relative_path = Path(normalize_artifact_path(artifact_path)).with_suffix(".pt")
         if relative_path.is_absolute() or ".." in relative_path.parts:
-            raise ValueError("artifact_path must be relative and stay within the logger root")
+            raise ValueError(
+                "artifact_path must be relative and stay within the logger root"
+            )
 
         artifact_file = self.root / relative_path
         artifact_file.parent.mkdir(parents=True, exist_ok=True)
@@ -129,7 +133,9 @@ class LocalArtifactLogger(MetricsLogger):
         """Create and return a safe run-relative metadata file path."""
         relative_path = Path(artifact_path)
         if relative_path.is_absolute() or ".." in relative_path.parts:
-            raise ValueError("artifact_path must be relative and stay within the logger root")
+            raise ValueError(
+                "artifact_path must be relative and stay within the logger root"
+            )
 
         metadata_file = self.root / relative_path
         metadata_file.parent.mkdir(parents=True, exist_ok=True)

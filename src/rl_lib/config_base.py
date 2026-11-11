@@ -1,4 +1,4 @@
-"""Shared Pydantic base for strict configuration models."""
+"""Shared base class for strict training settings models."""
 
 from pydantic import BaseModel, ConfigDict
 

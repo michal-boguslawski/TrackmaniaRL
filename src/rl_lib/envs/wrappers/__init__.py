@@ -6,7 +6,7 @@ from config.
 
 from typing import Any
 
-from rl_lib.envs.wrappers.settings import (
+from rl_lib.envs.settings.settings import (
     FrameStackWrapperSettings,
     GrayscaleWrapperSettings,
     MaxAndSkipWrapperSettings,
@@ -26,6 +26,7 @@ def __getattr__(name: str) -> Any:
 
         return WRAPPERS
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "FrameStackWrapperSettings",

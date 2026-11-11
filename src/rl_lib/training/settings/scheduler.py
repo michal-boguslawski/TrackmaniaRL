@@ -91,11 +91,9 @@ class ExponentialSchedulerSettings(StrictModel):
 
 
 SchedulerSettings = Annotated[
-    Union[
-        CosineSchedulerSettings,
-        LinearSchedulerSettings,
-        ExponentialSchedulerSettings,
-        NoSchedulerSettings,
-    ],
+    CosineSchedulerSettings
+    | LinearSchedulerSettings
+    | ExponentialSchedulerSettings
+    | NoSchedulerSettings,
     Field(discriminator="name"),
 ]

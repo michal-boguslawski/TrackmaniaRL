@@ -15,18 +15,9 @@ import gymnasium as gym
 import numpy as np
 import pytest
 import torch as T
-
 from rl_lib.agent import Agent
-from rl_lib.training.callbacks.base import (
-    Callback,
-    CallbackList,
-)
-from rl_lib.training.callbacks.metrics_logger import MetricsLoggingCallback
-from rl_lib.training.callbacks.params_logger import ParamsLoggingCallback
-from rl_lib.training.callbacks.record_statistics import RecordStatisticLoggerCallback
-from rl_lib.training.callbacks.record_video import RecordVideoCallback
-from rl_lib.training.callbacks.utils import stop_video_recording
-from rl_lib.envs.wrappers.settings import (
+
+from rl_lib.envs.settings.settings import (
     RecordEpisodeStatisticsWrapperSettings,
     RecordVideoWrapperSettings,
 )
@@ -36,10 +27,19 @@ from rl_lib.run_config import (
     MetricsCallbackSettings,
     VideoCallbackSettings,
 )
-from rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsSink
+from rl_lib.training.callbacks.base import (
+    Callback,
+    CallbackList,
+)
+from rl_lib.training.callbacks.metrics_logger import MetricsLoggingCallback
+from rl_lib.training.callbacks.params_logger import ParamsLoggingCallback
+from rl_lib.training.callbacks.record_statistics import RecordStatisticLoggerCallback
+from rl_lib.training.callbacks.record_video import RecordVideoCallback
+from rl_lib.training.callbacks.utils import stop_video_recording
 
 
-class FakeLogger(MetricsLogger):
+class FakeLogger(MetricsSink):
     def __init__(self):
         self.metrics: list[tuple[dict[str, float], int]] = []
         self.parameters: list[dict] = []
@@ -150,7 +150,7 @@ def test_callback_list_forwards_positional_arguments():
 
 
 def test_console_logger_formats_metrics(caplog):
-    from rl_lib.tracking.console_logger import ConsoleMetricsLogger
+    from rl_lib.tracking.sinks.console_sink import ConsoleMetricsLogger
 
     with caplog.at_level(logging.DEBUG, logger="rl_lib.tracking.console_logger"):
         ConsoleMetricsLogger().log_metrics({"loss/total": 1.5}, step=7)
@@ -160,7 +160,7 @@ def test_console_logger_formats_metrics(caplog):
 
 
 def test_console_logger_formats_parameters(caplog):
-    from rl_lib.tracking.console_logger import ConsoleMetricsLogger
+    from rl_lib.tracking.sinks.console_sink import ConsoleMetricsLogger
 
     with caplog.at_level(logging.DEBUG, logger="rl_lib.tracking.console_logger"):
         ConsoleMetricsLogger().log_parameters({"lr": 1e-4})
@@ -169,7 +169,7 @@ def test_console_logger_formats_parameters(caplog):
 
 
 def test_base_logger_artifact_logging_is_a_noop(tmp_path):
-    class _Bare(MetricsLogger):
+    class _Bare(MetricsSink):
         def log_metrics(self, metrics, step): ...
 
     artifact = tmp_path / "video.mp4"
@@ -209,7 +209,9 @@ def test_params_logger_ignores_an_empty_config(config):
 
 def test_minibatch_granularity_logs_every_minibatch():
     logger = FakeLogger()
-    callback = MetricsLoggingCallback(logger, MetricsCallbackSettings(granularity="minibatch"))
+    callback = MetricsLoggingCallback(
+        logger, MetricsCallbackSettings(granularity="minibatch")
+    )
 
     callback.on_start(step=0, metrics={"rollout/returns": 1.0})
     callback.on_minibatch(metrics={"loss/total": 1.0}, step=10)
@@ -227,7 +229,9 @@ def test_minibatch_granularity_logs_every_minibatch():
 
 def test_epoch_granularity_averages_the_minibatches_of_an_epoch():
     logger = FakeLogger()
-    callback = MetricsLoggingCallback(logger, MetricsCallbackSettings(granularity="epoch"))
+    callback = MetricsLoggingCallback(
+        logger, MetricsCallbackSettings(granularity="epoch")
+    )
 
     callback.on_start(step=0, metrics={"rollout/returns": 1.0})
     callback.on_minibatch(metrics={"loss/total": 1.0, "loss/critic": 2.0})
@@ -247,21 +251,23 @@ def test_epoch_granularity_averages_the_minibatches_of_an_epoch():
 
 def test_epoch_granularity_includes_deferred_diagnostics():
     logger = FakeLogger()
-    callback = MetricsLoggingCallback(logger, MetricsCallbackSettings(granularity="epoch"))
+    callback = MetricsLoggingCallback(
+        logger, MetricsCallbackSettings(granularity="epoch")
+    )
 
     callback.on_minibatch(metrics={"loss/total": 1.0})
     callback.on_minibatch(metrics={"loss/total": 3.0})
     callback.on_epoch(metrics={"metrics/ratio_max": 2.0})
     callback.on_end(step=0, metrics=None)
 
-    assert logger.metrics == [
-        ({"loss/total": 2.0, "metrics/ratio_max": 2.0}, 1)
-    ]
+    assert logger.metrics == [({"loss/total": 2.0, "metrics/ratio_max": 2.0}, 1)]
 
 
 def test_epoch_granularity_does_not_average_empty_epochs():
     logger = FakeLogger()
-    callback = MetricsLoggingCallback(logger, MetricsCallbackSettings(granularity="epoch"))
+    callback = MetricsLoggingCallback(
+        logger, MetricsCallbackSettings(granularity="epoch")
+    )
 
     callback.on_start(step=0, metrics={"rollout/returns": 1.0})
     callback.on_epoch()
@@ -273,7 +279,9 @@ def test_epoch_granularity_does_not_average_empty_epochs():
 
 def test_batch_granularity_defers_to_the_end_of_the_rollout():
     logger = FakeLogger()
-    callback = MetricsLoggingCallback(logger, MetricsCallbackSettings(granularity="batch"))
+    callback = MetricsLoggingCallback(
+        logger, MetricsCallbackSettings(granularity="batch")
+    )
 
     callback.on_start(step=5, metrics={"rollout/returns": 1.0})
     callback.on_minibatch(metrics={"loss/total": 1.0})
@@ -295,7 +303,9 @@ def test_batch_granularity_defers_to_the_end_of_the_rollout():
 
 def test_flush_merges_same_step_entries_and_empties_the_buffer():
     logger = FakeLogger()
-    callback = MetricsLoggingCallback(logger, MetricsCallbackSettings(granularity="minibatch"))
+    callback = MetricsLoggingCallback(
+        logger, MetricsCallbackSettings(granularity="minibatch")
+    )
 
     callback.on_start(step=1, metrics={"loss/total": 1.0})
     callback.on_start(step=1, metrics={"loss/critic": 2.0})
@@ -309,7 +319,9 @@ def test_flush_merges_same_step_entries_and_empties_the_buffer():
 
 def test_on_start_drops_minibatches_left_over_from_the_previous_rollout():
     logger = FakeLogger()
-    callback = MetricsLoggingCallback(logger, MetricsCallbackSettings(granularity="epoch"))
+    callback = MetricsLoggingCallback(
+        logger, MetricsCallbackSettings(granularity="epoch")
+    )
 
     callback.on_minibatch(metrics={"loss/total": 99.0})
     callback.on_start(step=1, metrics={"rollout/returns": 0.0})
@@ -317,7 +329,9 @@ def test_on_start_drops_minibatches_left_over_from_the_previous_rollout():
     callback.on_epoch()
     callback.on_end(step=1, metrics=None)
 
-    logged = {key: value for metrics, _ in logger.metrics for key, value in metrics.items()}
+    logged = {
+        key: value for metrics, _ in logger.metrics for key, value in metrics.items()
+    }
     assert logged["loss/total"] == 1.0
 
 
@@ -332,13 +346,18 @@ def _episode_info(returns, lengths, done_mask=None, key: str = "episode"):
     )
     return {
         "_episode": done_mask,
-        key: {"r": np.asarray(returns, np.float64), "l": np.asarray(lengths, np.float64)},
+        key: {
+            "r": np.asarray(returns, np.float64),
+            "l": np.asarray(lengths, np.float64),
+        },
     }
 
 
 def test_statistics_step_mode_logs_per_step_averages():
     logger = FakeLogger()
-    callback = RecordStatisticLoggerCallback(logger, EpisodeStatisticsCallbackSettings(mode="step"))
+    callback = RecordStatisticLoggerCallback(
+        logger, EpisodeStatisticsCallbackSettings(mode="step")
+    )
 
     callback.on_env_step(step=4, info=_episode_info([2.0, 4.0], [10, 20]))
 
@@ -349,19 +368,29 @@ def test_statistics_step_mode_logs_per_step_averages():
 
 def test_statistics_step_mode_ignores_partial_episode_masks():
     logger = FakeLogger()
-    callback = RecordStatisticLoggerCallback(logger, EpisodeStatisticsCallbackSettings(mode="step"))
+    callback = RecordStatisticLoggerCallback(
+        logger, EpisodeStatisticsCallbackSettings(mode="step")
+    )
 
     callback.on_env_step(
         step=1,
-        info=_episode_info([1.0, 5.0, 9.0], [2, 4, 6], done_mask=np.array([True, False, True])),
+        info=_episode_info(
+            [1.0, 5.0, 9.0], [2, 4, 6], done_mask=np.array([True, False, True])
+        ),
     )
 
-    assert logger.metrics[0][0] == {"episode/returns": 5.0, "episode/lengths": 4.0, "episode/n": 2}
+    assert logger.metrics[0][0] == {
+        "episode/returns": 5.0,
+        "episode/lengths": 4.0,
+        "episode/n": 2,
+    }
 
 
 def test_statistics_step_mode_ignores_steps_without_episode_data():
     logger = FakeLogger()
-    callback = RecordStatisticLoggerCallback(logger, EpisodeStatisticsCallbackSettings(mode="step"))
+    callback = RecordStatisticLoggerCallback(
+        logger, EpisodeStatisticsCallbackSettings(mode="step")
+    )
 
     callback.on_env_step(step=0, info={})
 
@@ -370,7 +399,9 @@ def test_statistics_step_mode_ignores_steps_without_episode_data():
 
 def test_statistics_mean_mode_accumulates_until_the_rollout_ends():
     logger = FakeLogger()
-    callback = RecordStatisticLoggerCallback(logger, EpisodeStatisticsCallbackSettings(mode="mean"))
+    callback = RecordStatisticLoggerCallback(
+        logger, EpisodeStatisticsCallbackSettings(mode="mean")
+    )
 
     callback.on_env_step(step=1, info=_episode_info([2.0, 4.0], [10, 20]))
     callback.on_env_step(step=2, info=_episode_info([6.0], [30]))
@@ -388,7 +419,9 @@ def test_statistics_mean_mode_accumulates_until_the_rollout_ends():
 
 def test_statistics_mean_mode_flush_is_a_noop_without_episodes():
     logger = FakeLogger()
-    callback = RecordStatisticLoggerCallback(logger, EpisodeStatisticsCallbackSettings(mode="mean"))
+    callback = RecordStatisticLoggerCallback(
+        logger, EpisodeStatisticsCallbackSettings(mode="mean")
+    )
 
     callback.on_rollout_end()
     callback.flush()
@@ -398,7 +431,9 @@ def test_statistics_mean_mode_flush_is_a_noop_without_episodes():
 
 def test_statistics_step_mode_flush_is_a_noop():
     logger = FakeLogger()
-    callback = RecordStatisticLoggerCallback(logger, EpisodeStatisticsCallbackSettings(mode="step"))
+    callback = RecordStatisticLoggerCallback(
+        logger, EpisodeStatisticsCallbackSettings(mode="step")
+    )
 
     callback.on_env_step(step=1, info=_episode_info([2.0], [10]))
     callback.flush()
@@ -408,7 +443,9 @@ def test_statistics_step_mode_flush_is_a_noop():
 
 def test_statistics_reads_gymnasics_nested_final_info():
     logger = FakeLogger()
-    callback = RecordStatisticLoggerCallback(logger, EpisodeStatisticsCallbackSettings(mode="step"))
+    callback = RecordStatisticLoggerCallback(
+        logger, EpisodeStatisticsCallbackSettings(mode="step")
+    )
 
     callback.on_env_step(
         step=6,
@@ -566,9 +603,13 @@ def test_video_callback_disables_same_step_autoreset(monkeypatch, agent: Agent):
     callback.env.close()
 
 
-def test_video_callback_records_on_the_interval(video_callback: RecordVideoCallback, monkeypatch):
+def test_video_callback_records_on_the_interval(
+    video_callback: RecordVideoCallback, monkeypatch
+):
     recorded: list[int] = []
-    monkeypatch.setattr(RecordVideoCallback, "record", lambda self, step: recorded.append(step))
+    monkeypatch.setattr(
+        RecordVideoCallback, "record", lambda self, step: recorded.append(step)
+    )
 
     video_callback.cfg = video_callback.cfg.model_copy(update={"interval": 10})
     for step in range(25):
@@ -577,13 +618,19 @@ def test_video_callback_records_on_the_interval(video_callback: RecordVideoCallb
     assert recorded == [0, 10, 20]
 
 
-def test_video_callback_rollout_end_closes_its_env(monkeypatch, agent: Agent, video_callback: RecordVideoCallback):
+def test_video_callback_rollout_end_closes_its_env(
+    monkeypatch, agent: Agent, video_callback: RecordVideoCallback
+):
     recorded: list[int] = []
-    monkeypatch.setattr(RecordVideoCallback, "record", lambda self, step: recorded.append(step))
+    monkeypatch.setattr(
+        RecordVideoCallback, "record", lambda self, step: recorded.append(step)
+    )
 
     video_callback.on_rollout_end()
 
-    assert recorded == [1], "the closing recording continues from the last reported step"
+    assert recorded == [1], (
+        "the closing recording continues from the last reported step"
+    )
     assert video_callback.env.closed is True
 
 
@@ -595,7 +642,8 @@ def test_video_callback_closes_its_env_when_recording_fails(monkeypatch, agent: 
 
     monkeypatch.setattr(RecordVideoCallback, "record", boom)
     monkeypatch.setattr(
-        "rl_lib.training.callbacks.record_video.make_env", lambda *a, **k: _StubVideoEnv()
+        "rl_lib.training.callbacks.record_video.make_env",
+        lambda *a, **k: _StubVideoEnv(),
     )
     callback = RecordVideoCallback(
         agent=agent,

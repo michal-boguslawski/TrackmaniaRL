@@ -11,7 +11,7 @@ from rl_lib.envs.make_env import make_env
 from rl_lib.evaluation.inference import log_evaluation_results, run_inference
 from rl_lib.run_config import VideoCallbackSettings
 from rl_lib.tracking.artifacts import step_artifact_path
-from rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsSink
 from rl_lib.training.callbacks.base import Callback
 from rl_lib.training.callbacks.utils import stop_video_recording
 
@@ -37,7 +37,7 @@ class RecordVideoCallback(Callback):
     def __init__(
         self,
         agent: Agent,
-        metrics_loggers: list[MetricsLogger],
+        metrics_loggers: list[MetricsSink],
         config: VideoCallbackSettings,
     ):
         """Initialize video recording callback.

@@ -16,7 +16,7 @@ from gymnasium.vector import VectorEnv
 from tqdm import tqdm
 
 from rl_lib.agent import Agent
-from rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsLogger
 
 logger = getLogger(__name__)
 

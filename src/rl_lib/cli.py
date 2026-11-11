@@ -5,8 +5,8 @@ Provides a text-based menu for:
 2. Evaluating a local checkpoint or MLflow model
 """
 
-from importlib import resources
 import logging
+from importlib import resources
 
 from rl_lib.logger_setup import setup_logging
 
@@ -62,7 +62,7 @@ def _evaluate() -> None:
     """Run evaluation of local checkpoint or MLflow model."""
     from rl_lib.evaluation import evaluate_checkpoint, evaluate_mlflow
     from rl_lib.run_config import load_config
-    from rl_lib.tracking.console_logger import ConsoleMetricsLogger
+    from rl_lib.tracking.sinks.console_sink import ConsoleMetricsLogger
 
     source = _ask("Model source: 1 local checkpoint, 2 MLflow", "1")
     episodes = _positive_int("Number of episodes", "5")
@@ -91,9 +91,13 @@ def _evaluate() -> None:
         try:
             experiment_default = load_config(DEFAULT_CONFIG).experiment_name
         except ValueError:
-            logger.debug("Default config unavailable; using the default experiment name")
+            logger.debug(
+                "Default config unavailable; using the default experiment name"
+            )
         experiment_name = _ask("MLflow experiment", experiment_default)
-        run_id = _ask("MLflow run ID / URI (blank to choose from available models)") or None
+        run_id = (
+            _ask("MLflow run ID / URI (blank to choose from available models)") or None
+        )
         checkpoint_step = _nonnegative_int(
             "Checkpoint step (blank to evaluate final model)", allow_blank=True
         )

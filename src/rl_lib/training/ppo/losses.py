@@ -5,6 +5,7 @@ from torch import nn
 from torch.distributions import Distribution
 
 from rl_lib.tracking.verbosity import Verbosity, as_verbosity
+from rl_lib.training.ppo.metrics import calc_approx_kl_divergence
 from rl_lib.training.settings.loss import (
     EntropySettings,
     PPOActorLossSettings,
@@ -77,6 +78,8 @@ class PPOLosses:
         actor_loss, actor_metrics = self.actor_loss(
             self.cfg.actor_loss_cfg, advantages, log_probs, old_log_probs
         )
+        actor_metrics = self.actor_metrics(actor_metrics)
+
         critic_loss, critic_metrics = self.critic_loss(
             self.cfg.critic_loss_cfg,
             self._critic_loss_fn,
@@ -122,7 +125,19 @@ class PPOLosses:
 
         # Zero represents no input for steering, gas, and brake
         actor_loss = surrogate_loss
-        return actor_loss, {"loss/actor": actor_loss.detach()}
+
+        metrics = {
+            "loss/actor": actor_loss.detach(),
+            "helper/log_ratio": log_ratio.detach(),
+        }
+        return actor_loss, metrics
+
+    @staticmethod
+    def actor_metrics(metrics: dict[str, T.Tensor]) -> dict[str, T.Tensor]:
+        """Compute additional actor metrics from the surrogate loss."""
+        log_ratio = metrics["helper/log_ratio"]
+        metrics["metrics/approx_kl"] = calc_approx_kl_divergence(log_ratio)
+        return metrics
 
     @staticmethod
     def critic_loss(

@@ -10,7 +10,7 @@ backends (console, MLflow). Supports three granularity modes:
 import numpy as np
 
 from rl_lib.run_config import MetricsCallbackSettings
-from rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsSink
 from rl_lib.training.callbacks.base import Callback
 
 
@@ -25,7 +25,7 @@ class MetricsLoggingCallback(Callback):
         _step: Internal step counter for minibatch/epoch logging.
     """
 
-    def __init__(self, logger: MetricsLogger, config: MetricsCallbackSettings):
+    def __init__(self, logger: MetricsSink, config: MetricsCallbackSettings):
         self._logger = logger
         self.cfg = config
         self._epoch_buffer: list[dict[str, float]] = []
@@ -72,7 +72,11 @@ class MetricsLoggingCallback(Callback):
         if self.cfg.granularity == "epoch" and self._epoch_buffer:
             keys = set().union(*(entry.keys() for entry in self._epoch_buffer))
             aggregated = {
-                key: float(np.mean([entry[key] for entry in self._epoch_buffer if key in entry]))
+                key: float(
+                    np.mean(
+                        [entry[key] for entry in self._epoch_buffer if key in entry]
+                    )
+                )
                 for key in keys
             }
             self._step += 1
@@ -87,7 +91,11 @@ class MetricsLoggingCallback(Callback):
         if self.cfg.granularity == "batch" and self._epoch_buffer:
             keys = set().union(*(entry.keys() for entry in self._epoch_buffer))
             aggregated = {
-                key: float(np.mean([entry[key] for entry in self._epoch_buffer if key in entry]))
+                key: float(
+                    np.mean(
+                        [entry[key] for entry in self._epoch_buffer if key in entry]
+                    )
+                )
                 for key in keys
             }
             self._step += 1

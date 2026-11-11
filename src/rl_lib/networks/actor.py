@@ -7,6 +7,7 @@ This provides bounded continuous actions with differentiable log-prob gradients.
 
 import torch as T
 import torch.nn.functional as F
+from pydantic import Field
 from torch import nn
 from torch.distributions import Beta, Distribution, TransformedDistribution
 from torch.distributions.transforms import AffineTransform, TanhTransform
@@ -53,18 +54,22 @@ class Actor(nn.Module):
         cfg (ActorConfig): Configuration for hidden layers, init, bounds.
     """
 
-    def __init__(self, action_dim: int, in_dim: int, config: ActorConfig):
+    def __init__(
+        self,
+        action_dim: int,
+        in_dim: int,
+        config: ActorConfig,
+        action_low: list[float] | None = None,
+        action_high: list[float] | None = None,
+    ):
         super().__init__()
         self.action_dim = action_dim
         self.in_dim = in_dim
         self.cfg = config
-        if (
-            len(self.cfg.action_low) != action_dim
-            or len(self.cfg.action_high) != action_dim
-        ):
+        if len(action_low) != action_dim or len(action_high) != action_dim:
             raise ValueError(
                 f"actor action bounds must each have action_dim={action_dim} values; "
-                f"got {len(self.cfg.action_low)} and {len(self.cfg.action_high)}"
+                f"got {len(action_low)} and {len(action_high)}"
             )
 
         hidden_layers = self.cfg.hidden_layers
@@ -90,8 +95,8 @@ class Actor(nn.Module):
             )
         )
         self._network = nn.Sequential(*modules)
-        low = T.tensor(self.cfg.action_low)
-        high = T.tensor(self.cfg.action_high)
+        low = T.tensor(action_low)
+        high = T.tensor(action_high)
         self.register_buffer("_affine_loc", low)
         self.register_buffer("_affine_scale", high - low)
 

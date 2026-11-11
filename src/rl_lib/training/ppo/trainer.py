@@ -139,7 +139,7 @@ class PPOTrainer:
         loss.backward()
         clip_grad_norm_(self.modules.parameters(), 0.5)
         self._optimizer.step()
-        return {"loss/total": loss.item()}
+        return {"loss/total": loss.item(), **metrics}
 
     def _build_optimizer(self, modules: ActorCritic) -> Optimizer:
         return Adam(

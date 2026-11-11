@@ -129,8 +129,6 @@ class ActorConfig(StrictConfig):
         output_init_gain: Gain for output layer weight init (small for Beta).
         output_init_bias: Bias for output layer (negative to start near 0).
         output_bias: Include bias in output layer.
-        action_low: Lower bounds per action dimension (e.g., [-1, 0, 0]).
-        action_high: Upper bounds per action dimension (e.g., [1, 1, 1]).
         concentration_offset: Added to softplus output to ensure >= 1.
         softplus_beta: Beta parameter for softplus.
         softplus_threshold: Threshold parameter for softplus.
@@ -145,8 +143,6 @@ class ActorConfig(StrictConfig):
     output_init_gain: PositiveFloat = 0.01
     output_init_bias: FiniteFloat = -2.0
     output_bias: bool = True
-    action_low: list[FiniteFloat] = Field(default_factory=lambda: [-1.0, 0.0, 0.0])
-    action_high: list[FiniteFloat] = Field(default_factory=lambda: [1.0, 1.0, 1.0])
     concentration_offset: PositiveFloat = 1.0
     softplus_beta: PositiveFloat = 1.0
     softplus_threshold: PositiveFloat = 20.0
@@ -161,7 +157,6 @@ class VCriticConfig(StrictConfig):
         output_init_gain: Gain for output layer weight init.
         output_init_bias: Bias for output layer init.
         output_bias: Include bias in output layer.
-        huber_delta: Delta for Huber loss used in critic training.
     """
 
     hidden_layers: list[LinearLayerConfig] = Field(
@@ -177,6 +172,7 @@ class VCriticConfig(StrictConfig):
 class EncoderConfig(StrictConfig):
     cnn: CNNConfig = Field(default_factory=CNNConfig)
     temporal: TemporalConfig = Field(default_factory=TemporalConfig)
+    stack_size: PositiveInt = 4
     observation_divisor: PositiveFloat = Field(default=127.5, gt=0)
     observation_offset: FiniteFloat = -1.0
 

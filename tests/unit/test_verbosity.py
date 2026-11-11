@@ -8,7 +8,7 @@ Parameters, configs, and artifacts are run metadata and stay unaffected.
 
 import pytest
 
-from rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsSink
 from rl_lib.tracking.verbosity import (
     Verbosity,
     VerbosityMetricsLogger,
@@ -17,7 +17,6 @@ from rl_lib.tracking.verbosity import (
     filter_metrics,
     is_core_loss,
 )
-
 
 CORE_LOSSES = {
     "loss/total": 1.0,
@@ -35,7 +34,7 @@ DIAGNOSTIC_METRICS = {
 }
 
 
-class _RecordingLogger(MetricsLogger):
+class _RecordingLogger(MetricsSink):
     """Backend that records every call it receives."""
 
     def __init__(self):
@@ -51,10 +50,14 @@ class _RecordingLogger(MetricsLogger):
     def log_parameters(self, parameters: dict) -> None:
         self.parameters.append(dict(parameters))
 
-    def log_config(self, config: dict, artifact_file: str = "config/run_config.yaml") -> None:
+    def log_config(
+        self, config: dict, artifact_file: str = "config/run_config.yaml"
+    ) -> None:
         self.configs.append(dict(config))
 
-    def log_state_dict(self, state_dict: dict, artifact_path: str = "checkpoints") -> None:
+    def log_state_dict(
+        self, state_dict: dict, artifact_path: str = "checkpoints"
+    ) -> None:
         self.state_dicts.append(artifact_path)
 
     def log_artifact(self, local_path: str, artifact_path: str | None = None) -> None:
@@ -162,7 +165,9 @@ def test_filter_metrics_rejects_an_unknown_verbosity(verbosity):
 def test_zero_verbosity_logger_never_calls_the_backend():
     logger = _RecordingLogger()
 
-    VerbosityMetricsLogger(logger, 0).log_metrics({**CORE_LOSSES, **DIAGNOSTIC_METRICS}, step=1)
+    VerbosityMetricsLogger(logger, 0).log_metrics(
+        {**CORE_LOSSES, **DIAGNOSTIC_METRICS}, step=1
+    )
 
     assert logger.metrics == []
 
@@ -170,7 +175,9 @@ def test_zero_verbosity_logger_never_calls_the_backend():
 def test_core_loss_verbosity_drops_diagnostics_before_the_backend():
     logger = _RecordingLogger()
 
-    VerbosityMetricsLogger(logger, 1).log_metrics({**CORE_LOSSES, **DIAGNOSTIC_METRICS}, step=4)
+    VerbosityMetricsLogger(logger, 1).log_metrics(
+        {**CORE_LOSSES, **DIAGNOSTIC_METRICS}, step=4
+    )
 
     assert logger.metrics == [(CORE_LOSSES, 4)]
 

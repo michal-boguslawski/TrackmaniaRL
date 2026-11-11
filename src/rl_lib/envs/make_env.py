@@ -12,8 +12,8 @@ from gymnasium import VectorizeMode, make_vec
 from gymnasium.vector import AutoresetMode, VectorEnv
 from gymnasium.wrappers.vector import NormalizeReward, NumpyToTorch
 
+from rl_lib.envs.settings.settings import make_wrapper_settings
 from rl_lib.envs.wrappers.registry import WRAPPERS
-from rl_lib.envs.wrappers.settings import make_wrapper_settings
 from rl_lib.run_config import EnvironmentSettings
 
 

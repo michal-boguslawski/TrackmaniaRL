@@ -10,20 +10,18 @@ class Encoder(nn.Module):
     def __init__(
         self,
         observation_dim: int,
-        stack_size: int,
         config: EncoderConfig,
         cnn_autocast_dtype: T.dtype | None = None,
     ):
         super().__init__()
         self.cfg = config
-        self.stack_size = stack_size
         self.observation_dim = observation_dim
         self.cnn_autocast_dtype = cnn_autocast_dtype
 
         self.cnn = CNN(observation_dim, self.cfg.cnn)
 
         self.sequence_encoder = TemporalCNN1D(
-            stack_size, in_dim=self.cnn.out_dim, config=self.cfg.temporal
+            self.cfg.stack_size, in_dim=self.cnn.out_dim, config=self.cfg.temporal
         )
         self.register_buffer(
             "_divisor", T.tensor(self.cfg.observation_divisor), persistent=False

@@ -6,17 +6,24 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from rl_lib.evaluation import MLflowModelRef, discover_mlflow_models, evaluate_mlflow, select_mlflow_run
-from rl_lib.evaluation.mlflow_evaluation import _load_mlflow_config, _shortest_unique_prefixes
 from rl_lib.checkpoint_loaders import MLflowCheckpointLoader
+from rl_lib.evaluation import (
+    MLflowModelRef,
+    discover_mlflow_models,
+    evaluate_mlflow,
+    select_mlflow_run,
+)
+from rl_lib.evaluation.mlflow_evaluation import (
+    _load_mlflow_config,
+    _shortest_unique_prefixes,
+)
 from rl_lib.run_config import AgentSettings, RunConfig
-from rl_lib.tracking.base import MetricsLogger
-
+from rl_lib.tracking.sinks.base import MetricsSink
 
 OBSERVATION_SHAPE = (96, 96, 1)
 
 
-class _Logger(MetricsLogger):
+class _Logger(MetricsSink):
     def __init__(self):
         self.metrics: list[tuple[dict[str, float], int]] = []
         self.artifacts: list[tuple[str, str | None]] = []
@@ -29,21 +36,23 @@ class _Logger(MetricsLogger):
 
 
 def _config(network_config, num_envs: int = 2) -> RunConfig:
-    return RunConfig.model_validate({
-        "environment": {
-            "id": "test-episode-env",
-            "num_envs": num_envs,
-            "normalize_rewards": True,
-            "wrappers": [],
-        },
-        "agent": AgentSettings(stack_size=2).model_dump(),
-        "network": network_config.model_dump(),
-        "callbacks": {
-            "episode_statistics": False,
-            "record_video": False,
-            "evaluation": False,
-        },
-    })
+    return RunConfig.model_validate(
+        {
+            "environment": {
+                "id": "test-episode-env",
+                "num_envs": num_envs,
+                "normalize_rewards": True,
+                "wrappers": [],
+            },
+            "agent": AgentSettings(stack_size=2).model_dump(),
+            "network": network_config.model_dump(),
+            "callbacks": {
+                "episode_statistics": False,
+                "record_video": False,
+                "evaluation": False,
+            },
+        }
+    )
 
 
 def _save_config(config: RunConfig, path: Path) -> None:
@@ -53,15 +62,17 @@ def _save_config(config: RunConfig, path: Path) -> None:
 
 def _vector_env(num_envs: int = 2, horizon: int = 2):
     import gymnasium as gym
+    import numpy as np
     from gymnasium import spaces
     from gymnasium.vector import AutoresetMode
-    import numpy as np
 
     class _EpisodeEnv(gym.Env):
         metadata = {"render_modes": []}
 
         def __init__(self, horizon: int = 2):
-            self.observation_space = spaces.Box(0, 255, OBSERVATION_SHAPE, dtype=np.uint8)
+            self.observation_space = spaces.Box(
+                0, 255, OBSERVATION_SHAPE, dtype=np.uint8
+            )
             self.action_space = spaces.Box(-1.0, 1.0, shape=(3,), dtype=np.float32)
             self.horizon = horizon
             self.step_count = 0
@@ -95,14 +106,17 @@ def test_mlflow_evaluation_loads_run_config_model_and_logs(
             download_artifacts=lambda **kwargs: str(config_path),
         ),
         pytorch=SimpleNamespace(
-            load_model=lambda uri, map_location: calls.update(
-                uri=uri, map_location=map_location
-            ) or agent.network,
+            load_model=lambda uri, map_location: (
+                calls.update(uri=uri, map_location=map_location) or agent.network
+            ),
         ),
     )
     monkeypatch.setattr("rl_lib.evaluation.mlflow_evaluation.mlflow", fake_mlflow)
     monkeypatch.setattr("rl_lib.checkpoint_loaders.mlflow", fake_mlflow)
-    monkeypatch.setattr("rl_lib.evaluation.checkpoint.make_env", lambda config: _vector_env(config.num_envs))
+    monkeypatch.setattr(
+        "rl_lib.evaluation.checkpoint.make_env",
+        lambda config: _vector_env(config.num_envs),
+    )
     logger = _Logger()
 
     returns = evaluate_mlflow(
@@ -130,7 +144,10 @@ def test_mlflow_run_uri_is_accepted(monkeypatch, tmp_path, network_config, agent
     )
     monkeypatch.setattr("rl_lib.evaluation.mlflow_evaluation.mlflow", fake_mlflow)
     monkeypatch.setattr("rl_lib.checkpoint_loaders.mlflow", fake_mlflow)
-    monkeypatch.setattr("rl_lib.evaluation.checkpoint.make_env", lambda config: _vector_env(config.num_envs))
+    monkeypatch.setattr(
+        "rl_lib.evaluation.checkpoint.make_env",
+        lambda config: _vector_env(config.num_envs),
+    )
 
     evaluate_mlflow(
         run_id="runs:/run-xyz/final_model",
@@ -152,7 +169,11 @@ def test_mlflow_evaluation_loads_selected_checkpoint(
 
     def download_artifacts(*, run_id, artifact_path):
         artifact_calls.append((run_id, artifact_path))
-        path = config_path if artifact_path == "config/run_config.yaml" else tmp_path / "state_dict.pth"
+        path = (
+            config_path
+            if artifact_path == "config/run_config.yaml"
+            else tmp_path / "state_dict.pth"
+        )
         return str(path)
 
     fake_mlflow = SimpleNamespace(
@@ -220,11 +241,17 @@ def test_mlflow_evaluation_rejects_negative_checkpoint_step():
         evaluate_mlflow(run_id="run-checkpoint", checkpoint_step=-1)
 
 
-def test_logged_config_keeps_default_wrappers_when_the_run_omitted_them(tmp_path, monkeypatch):
+def test_logged_config_keeps_default_wrappers_when_the_run_omitted_them(
+    tmp_path, monkeypatch
+):
     """Runs log unset fields as absent, so defaults must survive the reload."""
     logged = {
         "run": {"name": "manual-smoke", "total_steps": 8, "seed": 1},
-        "environment": {"id": "CarRacing-v3", "num_envs": 2, "vectorization_mode": "sync"},
+        "environment": {
+            "id": "CarRacing-v3",
+            "num_envs": 2,
+            "vectorization_mode": "sync",
+        },
         "rollout": {"buffer_size": 4, "epochs": 1, "minibatch_size": 4},
         "callbacks": [
             {"name": "checkpoints", "interval": 4},
@@ -278,7 +305,9 @@ def test_discovery_lists_only_runs_with_final_model_and_computes_prefixes(monkey
 
     models = discover_mlflow_models("CarRacing-v3")
 
-    assert [(model.run_id, model.unique_prefix, model.run_name) for model in models] == [
+    assert [
+        (model.run_id, model.unique_prefix, model.run_name) for model in models
+    ] == [
         ("abc111", "a", "old"),
     ]
 
@@ -349,7 +378,9 @@ def test_discovery_without_logged_model_registry_falls_back_to_artifacts(monkeyp
 
     monkeypatch.setattr("rl_lib.evaluation.mlflow_evaluation.MlflowClient", Client)
 
-    assert [model.run_id for model in discover_mlflow_models("CarRacing-v3")] == ["abc111"]
+    assert [model.run_id for model in discover_mlflow_models("CarRacing-v3")] == [
+        "abc111"
+    ]
 
 
 def test_mlflow_unique_prefix_selection_and_ambiguity(monkeypatch):
@@ -357,7 +388,10 @@ def test_mlflow_unique_prefix_selection_and_ambiguity(monkeypatch):
         MLflowModelRef("abc111", "first", "exp", "abc", 2),
         MLflowModelRef("abd222", "second", "exp", "abd", 1),
     ]
-    monkeypatch.setattr("rl_lib.evaluation.mlflow_evaluation.discover_mlflow_models", lambda experiment: models)
+    monkeypatch.setattr(
+        "rl_lib.evaluation.mlflow_evaluation.discover_mlflow_models",
+        lambda experiment: models,
+    )
 
     selected = select_mlflow_run("exp", identifier="abc")
     assert selected.run_name == "first"

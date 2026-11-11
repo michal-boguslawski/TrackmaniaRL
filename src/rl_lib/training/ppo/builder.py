@@ -18,7 +18,6 @@ def build_ppo(ctx: BuildContext) -> tuple[Policy, PPOTrainer]:
     # 1. construct
     encoder = Encoder(
         observation_dim=ctx.obs_shape[-1],
-        stack_size=cfg.agent.stack_size,
         config=cfg.network.encoder,
         cnn_autocast_dtype=cfg.run.cnn_autocast,
     ).to(device)

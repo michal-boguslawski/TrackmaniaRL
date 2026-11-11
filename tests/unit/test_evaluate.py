@@ -19,9 +19,8 @@ from rl_lib.run_config import (
     EvaluationCallbackSettings,
     RunConfig,
 )
-from rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsSink
 from rl_lib.training.callbacks.evaluate import EvaluationCallback
-
 
 OBSERVATION_SHAPE = (96, 96, 1)
 
@@ -54,7 +53,7 @@ def _vector_env(num_envs: int = 2, horizon: int = 2):
     )
 
 
-class _Logger(MetricsLogger):
+class _Logger(MetricsSink):
     def __init__(self):
         self.metrics: list[tuple[dict[str, float], int]] = []
         self.artifacts: list[tuple[str, str | None]] = []
@@ -80,21 +79,23 @@ class _Logger(MetricsLogger):
 
 
 def _config(network_config, num_envs: int = 2) -> RunConfig:
-    return RunConfig.model_validate({
-        "environment": {
-            "id": "test-episode-env",
-            "num_envs": num_envs,
-            "normalize_rewards": True,
-            "wrappers": [],
-        },
-        "agent": AgentSettings(stack_size=2).model_dump(),
-        "network": network_config.model_dump(),
-        "callbacks": {
-            "episode_statistics": False,
-            "record_video": False,
-            "evaluation": False,
-        },
-    })
+    return RunConfig.model_validate(
+        {
+            "environment": {
+                "id": "test-episode-env",
+                "num_envs": num_envs,
+                "normalize_rewards": True,
+                "wrappers": [],
+            },
+            "agent": AgentSettings(stack_size=2).model_dump(),
+            "network": network_config.model_dump(),
+            "callbacks": {
+                "episode_statistics": False,
+                "record_video": False,
+                "evaluation": False,
+            },
+        }
+    )
 
 
 def _save_config(config: RunConfig, path: Path) -> None:
@@ -106,7 +107,9 @@ def test_evaluation_callback_runs_on_vector_step_intervals_and_at_end(
     monkeypatch, agent
 ):
     env = _vector_env(num_envs=2, horizon=1)
-    monkeypatch.setattr("rl_lib.training.callbacks.evaluate.make_env", lambda config: env)
+    monkeypatch.setattr(
+        "rl_lib.training.callbacks.evaluate.make_env", lambda config: env
+    )
     logger = _Logger()
     callback = EvaluationCallback(
         agent,
@@ -163,7 +166,10 @@ def test_local_checkpoint_evaluation_uses_shared_inference(
     _save_config(config, config_path)
     checkpoint_path = tmp_path / "checkpoint.pt"
     agent.save_state_dict(str(checkpoint_path))
-    monkeypatch.setattr("rl_lib.evaluation.checkpoint.make_env", lambda config: _vector_env(config.num_envs))
+    monkeypatch.setattr(
+        "rl_lib.evaluation.checkpoint.make_env",
+        lambda config: _vector_env(config.num_envs),
+    )
     logger = _Logger()
 
     returns = evaluate_checkpoint(
@@ -185,8 +191,7 @@ def test_local_checkpoint_evaluation_loads_torch_compile_state_dict(
     _save_config(_config(network_config), config_path)
     checkpoint_path = tmp_path / "compiled-checkpoint.pt"
     compiled_state_dict = {
-        f"_orig_mod.{key}": value
-        for key, value in agent.network.state_dict().items()
+        f"_orig_mod.{key}": value for key, value in agent.network.state_dict().items()
     }
     T.save(compiled_state_dict, checkpoint_path)
     monkeypatch.setattr(
@@ -212,7 +217,10 @@ def test_local_evaluation_accepts_the_full_model_saved_at_training_end(
     _save_config(_config(network_config), config_path)
     checkpoint_path = tmp_path / "final_model.pt"
     T.save(agent.network, checkpoint_path)
-    monkeypatch.setattr("rl_lib.evaluation.checkpoint.make_env", lambda config: _vector_env(config.num_envs))
+    monkeypatch.setattr(
+        "rl_lib.evaluation.checkpoint.make_env",
+        lambda config: _vector_env(config.num_envs),
+    )
 
     returns = evaluate_checkpoint(
         config_path,

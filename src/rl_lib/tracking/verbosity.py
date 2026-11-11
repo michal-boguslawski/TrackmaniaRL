@@ -19,10 +19,11 @@ files are run metadata rather than metrics, so they are always written.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from enum import IntEnum
-from typing import Any, Iterable
+from typing import Any
 
-from rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsLogger
 
 
 class Verbosity(IntEnum):

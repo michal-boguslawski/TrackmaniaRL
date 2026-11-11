@@ -19,29 +19,17 @@ import gc
 import logging
 import random
 import signal
-from contextlib import ExitStack, closing, nullcontext
-from importlib import resources
+from contextlib import ExitStack, closing
 from pathlib import Path
 
 import numpy as np
 import torch as T
 
-from rl_lib.buffers.rollout_buffer import RolloutBuffer
-from rl_lib.checkpoint_loaders import LocalCheckpointLoader, MLflowCheckpointLoader
 from rl_lib.device import resolve_device
 from rl_lib.envs.make_env import make_env
 from rl_lib.logger_setup import setup_logging, shutdown_logging
-from rl_lib.networks.factory import Network
-from rl_lib.networks.mixed_precision import resolve_cnn_autocast_dtype
-from rl_lib.profiling_config import ProfilingConfig, load_profiling_config
 from rl_lib.run_config import RunConfig, load_config
-from rl_lib.tracking.console_logger import ConsoleMetricsLogger
-from rl_lib.tracking.local_artifact_logger import LocalArtifactLogger
-from rl_lib.tracking.mlflow_logger import MLflowLogger
-from rl_lib.tracking.verbosity import Verbosity, filter_loggers
 from rl_lib.training.base import BuildContext
-from rl_lib.training.callbacks.factory import create_callbacks
-from rl_lib.training.factory import create_trainer
 from rl_lib.training.ppo.builder import build_ppo
 from rl_lib.training.rollout_collector import RolloutCollector
 
@@ -67,7 +55,6 @@ def _seed_everything(seed: int) -> None:
 def run_training(
     config: RunConfig,
     config_path: str | Path | None = None,
-    profiling_config: ProfilingConfig | None = None,
 ) -> None:
     """Execute full training run from validated config.
 
@@ -94,35 +81,8 @@ def run_training(
             T.cuda.empty_cache()
             T.cuda.reset_peak_memory_stats(device)
 
-    console_logger = ConsoleMetricsLogger() if config.tracking.console else None
     verbosity = config.tracking.verbosity
     with ExitStack() as stack:
-        mlflow_logger = stack.enter_context(
-            MLflowLogger(
-                config.experiment_name,
-                run_name=config.run_name,
-                # Host metrics are diagnostics, so they only belong at the
-                # verbosity that logs every metric.
-                log_system_metrics=(
-                    config.tracking.log_system_metrics and verbosity == Verbosity.ALL
-                ),
-            )
-            if config.tracking.mlflow
-            else nullcontext(None)
-        )
-        local_artifact_logger = stack.enter_context(
-            LocalArtifactLogger(Path("logs") / "artifacts" / session_id)
-            if config.tracking.local_artifacts
-            else nullcontext(None),
-        )
-        metrics_loggers = filter_loggers(
-            [
-                item
-                for item in (console_logger, mlflow_logger, local_artifact_logger)
-                if item is not None
-            ],
-            verbosity,
-        )
         env = stack.enter_context(closing(make_env(config.environment, device=device)))
         build_ctx = BuildContext(
             config=config,
@@ -145,32 +105,7 @@ def run_training(
             config_path or "<object>",
         )
         try:
-            if profiling_config is None or not profiling_config.enabled:
-                collector.run(config.run.total_steps)
-            else:
-                activities = [T.profiler.ProfilerActivity.CPU]
-                if device.type == "cuda":
-                    activities.append(T.profiler.ProfilerActivity.CUDA)
-                trace_dir = Path(profiling_config.output_dir) / session_id
-                wait_steps, warmup_steps = profiling_config.resolve_schedule(
-                    config.rollout.buffer_size
-                )
-                profiler = T.profiler.profile(
-                    activities=activities,
-                    schedule=T.profiler.schedule(
-                        wait=wait_steps,
-                        warmup=warmup_steps,
-                        active=profiling_config.active_steps,
-                        repeat=profiling_config.repeat,
-                    ),
-                    on_trace_ready=T.profiler.tensorboard_trace_handler(str(trace_dir)),
-                    record_shapes=profiling_config.record_shapes,
-                    profile_memory=profiling_config.profile_memory,
-                    with_stack=profiling_config.with_stack,
-                )
-                with profiler:
-                    collector.run(config.run.total_steps, profiler=profiler)
-                logger.info("Profiler traces written to %s", trace_dir)
+            collector.run(config.run.total_steps)
         except KeyboardInterrupt:
             logger.warning("Rollout interrupted; stopping training")
             raise
@@ -181,8 +116,6 @@ def run_training(
 
 def main(
     config_path: str | Path,
-    profiling_config_path: str | Path | None = None,
-    profile: bool | None = None,
 ) -> None:
     """CLI entrypoint: load run and profiling configs, then train.
 
@@ -194,18 +127,10 @@ def main(
             setting. ``None`` follows the config value.
     """
     config = load_config(str(config_path))
-    default_profiling_config = resources.files("rl_lib.config") / "profiling.yaml"
-    profiling_path = profiling_config_path or default_profiling_config
-    profiling_settings = load_profiling_config(profiling_path)
-    profiling_enabled = profiling_settings.enabled if profile is None else profile
-    profiling_settings = profiling_settings.model_copy(
-        update={"enabled": profiling_enabled}
-    )
     try:
         run_training(
             config,
             config_path=config_path,
-            profiling_config=profiling_settings,
         )
     finally:
         shutdown_logging()
@@ -218,11 +143,5 @@ if __name__ == "__main__":
     parser.add_argument(
         "--config", default="configs/ppo_carracing.yaml", help="YAML run configuration"
     )
-    parser.add_argument(
-        "--profiling-config",
-        help="Separate YAML configuration for optional PyTorch profiling",
-    )
-    parser.add_argument("--profile", dest="profile", action="store_true", default=None)
-    parser.add_argument("--no-profile", dest="profile", action="store_false")
     args = parser.parse_args()
-    main(args.config, profiling_config_path=args.profiling_config, profile=args.profile)
+    main(args.config)

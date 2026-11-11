@@ -7,18 +7,20 @@ mapping (FINISHED/KILLED/FAILED).
 
 import socket
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
+from typing import Self
 
 import mlflow
 import mlflow.pytorch
 import torch
-from typing import Self
 
 from rl_lib.tracking.artifacts import normalize_artifact_path
-from rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsSink
 
 
-def run_status_for_exception(exc_type: type[BaseException] | None, exc_val: BaseException | None = None) -> str:
+def run_status_for_exception(
+    exc_type: type[BaseException] | None, exc_val: BaseException | None = None
+) -> str:
     """Map the exception leaving a run's `with` block onto an MLflow run status.
 
     A run that ends because it was interrupted is `KILLED` rather than
@@ -36,12 +38,16 @@ def run_status_for_exception(exc_type: type[BaseException] | None, exc_val: Base
         return "FINISHED"
     if issubclass(exc_type, KeyboardInterrupt):
         return "KILLED"
-    if issubclass(exc_type, SystemExit) and exc_val is not None and getattr(exc_val, "code", None) in (0, None):
+    if (
+        issubclass(exc_type, SystemExit)
+        and exc_val is not None
+        and getattr(exc_val, "code", None) in (0, None)
+    ):
         return "FINISHED"
     return "FAILED"
 
 
-class MLflowLogger(MetricsLogger):
+class MLflowLogger(MetricsSink):
     """MLflow tracking backend for metrics, params, models, and artifacts.
 
     Creates an MLflow run on initialization. Supports context manager
@@ -75,7 +81,9 @@ class MLflowLogger(MetricsLogger):
             run_name = self._deduce_run_name()
 
         self._registered_model_name = registered_model_name
-        self._run = mlflow.start_run(run_name=run_name, log_system_metrics=log_system_metrics)
+        self._run = mlflow.start_run(
+            run_name=run_name, log_system_metrics=log_system_metrics
+        )
 
     @staticmethod
     def _deduce_run_name() -> str:
@@ -88,7 +96,7 @@ class MLflowLogger(MetricsLogger):
             Run name string.
         """
         host = socket.gethostname().split(".")[0]
-        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         short_id = uuid.uuid4().hex[:6]
         return f"{host}-{ts}-{short_id}"
 
@@ -100,7 +108,9 @@ class MLflowLogger(MetricsLogger):
         """Log parameters to MLflow (values converted to strings)."""
         mlflow.log_params({k: str(v) for k, v in parameters.items()})
 
-    def log_config(self, config: dict, artifact_file: str = "config/run_config.yaml") -> None:
+    def log_config(
+        self, config: dict, artifact_file: str = "config/run_config.yaml"
+    ) -> None:
         """Log full config dict as YAML artifact."""
         mlflow.log_dict(config, artifact_file)
 
@@ -118,7 +128,9 @@ class MLflowLogger(MetricsLogger):
             serialization_format=mlflow.pytorch.SERIALIZATION_FORMAT_PICKLE,
         )
 
-    def log_state_dict(self, state_dict: dict, artifact_path: str = "checkpoints") -> None:
+    def log_state_dict(
+        self, state_dict: dict, artifact_path: str = "checkpoints"
+    ) -> None:
         """Log state dict as MLflow artifact."""
         mlflow.pytorch.log_state_dict(
             state_dict, artifact_path=normalize_artifact_path(artifact_path)

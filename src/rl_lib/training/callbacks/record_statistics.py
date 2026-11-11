@@ -9,9 +9,9 @@ output in the info dict. Supports two modes:
 from collections.abc import Mapping
 from typing import Any
 
-from rl_lib.tracking.base import MetricsLogger
-from rl_lib.training.callbacks.base import Callback
 from rl_lib.run_config import EpisodeStatisticsCallbackSettings
+from rl_lib.tracking.sinks.base import MetricsSink
+from rl_lib.training.callbacks.base import Callback
 
 
 class RecordStatisticLoggerCallback(Callback):
@@ -33,7 +33,7 @@ class RecordStatisticLoggerCallback(Callback):
 
     def __init__(
         self,
-        logger: MetricsLogger,
+        logger: MetricsSink,
         config: EpisodeStatisticsCallbackSettings,
     ):
         """Initialize statistics logging callback.
@@ -55,7 +55,10 @@ class RecordStatisticLoggerCallback(Callback):
     def on_env_step(self, step: int, info: dict[str, Any], *args, **kwargs):
         """Process completed episodes from info dict."""
         episode_info = info.get("final_info")
-        if not isinstance(episode_info, Mapping) or self.cfg.stats_key not in episode_info:
+        if (
+            not isinstance(episode_info, Mapping)
+            or self.cfg.stats_key not in episode_info
+        ):
             episode_info = info
 
         mask_key = f"_{self.cfg.stats_key}"

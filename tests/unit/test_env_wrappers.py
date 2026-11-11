@@ -12,8 +12,7 @@ import importlib
 import gymnasium as gym
 import numpy as np
 import pytest
-from gymnasium import spaces
-from gymnasium import VectorizeMode
+from gymnasium import VectorizeMode, spaces
 from gymnasium.vector import AutoresetMode
 from gymnasium.wrappers import (
     FrameStackObservation,
@@ -24,12 +23,11 @@ from gymnasium.wrappers import (
 )
 from gymnasium.wrappers.vector import NormalizeReward
 
+from rl_lib.envs.settings.settings import GrayscaleWrapperSettings
+from rl_lib.envs.wrappers.off_track_penalty_wrapper import OffTrackPenaltyWrapper
 from rl_lib.envs.wrappers.registry import WRAPPERS
 from rl_lib.envs.wrappers.reward_wrappers import RewardOnEpisodeEndWrapper
-from rl_lib.envs.wrappers.off_track_penalty_wrapper import OffTrackPenaltyWrapper
-from rl_lib.envs.wrappers.settings import GrayscaleWrapperSettings
 from rl_lib.run_config import EnvironmentSettings
-
 
 make_env_module = importlib.import_module("rl_lib.envs.make_env")
 make_env = make_env_module.make_env
@@ -38,7 +36,12 @@ make_env = make_env_module.make_env
 def env_settings(**overrides) -> EnvironmentSettings:
     """Bare environment settings: no wrappers and no reward normalization, so
     each test states only the plumbing it asserts on."""
-    base = {"id": "SomeEnv-v0", "num_envs": 1, "wrappers": [], "normalize_rewards": False}
+    base = {
+        "id": "SomeEnv-v0",
+        "num_envs": 1,
+        "wrappers": [],
+        "normalize_rewards": False,
+    }
     base.update(overrides)
     return EnvironmentSettings(**base)
 
@@ -81,7 +84,13 @@ class _PixelEnv(gym.Env):
         self._t += 1
         ended = self._t >= self._horizon
         info = {"lap_finished": ended and self._lap_on_last}
-        return self._observation(), 1.0, ended and self._terminate, ended and not self._terminate, info
+        return (
+            self._observation(),
+            1.0,
+            ended and self._terminate,
+            ended and not self._terminate,
+            info,
+        )
 
 
 ENV_ID = "RewardWrapperFactoryTest-v0"
@@ -113,7 +122,9 @@ def test_make_env_passes_the_requested_shape(capture_make_vec):
     assert capture_make_vec["env_id"] == "SomeEnv-v0"
     assert capture_make_vec["num_envs"] == 4
     assert capture_make_vec["vectorization_mode"] is VectorizeMode.SYNC
-    assert capture_make_vec["vector_kwargs"]["autoreset_mode"] is AutoresetMode.SAME_STEP
+    assert (
+        capture_make_vec["vector_kwargs"]["autoreset_mode"] is AutoresetMode.SAME_STEP
+    )
     assert capture_make_vec["continuous"] is True
     assert capture_make_vec["render_mode"] is None
     assert capture_make_vec["wrappers"] == []
@@ -130,7 +141,9 @@ def test_make_env_recording_forces_sync_and_rgb(capture_make_vec):
 
     assert capture_make_vec["vectorization_mode"] is VectorizeMode.SYNC
     assert capture_make_vec["render_mode"] == "rgb_array"
-    assert [wrapper.func for wrapper in capture_make_vec["wrappers"]] == [WRAPPERS["record_video"]]
+    assert [wrapper.func for wrapper in capture_make_vec["wrappers"]] == [
+        WRAPPERS["record_video"]
+    ]
 
 
 def test_make_env_inserts_the_video_wrapper_first(capture_make_vec):
@@ -161,10 +174,18 @@ def test_make_env_forwards_the_video_folder_and_skip(capture_make_vec):
 
 
 def test_make_env_forwards_typed_wrapper_specific_options(capture_make_vec):
-    make_env(env_settings(wrappers=[
-        {"name": "record_episode_stats", "stats_buffer_length": 25, "stats_key": "episode_stats"},
-        {"name": "max_and_skip", "skip": 3},
-    ]))
+    make_env(
+        env_settings(
+            wrappers=[
+                {
+                    "name": "record_episode_stats",
+                    "stats_buffer_length": 25,
+                    "stats_key": "episode_stats",
+                },
+                {"name": "max_and_skip", "skip": 3},
+            ]
+        )
+    )
 
     stats_wrapper, skip_wrapper = capture_make_vec["wrappers"]
     assert stats_wrapper.keywords["stats_buffer_length"] == 25
@@ -173,9 +194,15 @@ def test_make_env_forwards_typed_wrapper_specific_options(capture_make_vec):
 
 
 def test_make_env_wraps_with_normalized_rewards():
-    env = make_env(EnvironmentSettings(
-        id=ENV_ID, num_envs=2, vectorization_mode="sync", normalize_rewards=True, wrappers=[]
-    ))
+    env = make_env(
+        EnvironmentSettings(
+            id=ENV_ID,
+            num_envs=2,
+            vectorization_mode="sync",
+            normalize_rewards=True,
+            wrappers=[],
+        )
+    )
 
     try:
         assert isinstance(env, NormalizeReward)
@@ -233,7 +260,9 @@ def test_frame_stack_wrapper_stacks_observations():
 
 
 def test_record_episode_statistics_wrapper_reports_episode_returns():
-    env = WRAPPERS["record_episode_stats"](_PixelEnv(horizon=2), video_folder="v", skip=4)
+    env = WRAPPERS["record_episode_stats"](
+        _PixelEnv(horizon=2), video_folder="v", skip=4
+    )
 
     assert isinstance(env, RecordEpisodeStatistics)
     env.reset()
@@ -440,7 +469,9 @@ def test_the_wrapper_passes_everything_else_through():
     env = RewardOnEpisodeEndWrapper(_PixelEnv(horizon=4), on_win=5.0)
     env.reset()
 
-    observation, reward, terminated, truncated, info = env.step(env.action_space.sample())
+    observation, reward, terminated, truncated, info = env.step(
+        env.action_space.sample()
+    )
 
     assert observation.shape == (96, 96, 3)
     assert (reward, terminated, truncated) == (1.0, False, False)

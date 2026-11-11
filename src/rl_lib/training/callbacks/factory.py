@@ -6,12 +6,12 @@ to instantiate all configured callbacks with resolved settings.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 from rl_lib.agent import Agent
 from rl_lib.run_config import CheckpointsCallbackConfig, RunConfig
-from rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsSink
 from rl_lib.training.callbacks.base import Callback
 from rl_lib.training.callbacks.evaluate import EvaluationCallback
 from rl_lib.training.callbacks.metrics_logger import MetricsLoggingCallback
@@ -29,6 +29,7 @@ class CallbackGroups:
         trainer: Callbacks invoked during PPO optimization.
         collector: Callbacks invoked during environment rollout.
     """
+
     trainer: list[Callback] = field(default_factory=list)
     collector: list[Callback] = field(default_factory=list)
 
@@ -43,10 +44,11 @@ class CallbackFactoryContext:
         video_agent: Evaluation agent with video recording setup.
         metrics_loggers: List of MetricsLogger backends (console, MLflow).
     """
+
     config: RunConfig
     agent: Agent
     video_agent: Agent
-    metrics_loggers: list[MetricsLogger]
+    metrics_loggers: list[MetricsSink]
 
 
 CallbackBuilder = Callable[[CallbackFactoryContext], CallbackGroups]
@@ -56,7 +58,7 @@ def _checkpoints(context: CallbackFactoryContext) -> CallbackGroups:
     """Build the periodic and final model checkpoint callback."""
     config = context.config.callback("checkpoints")
     if not isinstance(config, CheckpointsCallbackConfig):
-        raise ValueError("checkpoints callback is not configured")
+        raise TypeError("checkpoints callback is not configured")
     callback = ModelCheckpointCallback(
         context.agent,
         context.metrics_loggers,
@@ -90,22 +92,26 @@ def _episode_statistics(context: CallbackFactoryContext) -> CallbackGroups:
 def _record_video(context: CallbackFactoryContext) -> CallbackGroups:
     """Build video recording callback (collector-level)."""
     return CallbackGroups(
-        collector=[RecordVideoCallback(
-            agent=context.video_agent,
-            metrics_loggers=context.metrics_loggers,
-            config=context.config.video_settings(),
-        )]
+        collector=[
+            RecordVideoCallback(
+                agent=context.video_agent,
+                metrics_loggers=context.metrics_loggers,
+                config=context.config.video_settings(),
+            )
+        ]
     )
 
 
 def _evaluation(context: CallbackFactoryContext) -> CallbackGroups:
     """Build periodic evaluation callback (collector-level)."""
     return CallbackGroups(
-        collector=[EvaluationCallback(
-            agent=context.agent,
-            metrics_loggers=context.metrics_loggers,
-            config=context.config.evaluation_settings(),
-        )]
+        collector=[
+            EvaluationCallback(
+                agent=context.agent,
+                metrics_loggers=context.metrics_loggers,
+                config=context.config.evaluation_settings(),
+            )
+        ]
     )
 
 
@@ -122,7 +128,7 @@ def create_callbacks(
     config: RunConfig,
     agent: Agent,
     video_agent: Agent,
-    metrics_loggers: list[MetricsLogger],
+    metrics_loggers: list[MetricsSink],
     run_config: dict | None = None,
 ) -> CallbackGroups:
     """Create all configured trainer/collector callbacks.

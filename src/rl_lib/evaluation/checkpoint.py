@@ -19,7 +19,7 @@ from rl_lib.evaluation.runtime import _default_metrics_loggers, _episode_stats_k
 from rl_lib.networks.factory import Network
 from rl_lib.networks.mixed_precision import resolve_cnn_autocast_dtype
 from rl_lib.run_config import RunConfig, load_config
-from rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsSink
 from rl_lib.tracking.verbosity import filter_loggers
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ def evaluate_checkpoint(
     episodes: int = 5,
     record_video: bool = False,
     num_envs: int = 1,
-    metrics_loggers: list[MetricsLogger] | None = None,
+    metrics_loggers: list[MetricsSink] | None = None,
 ) -> list[float]:
     """Evaluate a local network state-dict checkpoint.
 
@@ -87,7 +87,7 @@ def _evaluate_configured_policy(
     config: RunConfig,
     episodes: int,
     num_envs: int,
-    metrics_loggers: list[MetricsLogger],
+    metrics_loggers: list[MetricsSink],
     record_video: bool,
     scope: str,
     checkpoint_loader: LocalCheckpointLoader | MLflowCheckpointLoader | None = None,

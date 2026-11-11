@@ -12,7 +12,7 @@ from rl_lib.envs.make_env import make_env
 from rl_lib.evaluation.inference import log_evaluation_results, run_inference
 from rl_lib.evaluation.runtime import _episode_stats_key
 from rl_lib.run_config import EvaluationCallbackSettings
-from rl_lib.tracking.base import MetricsLogger
+from rl_lib.tracking.sinks.base import MetricsSink
 from rl_lib.training.callbacks.base import Callback
 
 
@@ -36,7 +36,7 @@ class EvaluationCallback(Callback):
     def __init__(
         self,
         agent: Agent,
-        metrics_loggers: list[MetricsLogger],
+        metrics_loggers: list[MetricsSink],
         config: EvaluationCallbackSettings,
     ):
         """Initialize evaluation callback.

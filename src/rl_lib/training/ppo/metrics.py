@@ -18,3 +18,16 @@ def _tensor_metrics_to_scalars(metrics: dict[str, T.Tensor]) -> dict[str, float]
         values = T.stack([metrics[key].detach().reshape(()) for key in keys])
         scalars = values.cpu().tolist()
     return dict(zip(keys, scalars, strict=True))
+
+
+def calc_approx_kl_divergence(log_ratios: T.Tensor) -> T.Tensor:
+    """Compute the approximate KL divergence between two distributions.
+
+    Args:
+        log_ratios: Log probability ratios between the new and old policies.
+
+    Returns:
+        Approximate KL divergence as a scalar tensor.
+    """
+    log_ratios_total = log_ratios.sum(-1)
+    return (log_ratios_total.exp() - 1 - log_ratios_total).mean()

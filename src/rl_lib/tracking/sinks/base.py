@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 
-class MetricsLogger(ABC):
+class MetricsSink(ABC):
     """Base interface for experiment tracking backends.
 
     All methods are no-op by default; subclasses implement backend-specific
@@ -24,7 +24,6 @@ class MetricsLogger(ABC):
             metrics: Dict of metric name -> value.
             step: Global step (e.g., environment steps or minibatch count).
         """
-        ...
 
     def log_parameters(self, parameters: dict[str, Any]) -> None:
         """Log hyperparameters/configuration (optional).
@@ -32,16 +31,16 @@ class MetricsLogger(ABC):
         Args:
             parameters: Dict of parameter name -> value.
         """
-        pass
 
-    def log_config(self, config: dict, artifact_file: str = "config/run_config.yaml") -> None:
+    def log_config(
+        self, config: dict, artifact_file: str = "config/run_config.yaml"
+    ) -> None:
         """Log full configuration as an artifact (optional).
 
         Args:
             config: Full configuration dict.
             artifact_file: Path within artifact store.
         """
-        pass
 
     def log_evaluation(
         self,
@@ -60,7 +59,6 @@ class MetricsLogger(ABC):
             scope: Evaluation scope, such as ``final`` or ``periodic``.
             config_artifact: Run-relative path to the config used for evaluation.
         """
-        pass
 
     def log_model(
         self,
@@ -75,16 +73,16 @@ class MetricsLogger(ABC):
             artifact_path: Path within artifact store.
             registered_model_name: Optional name for model registry.
         """
-        pass
 
-    def log_state_dict(self, state_dict: dict, artifact_path: str = "checkpoints") -> None:
+    def log_state_dict(
+        self, state_dict: dict, artifact_path: str = "checkpoints"
+    ) -> None:
         """Log model state dict (optional).
 
         Args:
             state_dict: Model state dict.
             artifact_path: Path within artifact store.
         """
-        pass
 
     def log_artifact(self, local_path: str, artifact_path: str | None = None) -> None:
         """Log a local file as an artifact (optional).
@@ -93,4 +91,3 @@ class MetricsLogger(ABC):
             local_path: Path to local file.
             artifact_path: Destination path in artifact store.
         """
-        pass
