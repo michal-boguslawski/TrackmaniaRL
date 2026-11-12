@@ -16,8 +16,8 @@ class FrameStackWrapperSettings(StrictModel):
     name: Literal["frame_stack"] = Field(
         default="frame_stack", description="Select the frame-stack wrapper."
     )
-    stack_size: PositiveInt = Field(
-        description="Number of consecutive frames to stack."
+    stack_size: PositiveInt | None = Field(
+        default=None, description="Number of consecutive frames to stack."
     )
     frame_padding_type: Literal["reset", "zero"] = Field(
         default="reset", description="How to pad the initial observation history."

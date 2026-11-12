@@ -6,7 +6,7 @@ Maps temporal encoding features to a scalar state value estimate.
 import torch as T
 from torch import nn
 
-from rl_lib.networks.config import VCriticConfig
+from rl_lib.networks.settings.critic import VCriticConfig
 from rl_lib.networks.utils import init_layer, make_activation
 
 

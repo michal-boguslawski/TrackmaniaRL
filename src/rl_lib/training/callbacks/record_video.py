@@ -45,7 +45,6 @@ class RecordVideoCallback(Callback):
             metrics_loggers: Tracking backends for video/metric logging.
             config: Video settings including environment, interval, seed.
         """
-        self.agent = agent
         self.cfg = config
         self._loggers = metrics_loggers
         # SAME_STEP autoreset resets the wrapped environment on the terminal

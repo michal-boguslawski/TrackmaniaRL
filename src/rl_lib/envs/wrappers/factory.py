@@ -17,7 +17,7 @@ def make_wrapper(settings: WrapperSettings) -> Callable[..., Wrapper]:
     wrapper_cls = WRAPPERS_REGISTRY.get(settings.name)
     if wrapper_cls is None:
         raise ValueError(f"Unknown wrapper name: {settings.name}")
-    options = settings.model_dump(exclude={"name"})
+    options = settings.model_dump(exclude={"name"}, exclude_none=True)
     return partial(wrapper_cls, **options)
 
 

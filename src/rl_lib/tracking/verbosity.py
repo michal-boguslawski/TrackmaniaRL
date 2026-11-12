@@ -115,8 +115,8 @@ def filter_metrics(
 
 
 def filter_loggers(
-    loggers: Iterable[MetricsLogger], verbosity: int | Verbosity
-) -> list[MetricsLogger]:
+    loggers: Iterable[MetricsSink], verbosity: int | Verbosity
+) -> list[MetricsSink]:
     """Wrap loggers so each one only receives metrics allowed at ``verbosity``.
 
     Loggers that already filter are left alone, so composing this with an
@@ -127,18 +127,18 @@ def filter_loggers(
         verbosity: Metric detail level (0, 1, or 2).
 
     Returns:
-        List of loggers, each wrapped in a ``VerbosityMetricsLogger``.
+        List of loggers, each wrapped in a ``VerbosityMetricsSink``.
     """
     level = as_verbosity(verbosity)
     return [
         logger
-        if isinstance(logger, VerbosityMetricsLogger) or level == Verbosity.ALL
-        else VerbosityMetricsLogger(logger, level)
+        if isinstance(logger, VerbosityMetricsSink) or level == Verbosity.ALL
+        else VerbosityMetricsSink(logger, level)
         for logger in loggers
     ]
 
 
-class VerbosityMetricsLogger(MetricsSink):
+class VerbosityMetricsSink(MetricsSink):
     """MetricsLogger decorator that drops metrics above the verbosity budget.
 
     Every method other than ``log_metrics`` is delegated untouched, so
@@ -151,7 +151,7 @@ class VerbosityMetricsLogger(MetricsSink):
         verbosity: Resolved verbosity level.
     """
 
-    def __init__(self, logger: MetricsLogger, verbosity: int | Verbosity):
+    def __init__(self, sink: MetricsSink, verbosity: int | Verbosity):
         """Initialize the decorator.
 
         Args:
@@ -161,24 +161,24 @@ class VerbosityMetricsLogger(MetricsSink):
         Raises:
             ValueError: If verbosity is not one of 0, 1, or 2.
         """
-        self.logger = logger
+        self.sink = sink
         self.verbosity = as_verbosity(verbosity)
 
     def log_metrics(self, metrics: dict[str, float], step: int) -> None:
         """Forward only the metrics allowed at this verbosity."""
         selected = filter_metrics(metrics, self.verbosity)
         if selected:
-            self.logger.log_metrics(selected, step)
+            self.sink.log_metrics(selected, step)
 
     def log_parameters(self, parameters: dict[str, Any]) -> None:
         """Delegate parameter logging; parameters are not metrics."""
-        self.logger.log_parameters(parameters)
+        self.sink.log_parameters(parameters)
 
     def log_config(
         self, config: dict, artifact_file: str = "config/run_config.yaml"
     ) -> None:
         """Delegate config artifact logging; configs are not metrics."""
-        self.logger.log_config(config, artifact_file)
+        self.sink.log_config(config, artifact_file)
 
     def log_evaluation(
         self,
@@ -189,7 +189,7 @@ class VerbosityMetricsLogger(MetricsSink):
         config_artifact: str = "config/run_config.yaml",
     ) -> None:
         """Delegate evaluation persistence; evaluation files are not metrics."""
-        self.logger.log_evaluation(episodes, summary, step, scope, config_artifact)
+        self.sink.log_evaluation(episodes, summary, step, scope, config_artifact)
 
     def log_model(
         self,
@@ -198,14 +198,14 @@ class VerbosityMetricsLogger(MetricsSink):
         registered_model_name: str | None = None,
     ) -> None:
         """Delegate model artifact logging."""
-        self.logger.log_model(model, artifact_path, registered_model_name)
+        self.sink.log_model(model, artifact_path, registered_model_name)
 
     def log_state_dict(
         self, state_dict: dict, artifact_path: str = "checkpoints"
     ) -> None:
         """Delegate state-dict artifact logging."""
-        self.logger.log_state_dict(state_dict, artifact_path)
+        self.sink.log_state_dict(state_dict, artifact_path)
 
     def log_artifact(self, local_path: str, artifact_path: str | None = None) -> None:
         """Delegate file artifact logging."""
-        self.logger.log_artifact(local_path, artifact_path)
+        self.sink.log_artifact(local_path, artifact_path)

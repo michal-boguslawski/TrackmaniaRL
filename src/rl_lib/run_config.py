@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from pydantic import Field, PositiveInt, model_validator
 
 from rl_lib.config_base import StrictModel
+from rl_lib.envs.settings.env import EnvironmentSettings
 from rl_lib.envs.settings.wrappers import (
     RecordVideoWrapperSettings,
     WrapperSettings,
@@ -49,19 +50,6 @@ class RuntimeSettings(StrictModel):
     total_steps_unit: str = "vector-environment steps"
     mlflow_experiment_name: str | None = None
     mlflow_run_name: str | None = None
-
-
-class EnvironmentSettings(StrictModel):
-    id: str = "CarRacing-v3"
-    num_envs: PositiveInt = 8
-    skip: PositiveInt = 2
-    continuous: bool = True
-    normalize_rewards: bool = True
-    reward_normalization_gamma: float = Field(default=0.99, ge=0, le=1)
-    reward_normalization_epsilon: float = Field(default=1e-8, gt=0)
-    vectorization_mode: Literal["async", "sync"] = "async"
-    autoreset_mode: Literal["same_step", "next_step", "disabled"] = "same_step"
-    wrappers: list[WrapperSettings] = Field(default_factory=lambda: [list])
 
 
 class TrackingSettings(StrictModel):

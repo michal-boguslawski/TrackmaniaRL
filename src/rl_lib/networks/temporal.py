@@ -7,7 +7,7 @@ via a single full-length Conv1d kernel, with optional LayerNorm.
 import torch as T
 from torch import nn
 
-from rl_lib.networks.config import TemporalConfig
+from rl_lib.networks.settings.temporal import TemporalConfig
 
 
 class TemporalCNN1D(nn.Module):

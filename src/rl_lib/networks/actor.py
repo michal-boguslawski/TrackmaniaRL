@@ -7,12 +7,11 @@ This provides bounded continuous actions with differentiable log-prob gradients.
 
 import torch as T
 import torch.nn.functional as F
-from pydantic import Field
 from torch import nn
 from torch.distributions import Beta, Distribution, TransformedDistribution
 from torch.distributions.transforms import AffineTransform, TanhTransform
 
-from rl_lib.networks.config import ActorConfig
+from rl_lib.networks.settings.actor import ActorConfig
 from rl_lib.networks.utils import init_layer, make_activation
 
 

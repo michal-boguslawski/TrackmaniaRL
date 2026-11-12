@@ -2,7 +2,7 @@ import torch as T
 from torch import nn
 
 from rl_lib.networks.cnn import CNN
-from rl_lib.networks.config import EncoderConfig
+from rl_lib.networks.settings.encoder import EncoderConfig
 from rl_lib.networks.temporal import TemporalCNN1D
 
 

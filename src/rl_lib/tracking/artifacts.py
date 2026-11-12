@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import re
 
-
 STEP_DIGITS = 3
 _STEP_SEGMENT = re.compile(r"^(step_)(\d+)$")
 

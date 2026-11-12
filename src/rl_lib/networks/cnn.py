@@ -9,7 +9,7 @@ import json
 import torch as T
 from torch import nn
 
-from rl_lib.networks.config import CNNConfig
+from rl_lib.networks.settings.cnn import CNNConfig
 from rl_lib.networks.utils import init_layer, make_activation
 
 

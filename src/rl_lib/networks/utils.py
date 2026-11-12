@@ -6,7 +6,7 @@ for consistent network construction across modules.
 
 from torch import nn
 
-from rl_lib.networks.config import LinearLayerConfig
+from rl_lib.networks.settings.layer import LinearLayerConfig
 
 
 def init_layer(
