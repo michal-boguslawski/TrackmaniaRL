@@ -1,5 +1,5 @@
-from rl_lib.training.settings.base import StrictModel
+from rl_lib.config_base import StrictModel
 
 
-class NetworkSettings(StrictModel):
+class NetworkConfig(StrictModel):
     """Network architecture settings for the algorithm."""

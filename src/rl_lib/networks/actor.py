@@ -11,7 +11,7 @@ from torch import nn
 from torch.distributions import Beta, Distribution, TransformedDistribution
 from torch.distributions.transforms import AffineTransform, TanhTransform
 
-from rl_lib.networks.settings.actor import ActorConfig
+from rl_lib.networks.settings.actor import ActorSettings
 from rl_lib.networks.utils import init_layer, make_activation
 
 
@@ -57,14 +57,14 @@ class Actor(nn.Module):
         self,
         action_dim: int,
         in_dim: int,
-        config: ActorConfig,
+        settings: ActorSettings,
         action_low: list[float] | None = None,
         action_high: list[float] | None = None,
     ):
         super().__init__()
         self.action_dim = action_dim
         self.in_dim = in_dim
-        self.cfg = config
+        self.cfg = settings
         if len(action_low) != action_dim or len(action_high) != action_dim:
             raise ValueError(
                 f"actor action bounds must each have action_dim={action_dim} values; "

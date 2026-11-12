@@ -17,7 +17,7 @@ class RecordEpisodeStatisticsWrapperSettings(StrictModel):
         default="record_episode_stats",
         description="Select the episode-statistics wrapper.",
     )
-    stats_buffer_length: PositiveInt = Field(
+    buffer_length: PositiveInt = Field(
         default=100, description="Number of recent episode results to retain."
     )
     stats_key: str = Field(

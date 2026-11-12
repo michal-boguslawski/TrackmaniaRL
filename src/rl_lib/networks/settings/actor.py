@@ -5,10 +5,10 @@ from pydantic import (
 )
 
 from rl_lib.config_base import StrictModel
-from rl_lib.networks.settings.layer import LinearLayerConfig
+from rl_lib.networks.settings.layer import LinearLayerSettings
 
 
-class ActorConfig(StrictModel):
+class ActorSettings(StrictModel):
     """Beta-distribution actor configuration.
 
     Attributes:
@@ -22,9 +22,9 @@ class ActorConfig(StrictModel):
         deterministic_distribution_temperature: Temperature for deterministic eval.
     """
 
-    hidden_layers: list[LinearLayerConfig] = Field(
+    hidden_layers: list[LinearLayerSettings] = Field(
         default_factory=lambda: [
-            LinearLayerConfig(out_dim=256, activation="gelu"),
+            LinearLayerSettings(out_dim=256, activation="gelu"),
         ]
     )
     output_init_gain: PositiveFloat = 0.01

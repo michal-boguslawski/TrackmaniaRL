@@ -8,7 +8,7 @@ from rl_lib.tracking.verbosity import Verbosity, as_verbosity
 from rl_lib.training.ppo.config.loss import (
     PPOActorLossSettings,
     PPOCriticLossSettings,
-    PPOLossSettings,
+    PPOLossConfig,
 )
 from rl_lib.training.ppo.metrics import calc_approx_kl_divergence
 from rl_lib.training.settings.loss import (
@@ -46,7 +46,7 @@ class PPOLosses:
 
     def __init__(
         self,
-        cfg: PPOLossSettings,
+        cfg: PPOLossConfig,
         verbosity: int | Verbosity = Verbosity.ALL,
     ):
         """Initialize loss evaluation for an agent.

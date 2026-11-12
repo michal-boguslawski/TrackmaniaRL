@@ -5,10 +5,10 @@ from pydantic import (
 )
 
 from rl_lib.config_base import StrictModel
-from rl_lib.networks.settings.layer import LinearLayerConfig
+from rl_lib.networks.settings.layer import LinearLayerSettings
 
 
-class VCriticConfig(StrictModel):
+class VCriticSettings(StrictModel):
     """Critic (value head) configuration.
 
     Attributes:
@@ -18,9 +18,9 @@ class VCriticConfig(StrictModel):
         output_bias: Include bias in output layer.
     """
 
-    hidden_layers: list[LinearLayerConfig] = Field(
+    hidden_layers: list[LinearLayerSettings] = Field(
         default_factory=lambda: [
-            LinearLayerConfig(out_dim=256, activation="gelu"),
+            LinearLayerSettings(out_dim=256, activation="gelu"),
         ]
     )
     output_init_gain: PositiveFloat = 1.0

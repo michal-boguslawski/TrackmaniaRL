@@ -6,7 +6,7 @@ from rl_lib.training.settings.network import NetworkSettings
 from rl_lib.training.settings.trainer import TrainerSettings
 
 
-class AlgorithmSettings(StrictModel):
+class AlgorithmConfig(StrictModel):
     name: Literal["ppo"]
     network: NetworkSettings
     trainer: TrainerSettings

@@ -21,7 +21,7 @@ class Encoder(nn.Module):
         self.cnn = CNN(observation_dim, self.cfg.cnn)
 
         self.sequence_encoder = TemporalCNN1D(
-            self.cfg.stack_size, in_dim=self.cnn.out_dim, config=self.cfg.temporal
+            self.cfg.stack_size, in_dim=self.cnn.out_dim, settings=self.cfg.temporal
         )
         self.register_buffer(
             "_divisor", T.tensor(self.cfg.observation_divisor), persistent=False
@@ -67,3 +67,7 @@ class Encoder(nn.Module):
     @property
     def out_dim(self) -> int:
         return self.cnn.out_dim
+
+    @property
+    def stack_size(self) -> int:
+        return self.cfg.stack_size

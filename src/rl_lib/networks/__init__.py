@@ -12,24 +12,12 @@ Provides:
 from rl_lib.networks.actor import Actor, StableTanhTransform
 from rl_lib.networks.cnn import CNN
 from rl_lib.networks.critic import VCritic
-from rl_lib.networks.settings.actor import ActorConfig
-from rl_lib.networks.settings.cnn import CNNConfig
-from rl_lib.networks.settings.critic import VCriticConfig
-from rl_lib.networks.settings.layer import ConvLayerConfig, LinearLayerConfig
-from rl_lib.networks.settings.temporal import TemporalConfig
 from rl_lib.networks.temporal import TemporalCNN1D
 
 __all__ = [
     "CNN",
     "Actor",
-    "ActorConfig",
-    "CNNConfig",
-    "ConvLayerConfig",
-    "LinearLayerConfig",
-    "NetworkConfig",
     "StableTanhTransform",
     "TemporalCNN1D",
-    "TemporalConfig",
     "VCritic",
-    "VCriticConfig",
 ]

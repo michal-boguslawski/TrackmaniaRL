@@ -3,7 +3,6 @@
 from collections.abc import Callable
 from logging import getLogger
 
-import numpy as np
 import torch as T
 
 from rl_lib.training.ppo.minibatches import get_iid_minibatches

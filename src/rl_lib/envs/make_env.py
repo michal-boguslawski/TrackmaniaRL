@@ -6,7 +6,7 @@ wrappers in order and optionally adding reward normalization.
 
 import torch as T
 from gymnasium import make_vec
-from gymnasium.vector import AutoresetMode, VectorEnv
+from gymnasium.vector import VectorEnv
 from gymnasium.wrappers.vector import NormalizeReward, NumpyToTorch
 
 from rl_lib.envs.settings.env import EnvironmentSettings

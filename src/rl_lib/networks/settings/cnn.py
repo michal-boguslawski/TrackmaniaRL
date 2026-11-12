@@ -6,10 +6,10 @@ from pydantic import (
 )
 
 from rl_lib.config_base import StrictModel
-from rl_lib.networks.settings.layer import ConvLayerConfig, LinearLayerConfig
+from rl_lib.networks.settings.layer import ConvLayerSettings, LinearLayerSettings
 
 
-class CNNConfig(StrictModel):
+class CNNSettings(StrictModel):
     """Convolutional encoder configuration.
 
     Attributes:
@@ -21,18 +21,18 @@ class CNNConfig(StrictModel):
         output_init_bias: Bias for final Linear layer init.
     """
 
-    conv_layers: list[ConvLayerConfig] = Field(
+    conv_layers: list[ConvLayerSettings] = Field(
         default_factory=lambda: [
-            ConvLayerConfig(out_channels=32, kernel_size=8, stride=4),
-            ConvLayerConfig(out_channels=64, kernel_size=4, stride=2),
-            ConvLayerConfig(out_channels=128, kernel_size=3),
-            ConvLayerConfig(out_channels=128, kernel_size=3, stride=2),
+            ConvLayerSettings(out_channels=32, kernel_size=8, stride=4),
+            ConvLayerSettings(out_channels=64, kernel_size=4, stride=2),
+            ConvLayerSettings(out_channels=128, kernel_size=3),
+            ConvLayerSettings(out_channels=128, kernel_size=3, stride=2),
         ]
     )
     adaptive_pool_size: PositiveInt = 3
-    hidden_layers: list[LinearLayerConfig] = Field(
+    hidden_layers: list[LinearLayerSettings] = Field(
         default_factory=lambda: [
-            LinearLayerConfig(out_dim=256),
+            LinearLayerSettings(out_dim=256),
         ]
     )
     out_dim: PositiveInt = 256

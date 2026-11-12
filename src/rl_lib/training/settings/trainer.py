@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import Field
 
 from rl_lib.config_base import StrictModel
-from rl_lib.training.settings.loss import LossSettings
+from rl_lib.training.settings.loss import LossConfig
 from rl_lib.training.settings.optimizer import OptimizerSettings
 from rl_lib.training.settings.scheduler import (
     CosineSchedulerSettings,
@@ -84,7 +84,7 @@ class TrainerSettings(StrictModel):
         minibatch_indexing_mode: Whether minibatch indices are IID or sequential.
     """
 
-    loss: LossSettings = Field(
+    loss: LossConfig = Field(
         ...,
         description="Algorithm-specific loss configuration.",
     )

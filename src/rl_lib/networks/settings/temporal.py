@@ -6,7 +6,7 @@ from pydantic import (
 from rl_lib.config_base import StrictModel
 
 
-class TemporalConfig(StrictModel):
+class TemporalSettings(StrictModel):
     """Temporal encoder (TemporalCNN1D) configuration.
 
     Attributes:

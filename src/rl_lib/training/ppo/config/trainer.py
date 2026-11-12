@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import Field
 
 from rl_lib.config_base import StrictModel
-from rl_lib.training.ppo.config.loss import PPOLossSettings
+from rl_lib.training.ppo.config.loss import PPOLossConfig
 from rl_lib.training.settings.optimizer import OptimizerSettings
 from rl_lib.training.settings.scheduler import (
     CosineSchedulerSettings,
@@ -84,8 +84,8 @@ class PPOTrainerSettings(StrictModel):
         minibatch_indexing_mode: Whether minibatch indices are IID or sequential.
     """
 
-    loss: PPOLossSettings = Field(
-        default_factory=PPOLossSettings,
+    loss: PPOLossConfig = Field(
+        default_factory=PPOLossConfig,
     )
     kl: KLControlSettings = Field(
         default_factory=KLControlSettings,

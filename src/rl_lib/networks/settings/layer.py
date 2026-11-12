@@ -9,7 +9,7 @@ from pydantic import (
 from rl_lib.config_base import StrictModel
 
 
-class ConvLayerConfig(StrictModel):
+class ConvLayerSettings(StrictModel):
     """Single Conv2d layer configuration.
 
     Attributes:
@@ -39,7 +39,7 @@ class ConvLayerConfig(StrictModel):
     init_bias: FiniteFloat = 0.0
 
 
-class LinearLayerConfig(StrictModel):
+class LinearLayerSettings(StrictModel):
     """Single Linear layer configuration.
 
     Attributes:

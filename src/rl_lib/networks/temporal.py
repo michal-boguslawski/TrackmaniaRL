@@ -7,7 +7,7 @@ via a single full-length Conv1d kernel, with optional LayerNorm.
 import torch as T
 from torch import nn
 
-from rl_lib.networks.settings.temporal import TemporalConfig
+from rl_lib.networks.settings.temporal import TemporalSettings
 
 
 class TemporalCNN1D(nn.Module):
@@ -23,11 +23,11 @@ class TemporalCNN1D(nn.Module):
         cfg (TemporalConfig): Configuration for output dim, bias, normalization.
     """
 
-    def __init__(self, stack_size: int, in_dim: int, config: TemporalConfig):
+    def __init__(self, stack_size: int, in_dim: int, settings: TemporalSettings):
         super().__init__()
         self.stack_size = stack_size
         self.in_dim = in_dim
-        self.cfg = config
+        self.cfg = settings
 
         self._encoder = nn.Conv1d(
             in_dim, self.cfg.out_dim, kernel_size=stack_size, bias=self.cfg.bias

@@ -11,7 +11,6 @@ from rl_lib.envs.settings.wrappers import WrapperSettings
 class EnvironmentSettings(StrictModel):
     id: str = "CarRacing-v3"
     num_envs: PositiveInt = 8
-    skip: PositiveInt = 2
     continuous: bool = True
     normalize_rewards: bool = True
     render_mode: str | None = None

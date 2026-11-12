@@ -10,13 +10,13 @@ from rl_lib.envs.settings.wrappers import (
     RecordVideoWrapperSettings,
     WrapperSettings,
 )
-
-# from rl_lib.training.ppo.config import PPONetworkConfig
+from rl_lib.training.ppo.config.network import PPONetworkConfig
 from rl_lib.training.settings import (
     CosineSchedulerSettings,
     LinearSchedulerSettings,
     TrainerSettings,
 )
+from rl_lib.training.settings.network import NetworkConfig
 
 
 class RunSettings(StrictModel):
@@ -186,7 +186,7 @@ class VideoCallbackSettings(StrictModel):
 class RunConfig(StrictModel):
     run: RunSettings = Field(default_factory=RunSettings)
     environment: EnvironmentSettings = Field(default_factory=EnvironmentSettings)
-    # network: NetworkSettings = Field(default_factory=PPONetworkConfig)
+    network: NetworkConfig = Field(default_factory=PPONetworkConfig)
     trainer: TrainerSettings = Field(default_factory=TrainerSettings)
     tracking: TrackingSettings = Field(default_factory=TrackingSettings)
     callbacks: list[CallbackSettings] = Field(default_factory=list)

@@ -46,7 +46,7 @@ class PPOTrainer:
         modules: ActorCritic,
         config: TrainerSettings,
         rollout_config: RolloutSettings,
-        ctx: BuildContext,
+        # ctx: BuildContext,
     ):
         """Initialize the PPO trainer.
 
@@ -67,7 +67,7 @@ class PPOTrainer:
         self.rollout_config = rollout_config
         self._optimizer = self._build_optimizer(modules)
         # self._scheduler = None
-        self.losses = PPOLosses(config.loss, ctx.verbosity)
+        self.losses = PPOLosses(config.loss)
         # self._callbacks = CallbackList(callbacks)
 
     def observe(self, t: Transition) -> None:

@@ -6,7 +6,7 @@ for consistent network construction across modules.
 
 from torch import nn
 
-from rl_lib.networks.settings.layer import LinearLayerConfig
+from rl_lib.networks.settings.layer import LinearLayerSettings
 
 
 def init_layer(
@@ -26,7 +26,7 @@ def init_layer(
     Returns:
         The initialized layer (for chaining).
     """
-    defaults = LinearLayerConfig(out_dim=1)
+    defaults = LinearLayerSettings(out_dim=1)
     gain = defaults.init_gain if gain is None else gain
     bias = defaults.init_bias if bias is None else bias
     nn.init.orthogonal_(layer.weight, gain)

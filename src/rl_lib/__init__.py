@@ -13,7 +13,7 @@ This package provides a PPO implementation with:
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
 
 # from rl_lib.networks.factory import Network
-from rl_lib.run_config import RunConfig
+# from rl_lib.run_config import RunConfig
 from rl_lib.training.ppo import PPOTrainer
 from rl_lib.training.rollout_collector import RolloutCollector
 
@@ -22,5 +22,5 @@ __all__ = [
     "RolloutBuffer",
     "RolloutCollector",
     "RolloutStep",
-    "RunConfig",
+    # "RunConfig",
 ]

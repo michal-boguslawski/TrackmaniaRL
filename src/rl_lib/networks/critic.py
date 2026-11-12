@@ -6,7 +6,7 @@ Maps temporal encoding features to a scalar state value estimate.
 import torch as T
 from torch import nn
 
-from rl_lib.networks.settings.critic import VCriticConfig
+from rl_lib.networks.settings.critic import VCriticSettings
 from rl_lib.networks.utils import init_layer, make_activation
 
 
@@ -18,10 +18,10 @@ class VCritic(nn.Module):
         cfg (CriticConfig): Configuration for hidden layers and initialization.
     """
 
-    def __init__(self, in_dim: int, config: VCriticConfig):
+    def __init__(self, in_dim: int, settings: VCriticSettings):
         super().__init__()
         self.in_dim = in_dim
-        self.cfg = config
+        self.cfg = settings
 
         hidden_layers = self.cfg.hidden_layers
         modules: list[nn.Module] = []

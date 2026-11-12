@@ -9,7 +9,7 @@ import json
 import torch as T
 from torch import nn
 
-from rl_lib.networks.settings.cnn import CNNConfig
+from rl_lib.networks.settings.cnn import CNNSettings
 from rl_lib.networks.utils import init_layer, make_activation
 
 
@@ -28,7 +28,7 @@ class CNN(nn.Module):
     def __init__(
         self,
         observation_dim: int,
-        config: CNNConfig,
+        config: CNNSettings,
     ):
         super().__init__()
         self.observation_dim = observation_dim
