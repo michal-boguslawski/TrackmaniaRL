@@ -16,27 +16,27 @@ import numpy as np
 import pytest
 import torch as T
 from rl_lib.agent import Agent
-
 from rl_lib.envs.settings.settings import (
     RecordEpisodeStatisticsWrapperSettings,
     RecordVideoWrapperSettings,
 )
+
 from rl_lib.run_config import (
     EnvironmentSettings,
     EpisodeStatisticsCallbackSettings,
     MetricsCallbackSettings,
     VideoCallbackSettings,
 )
-from rl_lib.tracking.sinks.base import MetricsSink
-from rl_lib.training.callbacks.base import (
+from rl_lib.tracking.callbacks.base import (
     Callback,
     CallbackList,
 )
-from rl_lib.training.callbacks.metrics_logger import MetricsLoggingCallback
-from rl_lib.training.callbacks.params_logger import ParamsLoggingCallback
-from rl_lib.training.callbacks.record_statistics import RecordStatisticLoggerCallback
-from rl_lib.training.callbacks.record_video import RecordVideoCallback
-from rl_lib.training.callbacks.utils import stop_video_recording
+from rl_lib.tracking.callbacks.metrics_logger import MetricsLoggingCallback
+from rl_lib.tracking.callbacks.params_logger import ParamsLoggingCallback
+from rl_lib.tracking.callbacks.record_statistics import RecordStatisticLoggerCallback
+from rl_lib.tracking.callbacks.record_video import RecordVideoCallback
+from rl_lib.tracking.callbacks.utils import stop_video_recording
+from rl_lib.tracking.sinks.base import MetricsSink
 
 
 class FakeLogger(MetricsSink):

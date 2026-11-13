@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 import torch as T
 
+from rl_lib.tracking.callbacks.model_checkpoint import ModelCheckpointCallback
 from rl_lib.tracking.sinks.base import MetricsSink
-from rl_lib.training.callbacks.model_checkpoint import ModelCheckpointCallback
 
 
 class _RecordingLogger(MetricsSink):

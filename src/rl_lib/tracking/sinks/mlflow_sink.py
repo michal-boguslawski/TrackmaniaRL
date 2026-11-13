@@ -7,7 +7,7 @@ mapping (FINISHED/KILLED/FAILED).
 
 import socket
 import uuid
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from typing import Self
 
 import mlflow

@@ -15,12 +15,11 @@ from gymnasium import spaces
 from gymnasium.vector import AutoresetMode
 
 from rl_lib.buffers.rollout_buffer import RolloutBuffer
-from rl_lib.training.callbacks.base import Callback
-from rl_lib.training.rollout_collector import RolloutCollector
 from rl_lib.run_config import RolloutSettings
+from rl_lib.tracking.callbacks.base import Callback
 from rl_lib.training.ppo.trainer import PPOTrainer
+from rl_lib.training.rollout_collector import RolloutCollector
 from rl_lib.training.settings import TrainerSettings
-
 
 OBSERVATION_SHAPE = (96, 96, 1)
 NUM_ENVS = 2
@@ -41,7 +40,7 @@ class _CountingEnv(gym.Env):
         self._episode_reward = 0.0
 
     def _observation(self) -> np.ndarray:
-        value = (self._t % 255)
+        value = self._t % 255
         return np.full(OBSERVATION_SHAPE, value, dtype=np.uint8)
 
     def reset(self, *, seed=None, options=None):
@@ -76,9 +75,7 @@ class _SpyCallback(Callback):
         info = kwargs.get("info", {})
         # on an autoreset step the terminal payload is nested under final_info
         ticks = info.get("final_info", info).get("tick")
-        self.events.append(
-            ("env_step", kwargs.get("step"), np.asarray(ticks).tolist())
-        )
+        self.events.append(("env_step", kwargs.get("step"), np.asarray(ticks).tolist()))
 
     def on_rollout_end(self, *args, **kwargs):
         self.events.append(("rollout_end",))
@@ -121,7 +118,9 @@ def _flag(collector: RolloutCollector, key: str, step: int) -> T.Tensor:
     ]
 
 
-def _collector(vector_env, agent, buffer_size=3, minibatch_size=2, **env_kwargs) -> RolloutCollector:
+def _collector(
+    vector_env, agent, buffer_size=3, minibatch_size=2, **env_kwargs
+) -> RolloutCollector:
     """A collector whose buffer and collector share one RolloutSettings, so
     epochs/minibatch_size and gamma/gae_lambda cannot drift apart."""
     settings = RolloutSettings(
@@ -137,18 +136,16 @@ def _collector(vector_env, agent, buffer_size=3, minibatch_size=2, **env_kwargs)
 
 @pytest.fixture
 def collector(vector_env, agent) -> RolloutCollector:
-    return _collector(
-        vector_env, agent, buffer_size=ROLLOUT_SIZE, minibatch_size=4
-    )
+    return _collector(vector_env, agent, buffer_size=ROLLOUT_SIZE, minibatch_size=4)
 
 
 def test_run_collects_a_full_rollout_and_trains(collector: RolloutCollector, agent):
     collector.run(training_steps=ROLLOUT_SIZE)
 
     assert collector.buffer._counter == 0, "the counter is reset after training"
-    assert collector.trainer._step == (
-        1 + (ROLLOUT_SIZE - 1) * NUM_ENVS // 4
-    ) * 1, "one minibatch epoch of updates"
+    assert collector.trainer._step == (1 + (ROLLOUT_SIZE - 1) * NUM_ENVS // 4) * 1, (
+        "one minibatch epoch of updates"
+    )
 
 
 def test_run_keeps_collecting_until_the_buffer_fills(collector: RolloutCollector):
@@ -159,7 +156,9 @@ def test_run_keeps_collecting_until_the_buffer_fills(collector: RolloutCollector
     assert collector.buffer.is_full() is False
 
 
-def test_run_advances_optional_profiler_once_per_vector_step(collector: RolloutCollector):
+def test_run_advances_optional_profiler_once_per_vector_step(
+    collector: RolloutCollector,
+):
     class ProfilerSpy:
         def __init__(self):
             self.steps = 0
@@ -173,14 +172,14 @@ def test_run_advances_optional_profiler_once_per_vector_step(collector: RolloutC
     assert profiler.steps == 3
 
 
-def test_profiled_run_records_named_compute_and_transfer_regions(
-    vector_env, agent
-):
+def test_profiled_run_records_named_compute_and_transfer_regions(vector_env, agent):
     """The trace is only useful if the per-step and per-update work is split
     into named regions, including the host/device copies, so the cost split
     between policy inference, environment waiting, transfers, and the PPO
     update is readable in a trace viewer."""
-    collector = _collector(vector_env, agent, buffer_size=ROLLOUT_SIZE, minibatch_size=4)
+    collector = _collector(
+        vector_env, agent, buffer_size=ROLLOUT_SIZE, minibatch_size=4
+    )
     profiler = T.profiler.profile(activities=[T.profiler.ProfilerActivity.CPU])
     with profiler:
         collector.run(training_steps=ROLLOUT_SIZE, profiler=profiler)
@@ -246,7 +245,9 @@ def test_run_drives_every_callback_hook(collector: RolloutCollector):
     assert any(key.startswith("network.") for key in config)
 
 
-def test_env_step_callbacks_see_the_environment_step_counter(collector: RolloutCollector):
+def test_env_step_callbacks_see_the_environment_step_counter(
+    collector: RolloutCollector,
+):
     callback = _SpyCallback()
     collector._callbacks = type(collector._callbacks)([callback])
 
@@ -255,7 +256,12 @@ def test_env_step_callbacks_see_the_environment_step_counter(collector: RolloutC
     # the env's horizon is 3 and it autoresets, so the counters cycle 1, 2, 3
     seen = [event[2] for event in callback.events if event[0] == "env_step"]
     assert seen == [[1, 1], [2, 2], [3, 3], [1, 1]]
-    assert [event[1] for event in callback.events if event[0] == "env_step"] == [0, 1, 2, 3]
+    assert [event[1] for event in callback.events if event[0] == "env_step"] == [
+        0,
+        1,
+        2,
+        3,
+    ]
 
 
 def test_truncation_bootstraps_from_the_final_observation(vector_env, agent):
@@ -317,9 +323,10 @@ def test_update_rebuilds_the_same_temporal_masks_as_collection(
         for env in range(NUM_ENVS):
             window = batch["dones"][env, transition : transition + stack_size]
             rebuilt = window.logical_not() & (window.flip(0).cumsum(0).flip(0) > 0)
-            T.testing.assert_close(
-                rebuilt, collected[env], atol=0, rtol=0
-            ), f"env {env}, transition {transition}"
+            (
+                T.testing.assert_close(rebuilt, collected[env], atol=0, rtol=0),
+                f"env {env}, transition {transition}",
+            )
 
     # the horizon is crossed inside this rollout, so the comparison is not vacuous
     assert any(mask.any() for mask in masks), "no frame was ever masked out"
@@ -359,7 +366,9 @@ def test_incomplete_final_observation_mask_raises(vector_env, agent, monkeypatch
         collector.run(training_steps=2)
 
 
-def test_config_merges_the_buffer_trainer_and_network_settings(collector: RolloutCollector):
+def test_config_merges_the_buffer_trainer_and_network_settings(
+    collector: RolloutCollector,
+):
     config = collector.config()
 
     assert config["epochs"] == 1

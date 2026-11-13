@@ -19,21 +19,21 @@ import argparse
 from collections import defaultdict
 
 import torch as T
-
 from rl_lib.agent import Agent
+from rl_lib.networks.factory import Network
+
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
 from rl_lib.networks.config import (
     ActorConfig,
     CNNConfig,
-    CriticConfig,
     ConvLayerConfig,
+    CriticConfig,
     LinearLayerConfig,
     NetworkConfig,
     TemporalConfig,
 )
-from rl_lib.networks.factory import Network
 from rl_lib.run_config import AgentSettings, RolloutSettings
-from rl_lib.training.callbacks.base import Callback
+from rl_lib.tracking.callbacks.base import Callback
 from rl_lib.training.ppo.trainer import PPOTrainer
 from rl_lib.training.settings import TrainerSettings
 
@@ -85,8 +85,12 @@ def _tiny_network_config() -> NetworkConfig:
             out_dim=8,
         ),
         temporal=TemporalConfig(out_dim=8),
-        actor=ActorConfig(hidden_layers=[LinearLayerConfig(out_dim=8, activation="gelu")]),
-        critic=CriticConfig(hidden_layers=[LinearLayerConfig(out_dim=8, activation="gelu")]),
+        actor=ActorConfig(
+            hidden_layers=[LinearLayerConfig(out_dim=8, activation="gelu")]
+        ),
+        critic=CriticConfig(
+            hidden_layers=[LinearLayerConfig(out_dim=8, activation="gelu")]
+        ),
     )
 
 
@@ -122,7 +126,9 @@ def emitted_metric_names() -> list[str]:
         stack_size=STACK_SIZE,
         config=_tiny_network_config(),
     )
-    agent = Agent(network=network, device="cpu", config=AgentSettings(stack_size=STACK_SIZE))
+    agent = Agent(
+        network=network, device="cpu", config=AgentSettings(stack_size=STACK_SIZE)
+    )
     capture = _MetricCapture()
     trainer = PPOTrainer(agent, TrainerSettings(), callbacks=[capture], verbosity=2)
     trainer.train(_collect_rollout(agent), epochs=1, minibatch_size=2, training_step=0)

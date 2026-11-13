@@ -10,11 +10,11 @@ from torch.profiler import record_function
 
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
 from rl_lib.policy.masks import episode_mask
+from rl_lib.tracking.callbacks.base import CallbackList
 
 # from rl_lib.run_config import RolloutSettings, RunSettings
 from rl_lib.tracking.verbosity import as_verbosity, is_core_loss
 from rl_lib.training.base import BuildContext
-from rl_lib.training.callbacks.base import CallbackList
 from rl_lib.training.ppo.config.trainer import PPOTrainerSettings
 from rl_lib.training.ppo.losses import PPOLosses
 from rl_lib.training.ppo.metrics import _tensor_metrics_to_scalars
@@ -79,7 +79,7 @@ class PPOTrainer:
             )
         )
 
-    def maybe_update(self, global_step: int) -> None:
+    def maybe_update(self, global_step: int) -> bool:
         if self.rollout_buffer.is_full():
             batch = self.rollout_buffer.get()
             run_ppo_update_loop(
@@ -91,6 +91,8 @@ class PPOTrainer:
             )
 
             self.rollout_buffer.reset_counter()
+            return True
+        return False
 
     def train_step(
         self,

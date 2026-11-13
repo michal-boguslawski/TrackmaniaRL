@@ -12,12 +12,11 @@ from rl_lib.envs.settings.wrappers import (
     RecordVideoWrapperSettings,
     WrapperSettings,
 )
+from rl_lib.tracking.config.metrics_logger import TrackingSettings
 from rl_lib.training.ppo.config.algorithm import PPOAlgorithmConfig
 
 
 class RunSettings(StrictModel):
-    algorithm: str
-    name: str
     total_steps: PositiveInt = 3_000_000  # vector-environment steps
     seed: int = Field(default=1, ge=0, le=2**32 - 1)
     device: str = "auto"
@@ -48,33 +47,6 @@ class RuntimeSettings(StrictModel):
     total_steps_unit: str = "vector-environment steps"
     mlflow_experiment_name: str | None = None
     mlflow_run_name: str | None = None
-
-
-class TrackingSettings(StrictModel):
-    """Which scalars reach the tracking backends.
-
-    Attributes:
-        console: Enable the console metrics logger.
-        mlflow: Enable the MLflow tracking backend.
-        local_artifacts: Enable local artifact logging. Artifacts are stored in logs folder.
-        experiment_name: MLflow experiment (defaults to the environment id).
-        run_name: MLflow run name (defaults to "<run name>/<session id>").
-        log_system_metrics: Let MLflow sample host metrics; only honoured at
-            ``verbosity`` 2, since system metrics are diagnostics.
-        verbosity: Metric detail level: 0 logs no metrics, 1 logs only the
-            core training losses, 2 logs every metric.
-    """
-
-    console: bool = True
-    mlflow: bool = True
-    local_artifacts: bool = False
-    experiment_name: str | None = None
-    run_name: str | None = None
-    log_system_metrics: bool = True
-    verbosity: Literal[0, 1, 2] = Field(
-        default=2,
-        description="Metric detail: 0 none, 1 core training losses only, 2 everything.",
-    )
 
 
 class CheckpointsCallbackConfig(StrictModel):
@@ -143,11 +115,6 @@ class MetricsCallbackSettings(StrictModel):
     granularity: Literal["minibatch", "epoch", "batch"]
 
 
-class EpisodeStatisticsCallbackSettings(StrictModel):
-    mode: Literal["step", "mean"]
-    stats_key: str = Field(default="episode", min_length=1)
-
-
 class EvaluationCallbackSettings(StrictModel):
     """Resolved settings for scheduled and final policy evaluation."""
 
@@ -186,7 +153,6 @@ class RunConfig(StrictModel):
     environment: EnvironmentSettings = Field(default_factory=EnvironmentSettings)
     algorithm: PPOAlgorithmConfig = Field(default_factory=PPOAlgorithmConfig)
     tracking: TrackingSettings = Field(default_factory=TrackingSettings)
-    # callbacks: list[CallbackSettings] = Field(default_factory=list)
     # runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
 
 

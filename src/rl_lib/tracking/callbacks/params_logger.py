@@ -4,8 +4,8 @@ Logs the collector config (merged buffer/trainer/network settings) and
 optionally the full run config dict to all metrics loggers.
 """
 
+from rl_lib.tracking.callbacks.base import Callback
 from rl_lib.tracking.sinks.base import MetricsSink
-from rl_lib.training.callbacks.base import Callback
 
 
 class ParamsLoggingCallback(Callback):

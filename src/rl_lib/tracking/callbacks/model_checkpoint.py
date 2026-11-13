@@ -8,8 +8,8 @@ from collections.abc import Iterable
 from logging import getLogger
 
 from rl_lib.tracking.artifacts import step_artifact_path
+from rl_lib.tracking.callbacks.base import Callback
 from rl_lib.tracking.sinks.base import MetricsSink
-from rl_lib.training.callbacks.base import Callback
 
 logger = getLogger(__name__)
 

@@ -10,8 +10,8 @@ from gymnasium.vector import VectorEnv
 from tqdm import tqdm
 
 from rl_lib.policy.policy import Policy
+from rl_lib.tracking.callbacks.base import Callback, CallbackEvent, CallbackList
 from rl_lib.training.base import Trainer
-from rl_lib.training.callbacks.base import Callback, CallbackList
 from rl_lib.training.transitions import Transition
 
 
@@ -61,15 +61,16 @@ class RolloutCollector:
 
     def _on_rollout_start(self, *args, **kwargs):
         """Notify callbacks that rollout collection is starting."""
-        self._callbacks.on_rollout_start(*args, **kwargs)
+        self._callbacks.on_event(CallbackEvent.ROLLOUT_START, *args, **kwargs)
 
     def _on_env_step(self, *args, **kwargs):
         """Notify callbacks of each environment step."""
-        self._callbacks.on_env_step(*args, **kwargs)
+        self._callbacks.on_event(CallbackEvent.ENV_STEP, *args, **kwargs)
 
     def _on_rollout_end(self, *args, **kwargs):
         """Notify callbacks that rollout collection has ended."""
-        self._callbacks.on_rollout_end(*args, **kwargs)
+        self._callbacks.on_event(CallbackEvent.ROLLOUT_END, *args, **kwargs)
+        self._callbacks.flush(*args, **kwargs)
 
     def _callback_flush(self, *args, **kwargs):
         """Flush callback buffers (e.g., write metrics to MLflow)."""
@@ -112,11 +113,11 @@ class RolloutCollector:
             self._on_env_step(step=i, info=info)
             done = terminated | truncated
 
-            self.trainer.maybe_update(i)
-
-            self._callback_flush()
+            updated = self.trainer.maybe_update(i)
+            if updated:
+                self._callback_flush()
 
             if profiler is not None:
                 profiler.step()
 
-        self._on_rollout_end()
+        self._on_rollout_end(step=i)

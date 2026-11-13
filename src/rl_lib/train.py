@@ -29,6 +29,7 @@ from rl_lib.device import resolve_device
 from rl_lib.envs.make_env import make_env
 from rl_lib.logger_setup import setup_logging, shutdown_logging
 from rl_lib.run_config import RunConfig, load_config
+from rl_lib.tracking.builder import build_callbacks, build_metrics_logger
 from rl_lib.training.base import BuildContext
 from rl_lib.training.ppo.builder import build_ppo
 from rl_lib.training.rollout_collector import RolloutCollector
@@ -92,11 +93,14 @@ def run_training(
             action_space=env.single_action_space,
         )
         policy, trainer = build_ppo(build_ctx)
+        metrics_logger = build_metrics_logger(config.tracking, session_id)
+        callbacks = build_callbacks(metrics_logger, config.tracking.callbacks)
 
         collector = RolloutCollector(
             env,
             policy,
             trainer,
+            callbacks=callbacks,
             seed=config.run.seed,
         )
         logger.info(

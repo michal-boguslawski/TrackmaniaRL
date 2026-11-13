@@ -1,6 +1,4 @@
 run:
-  algorithm: ppo
-  name: ppo_carracing
   total_steps: 1000
   seed: 42
   device: cpu
@@ -59,9 +57,17 @@ algorithm:
       cnn_lr: 1e-4
 
     rollout:
-      steps_per_env: 32
+      steps_per_env: 512
 
     optimization:
-      minibatch_size: 16
-      epochs: 3
+      minibatch_size: 512
+      epochs: 1
       minibatch_indexing_mode: iid
+
+tracking:
+  console: true
+  mlflow: false
+  experiment_name: test
+  callbacks:
+    - name: episode_statistics
+      mode: step

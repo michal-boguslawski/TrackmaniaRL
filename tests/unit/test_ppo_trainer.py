@@ -10,11 +10,11 @@ import math
 import numpy as np
 import pytest
 import torch as T
-
 from rl_lib.agent import Agent
+
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
 from rl_lib.run_config import RolloutSettings, RunSettings
-from rl_lib.training.callbacks.base import Callback
+from rl_lib.tracking.callbacks.base import Callback
 from rl_lib.training.ppo.losses import PPOLosses
 from rl_lib.training.ppo.minibatches import get_iid_minibatches
 from rl_lib.training.ppo.trainer import PPOTrainer

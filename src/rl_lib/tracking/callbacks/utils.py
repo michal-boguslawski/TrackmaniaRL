@@ -1,8 +1,8 @@
 """Utility for stopping video recording in Gymnasium wrapper chains."""
 
-import gymnasium as gym
 from logging import getLogger
 
+import gymnasium as gym
 
 logger = getLogger(__name__)
 

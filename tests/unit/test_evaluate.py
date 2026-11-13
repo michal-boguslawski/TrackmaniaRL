@@ -19,8 +19,8 @@ from rl_lib.run_config import (
     EvaluationCallbackSettings,
     RunConfig,
 )
+from rl_lib.tracking.callbacks.evaluate import EvaluationCallback
 from rl_lib.tracking.sinks.base import MetricsSink
-from rl_lib.training.callbacks.evaluate import EvaluationCallback
 
 OBSERVATION_SHAPE = (96, 96, 1)
 

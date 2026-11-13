@@ -1,11 +1,11 @@
 from rl_lib.run_config import RunConfig
+from rl_lib.tracking.callbacks.evaluate import EvaluationCallback
+from rl_lib.tracking.callbacks.factory import create_callbacks
+from rl_lib.tracking.callbacks.metrics_logger import MetricsLoggingCallback
+from rl_lib.tracking.callbacks.model_checkpoint import ModelCheckpointCallback
+from rl_lib.tracking.callbacks.params_logger import ParamsLoggingCallback
+from rl_lib.tracking.callbacks.record_statistics import RecordStatisticLoggerCallback
 from rl_lib.tracking.sinks.base import MetricsSink
-from rl_lib.training.callbacks.evaluate import EvaluationCallback
-from rl_lib.training.callbacks.factory import create_callbacks
-from rl_lib.training.callbacks.metrics_logger import MetricsLoggingCallback
-from rl_lib.training.callbacks.model_checkpoint import ModelCheckpointCallback
-from rl_lib.training.callbacks.params_logger import ParamsLoggingCallback
-from rl_lib.training.callbacks.record_statistics import RecordStatisticLoggerCallback
 
 
 class _Logger(MetricsSink):
