@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import Field, FiniteFloat, PositiveFloat, model_validator
 
 from rl_lib.config_base import StrictModel
-from rl_lib.training.settings.loss import EntropySettings, LossConfig
+from rl_lib.training.settings.loss import EntropySettings
 
 
 class PPOActorLossSettings(StrictModel):
@@ -54,7 +54,7 @@ class PPOCriticLossSettings(StrictModel):
     huber_delta: PositiveFloat = Field(default=1.0, description="Huber loss delta.")
 
 
-class PPOLossConfig(LossConfig):
+class PPOLossConfig(StrictModel):
     """PPO actor, critic, entropy, and advantage objective settings."""
 
     actor_loss_cfg: PPOActorLossSettings = Field(

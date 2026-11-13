@@ -7,10 +7,11 @@ wrappers in order and optionally adding reward normalization.
 import torch as T
 from gymnasium import make_vec
 from gymnasium.vector import VectorEnv
-from gymnasium.wrappers.vector import NormalizeReward, NumpyToTorch
+from gymnasium.wrappers.vector import NormalizeReward
 
 from rl_lib.envs.settings.env import EnvironmentSettings
 from rl_lib.envs.wrappers.factory import make_wrapper
+from rl_lib.envs.wrappers.torch_conversion import NumpyToTorch
 
 
 def make_env(config: EnvironmentSettings, device: T.device | str = "cpu") -> VectorEnv:

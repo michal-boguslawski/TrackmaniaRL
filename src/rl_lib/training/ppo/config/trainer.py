@@ -1,15 +1,15 @@
 """Top-level trainer settings and compatibility migration."""
 
-from typing import Literal
-
 from pydantic import Field
 
+from rl_lib.buffers.rollout_buffer import RolloutSettings
 from rl_lib.config_base import StrictModel
 from rl_lib.training.ppo.config.loss import PPOLossConfig
+from rl_lib.training.ppo.config.optimization import PPOOptimizationSettings
 from rl_lib.training.settings.optimizer import OptimizerSettings
 from rl_lib.training.settings.scheduler import (
     CosineSchedulerSettings,
-    SchedulerSettings,
+    # SchedulerSettings,
 )
 
 
@@ -103,11 +103,12 @@ class PPOTrainerSettings(StrictModel):
         default_factory=OptimizerSettings,
         description="Optimizer implementation and parameter-group settings.",
     )
-    scheduler: SchedulerSettings = Field(
-        default_factory=CosineSchedulerSettings,
-        description="Learning-rate scheduler variant and its options.",
+    # scheduler: SchedulerSettings = Field(
+    #     default_factory=CosineSchedulerSettings,
+    #     description="Learning-rate scheduler variant and its options.",
+    # )
+    optimization: PPOOptimizationSettings = Field(
+        ..., description="Optimization settings"
     )
-    minibatch_indexing_mode: Literal["iid", "sequential"] = Field(
-        default="iid",
-        description="Minibatch sample ordering strategy.",
-    )
+
+    rollout: RolloutSettings = Field(..., description="Rollout settings")

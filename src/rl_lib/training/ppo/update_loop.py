@@ -5,18 +5,16 @@ from logging import getLogger
 
 import torch as T
 
+from rl_lib.training.ppo.config.optimization import PPOOptimizationSettings
 from rl_lib.training.ppo.minibatches import get_iid_minibatches
-from rl_lib.training.settings import TrainerSettings
 
 logger = getLogger(__name__)
 
 
 def run_ppo_update_loop(
     batch: dict[str, T.Tensor],
-    epochs: int,
-    minibatch_size: int,
     stack_size: int,
-    cfg: TrainerSettings,
+    optimization_settings: PPOOptimizationSettings,
     training_step: int,
     train_step: Callable[..., dict[str, float]],
     # current_update_step: Callable[[], int],
@@ -39,13 +37,13 @@ def run_ppo_update_loop(
         on_epoch: Callback dispatcher invoked after each epoch, including a
             partially completed epoch stopped by the KL threshold.
     """
-    for epoch in range(epochs):
+    for epoch in range(optimization_settings.epochs):
         epoch_kls = []
         minibatches = get_iid_minibatches(
             batch,
-            minibatch_size,
+            optimization_settings.minibatch_size,
             stack_size,
-            shuffle=cfg.minibatch_indexing_mode == "iid",
+            shuffle=optimization_settings.minibatch_indexing_mode == "iid",
         )
         for minibatch in minibatches:
             try:

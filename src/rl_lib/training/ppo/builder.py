@@ -8,31 +8,36 @@ from rl_lib.networks.encoder import Encoder
 from rl_lib.policy.history import History
 from rl_lib.policy.policy import Policy
 from rl_lib.training.base import BuildContext
+from rl_lib.training.ppo.config.network import PPONetworkConfig
 from rl_lib.training.ppo.modules import ActorCritic
 from rl_lib.training.ppo.trainer import PPOTrainer
 
 
 def build_ppo(ctx: BuildContext) -> tuple[Policy, PPOTrainer]:
     cfg, device = ctx.config, ctx.device
+    network_settings = cfg.algorithm.network
+    assert isinstance(network_settings, PPONetworkConfig)
 
     # 1. construct
     encoder = Encoder(
         observation_dim=ctx.obs_shape[-1],
-        config=cfg.network.encoder,
-        cnn_autocast_dtype=cfg.run.cnn_autocast,
+        config=network_settings.encoder,
+        # cnn_autocast_dtype=cfg.run.cnn_autocast,
     ).to(device)
     actor = Actor(
-        action_dim=ctx.action_shape[-1],
+        action_dim=ctx.action_space.shape[0],
         in_dim=encoder.out_dim,
-        config=cfg.network.actor,
+        settings=network_settings.actor,
+        action_low=ctx.action_space.low,
+        action_high=ctx.action_space.high,
     ).to(device)
-    critic = VCritic(encoder.out_dim, cfg.network.critic).to(device)
+    critic = VCritic(encoder.out_dim, network_settings.critic).to(device)
     modules = ActorCritic(
         encoder, actor, critic
     )  # nn.Module container, owns the parameters
 
     # 2. prepare weights, before anything copies or wraps them
-    load_pretrained(modules, cfg.run, device)
+    # load_pretrained(modules, cfg.run, device)
     if device.type == "cuda" and cfg.run.channels_last:
         encoder.cnn.to(memory_format=T.channels_last)
 
@@ -43,6 +48,6 @@ def build_ppo(ctx: BuildContext) -> tuple[Policy, PPOTrainer]:
         History(encoder.stack_size),
     )
     trainer = PPOTrainer(
-        modules, cfg.trainer, cfg.rollout, ctx
+        modules, cfg.algorithm.trainer
     )  # builds optimizer, buffer, scheduler
     return policy, trainer

@@ -8,23 +8,18 @@ from torch.optim import Adam, AdamW, Optimizer
 from torch.optim.lr_scheduler import CosineAnnealingLR, ExponentialLR, LinearLR
 from torch.profiler import record_function
 
-from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutSettings, RolloutStep
+from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
 from rl_lib.policy.masks import episode_mask
 
 # from rl_lib.run_config import RolloutSettings, RunSettings
 from rl_lib.tracking.verbosity import as_verbosity, is_core_loss
 from rl_lib.training.base import BuildContext
 from rl_lib.training.callbacks.base import CallbackList
+from rl_lib.training.ppo.config.trainer import PPOTrainerSettings
 from rl_lib.training.ppo.losses import PPOLosses
 from rl_lib.training.ppo.metrics import _tensor_metrics_to_scalars
 from rl_lib.training.ppo.modules import ActorCritic
 from rl_lib.training.ppo.update_loop import run_ppo_update_loop
-from rl_lib.training.settings import (
-    CosineSchedulerSettings,
-    ExponentialSchedulerSettings,
-    LinearSchedulerSettings,
-    TrainerSettings,
-)
 from rl_lib.training.transitions import Transition
 
 logger = getLogger(__name__)
@@ -44,8 +39,7 @@ class PPOTrainer:
     def __init__(
         self,
         modules: ActorCritic,
-        config: TrainerSettings,
-        rollout_config: RolloutSettings,
+        config: PPOTrainerSettings,
         # ctx: BuildContext,
     ):
         """Initialize the PPO trainer.
@@ -63,8 +57,8 @@ class PPOTrainer:
         self.cfg = config
         self.modules = modules
         self.stack_size = self.modules.encoder.stack_size
-        self.rollout_buffer = RolloutBuffer(rollout_config, self.stack_size)
-        self.rollout_config = rollout_config
+        self.rollout_config = config.rollout
+        self.rollout_buffer = RolloutBuffer(self.rollout_config, self.stack_size)
         self._optimizer = self._build_optimizer(modules)
         # self._scheduler = None
         self.losses = PPOLosses(config.loss)
@@ -90,10 +84,8 @@ class PPOTrainer:
             batch = self.rollout_buffer.get()
             run_ppo_update_loop(
                 batch=batch,
-                epochs=self.rollout_config.epochs,
-                minibatch_size=self.rollout_config.minibatch_size,
                 stack_size=self.stack_size,
-                cfg=self.cfg,
+                optimization_settings=self.cfg.optimization,
                 training_step=global_step,
                 train_step=self.train_step,
             )

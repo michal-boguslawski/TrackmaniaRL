@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 import torch as T
+from gymnasium.spaces.box import Box
 
 from rl_lib.run_config import RunConfig
 from rl_lib.training.callbacks.base import Callback
@@ -14,7 +15,7 @@ class BuildContext:
     device: T.device
     verbosity: Literal[0, 1, 2]
     obs_shape: tuple
-    action_shape: tuple
+    action_space: Box
 
 
 class Trainer(Protocol):

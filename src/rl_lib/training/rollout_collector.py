@@ -5,16 +5,11 @@ the rollout buffer, and the PPO trainer. Manages callbacks for logging,
 video recording, and checkpointing at the rollout level.
 """
 
-import json
-
-import numpy as np
 import torch as T
 from gymnasium.vector import VectorEnv
 from tqdm import tqdm
 
 from rl_lib.policy.policy import Policy
-
-# from rl_lib.run_config import RolloutSettings
 from rl_lib.training.base import Trainer
 from rl_lib.training.callbacks.base import Callback, CallbackList
 from rl_lib.training.transitions import Transition
@@ -113,19 +108,9 @@ class RolloutCollector:
                         "Vector environment truncated an episode without providing its final observation"
                     )
 
-                final_mask = info.get("_final_obs", info.get("_final_observation"))
-                truncated_indices = (
-                    transition.truncated.nonzero(as_tuple=True)[0].cpu().numpy()
-                )
-                if final_mask is not None:
-                    mask = np.asarray(final_mask, dtype=np.bool_)
-                    if not mask[truncated_indices].all():
-                        raise RuntimeError(
-                            "Vector environment did not provide a final observation for every truncated episode"
-                        )
-
             state = transition.next_obs
             self._on_env_step(step=i, info=info)
+            done = terminated | truncated
 
             self.trainer.maybe_update(i)
 

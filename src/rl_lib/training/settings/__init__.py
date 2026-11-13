@@ -9,21 +9,13 @@ from rl_lib.training.settings.scheduler import (
     NoSchedulerSettings,
     SchedulerSettings,
 )
-from rl_lib.training.settings.trainer import (
-    GradientSettings,
-    KLControlSettings,
-    TrainerSettings,
-)
 
 __all__ = [
     "CosineSchedulerSettings",
     "EntropySettings",
     "ExponentialSchedulerSettings",
-    "GradientSettings",
-    "KLControlSettings",
     "LinearSchedulerSettings",
     "NoSchedulerSettings",
     "OptimizerSettings",
     "SchedulerSettings",
-    "TrainerSettings",
 ]

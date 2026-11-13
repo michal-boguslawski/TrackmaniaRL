@@ -5,6 +5,7 @@ dimension, transformed via AffineTransform to the environment's action bounds.
 This provides bounded continuous actions with differentiable log-prob gradients.
 """
 
+import numpy as np
 import torch as T
 import torch.nn.functional as F
 from torch import nn
@@ -58,8 +59,8 @@ class Actor(nn.Module):
         action_dim: int,
         in_dim: int,
         settings: ActorSettings,
-        action_low: list[float] | None = None,
-        action_high: list[float] | None = None,
+        action_low: list[float] | np.ndarray | None = None,
+        action_high: list[float] | np.ndarray | None = None,
     ):
         super().__init__()
         self.action_dim = action_dim

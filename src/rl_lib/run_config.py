@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated, Literal
 
+import yaml
 from pydantic import Field, PositiveInt, model_validator
 
 from rl_lib.config_base import StrictModel
@@ -10,17 +12,12 @@ from rl_lib.envs.settings.wrappers import (
     RecordVideoWrapperSettings,
     WrapperSettings,
 )
-from rl_lib.training.ppo.config.network import PPONetworkConfig
-from rl_lib.training.settings import (
-    CosineSchedulerSettings,
-    LinearSchedulerSettings,
-    TrainerSettings,
-)
-from rl_lib.training.settings.network import NetworkConfig
+from rl_lib.training.ppo.config.algorithm import PPOAlgorithmConfig
 
 
 class RunSettings(StrictModel):
-    experiment_name: str | None = None
+    algorithm: str
+    name: str
     total_steps: PositiveInt = 3_000_000  # vector-environment steps
     seed: int = Field(default=1, ge=0, le=2**32 - 1)
     device: str = "auto"
@@ -34,6 +31,7 @@ class RunSettings(StrictModel):
             "NHWC observations already arrive with channels_last strides."
         ),
     )
+    log_config: str | None = None
 
 
 class RuntimeSettings(StrictModel):
@@ -186,8 +184,24 @@ class VideoCallbackSettings(StrictModel):
 class RunConfig(StrictModel):
     run: RunSettings = Field(default_factory=RunSettings)
     environment: EnvironmentSettings = Field(default_factory=EnvironmentSettings)
-    network: NetworkConfig = Field(default_factory=PPONetworkConfig)
-    trainer: TrainerSettings = Field(default_factory=TrainerSettings)
+    algorithm: PPOAlgorithmConfig = Field(default_factory=PPOAlgorithmConfig)
     tracking: TrackingSettings = Field(default_factory=TrackingSettings)
-    callbacks: list[CallbackSettings] = Field(default_factory=list)
-    runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
+    # callbacks: list[CallbackSettings] = Field(default_factory=list)
+    # runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
+
+
+def load_config(path: str) -> RunConfig:
+    """Load and validate a training configuration from YAML."""
+    config_path = Path("src") / "rl_lib" / path
+    try:
+        with config_path.open("rt", encoding="utf-8") as stream:
+            raw = yaml.safe_load(stream)
+    except OSError as exc:
+        raise ValueError(f"Cannot read config file {config_path}: {exc}") from exc
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid YAML in {config_path}: {exc}") from exc
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise TypeError(f"Config file {config_path} must contain a YAML mapping")
+    return RunConfig.model_validate(raw)

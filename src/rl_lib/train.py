@@ -89,7 +89,7 @@ def run_training(
             device=device,
             verbosity=verbosity,
             obs_shape=env.observation_space.shape,
-            action_shape=env.action_space.shape,
+            action_space=env.single_action_space,
         )
         policy, trainer = build_ppo(build_ctx)
 
@@ -141,7 +141,7 @@ if __name__ == "__main__":
         description="Train the PPO agent using a YAML configuration"
     )
     parser.add_argument(
-        "--config", default="configs/ppo_carracing.yaml", help="YAML run configuration"
+        "--config", default="config/new.yaml", help="YAML run configuration"
     )
     args = parser.parse_args()
     main(args.config)

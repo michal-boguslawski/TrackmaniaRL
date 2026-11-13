@@ -22,6 +22,3 @@ class EntropySettings(StrictModel):
         ge=0,
         description="Lower bound for the decayed entropy coefficient.",
     )
-
-
-class LossConfig(StrictModel): ...

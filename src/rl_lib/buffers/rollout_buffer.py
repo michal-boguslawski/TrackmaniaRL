@@ -63,7 +63,7 @@ class RolloutBuffer:
             stack_size: Number of frames in temporal window (for obs/done padding).
         """
         self.cfg = config
-        self.size = config.buffer_size
+        self.size = config.steps_per_env
         self._stack_size = stack_size
         self.gamma = config.gamma
         self.gae_lambda = config.gae_lambda
