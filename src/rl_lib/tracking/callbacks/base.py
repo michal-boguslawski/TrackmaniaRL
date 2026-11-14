@@ -6,7 +6,7 @@ CallbackList dispatches each event to its registered callbacks.
 
 from abc import ABC, abstractmethod
 from enum import StrEnum
-from typing import Any, TypeVar
+from typing import Any
 
 
 class CallbackEvent(StrEnum):

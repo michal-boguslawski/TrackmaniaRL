@@ -5,6 +5,7 @@ from logging import getLogger
 
 import torch as T
 
+from rl_lib.tracking.callbacks.base import Callback, CallbackEvent
 from rl_lib.training.ppo.config.optimization import PPOOptimizationSettings
 from rl_lib.training.ppo.minibatches import get_iid_minibatches
 
@@ -17,6 +18,7 @@ def run_ppo_update_loop(
     optimization_settings: PPOOptimizationSettings,
     training_step: int,
     train_step: Callable[..., dict[str, float]],
+    metrics_logger: Callback | None = None,
     # current_update_step: Callable[[], int],
     # on_minibatch: Callable[..., None],
     # on_epoch: Callable[..., None],
@@ -56,9 +58,13 @@ def run_ppo_update_loop(
                     error,
                 )
                 raise
-            if not minibatch_metrics:
-                continue
-            # epoch_kls.append(minibatch_metrics["metrics/approx_kl"])
+            if (minibatch_metrics is not None) and (metrics_logger is not None):
+                metrics_logger.on_event(
+                    CallbackEvent.MINIBATCH_END,
+                    step=training_step,
+                    metrics=minibatch_metrics,
+                )
+            epoch_kls.append(minibatch_metrics["metrics/approx_kl"])
 
             # if (
             #     minibatch_metrics["metrics/approx_kl"]

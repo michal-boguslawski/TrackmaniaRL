@@ -1,12 +1,9 @@
-from rl_lib.tracking.callbacks.base import Callback
-from rl_lib.tracking.callbacks.episode_statistics import (
-    EpisodeStatisticLoggerCallback,
-)
+from rl_lib.tracking.callbacks.base import CallbackList
+from rl_lib.tracking.callbacks.registry import CALLBACK_REGISTRY
 from rl_lib.tracking.composite_logger import CompositeMetricsLogger
-from rl_lib.tracking.config.callbacks.episode_statistics import (
-    EpisodeStatisticsCallbackSettings,
-)
+from rl_lib.tracking.config.callbacks import CallbackSettings
 from rl_lib.tracking.config.metrics_logger import TrackingSettings
+from rl_lib.tracking.sinks.base import MetricsSink
 from rl_lib.tracking.sinks.console_sink import ConsoleMetricsSink
 from rl_lib.tracking.sinks.mlflow_sink import MLflowMetricsSink
 
@@ -40,10 +37,14 @@ def build_metrics_logger(
 
 
 def build_callbacks(
-    metrics_logger: CompositeMetricsLogger,
-    callback_settings_list: list[EpisodeStatisticsCallbackSettings],
-) -> list[Callback]:
-    return [
-        EpisodeStatisticLoggerCallback(metrics_logger, callback_settings)
-        for callback_settings in callback_settings_list
-    ]
+    metrics_logger: MetricsSink,
+    callback_settings_list: list[CallbackSettings],
+) -> CallbackList | None:
+    if not callback_settings_list:
+        return
+    return CallbackList(
+        [
+            CALLBACK_REGISTRY[callback_settings.name](metrics_logger, callback_settings)
+            for callback_settings in callback_settings_list
+        ]
+    )

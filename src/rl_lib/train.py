@@ -92,9 +92,9 @@ def run_training(
             obs_shape=env.observation_space.shape,
             action_space=env.single_action_space,
         )
-        policy, trainer = build_ppo(build_ctx)
         metrics_logger = build_metrics_logger(config.tracking, session_id)
         callbacks = build_callbacks(metrics_logger, config.tracking.callbacks)
+        policy, trainer = build_ppo(build_ctx, callbacks)
 
         collector = RolloutCollector(
             env,

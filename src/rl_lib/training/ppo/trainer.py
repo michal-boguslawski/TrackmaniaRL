@@ -10,7 +10,7 @@ from torch.profiler import record_function
 
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
 from rl_lib.policy.masks import episode_mask
-from rl_lib.tracking.callbacks.base import CallbackList
+from rl_lib.tracking.callbacks.base import Callback, CallbackEvent
 
 # from rl_lib.run_config import RolloutSettings, RunSettings
 from rl_lib.tracking.verbosity import as_verbosity, is_core_loss
@@ -40,6 +40,7 @@ class PPOTrainer:
         self,
         modules: ActorCritic,
         config: PPOTrainerSettings,
+        callbacks: Callback | None = None,
         # ctx: BuildContext,
     ):
         """Initialize the PPO trainer.
@@ -60,6 +61,7 @@ class PPOTrainer:
         self.rollout_config = config.rollout
         self.rollout_buffer = RolloutBuffer(self.rollout_config, self.stack_size)
         self._optimizer = self._build_optimizer(modules)
+        self._callbacks = callbacks
         # self._scheduler = None
         self.losses = PPOLosses(config.loss)
         # self._callbacks = CallbackList(callbacks)
@@ -81,6 +83,7 @@ class PPOTrainer:
 
     def maybe_update(self, global_step: int) -> bool:
         if self.rollout_buffer.is_full():
+            self._callbacks.on_event(CallbackEvent.TRAIN_START)
             batch = self.rollout_buffer.get()
             run_ppo_update_loop(
                 batch=batch,
@@ -88,9 +91,11 @@ class PPOTrainer:
                 optimization_settings=self.cfg.optimization,
                 training_step=global_step,
                 train_step=self.train_step,
+                metrics_logger=self._callbacks,
             )
 
             self.rollout_buffer.reset_counter()
+            self._callbacks.on_event(CallbackEvent.TRAIN_END, step=global_step)
             return True
         return False
 

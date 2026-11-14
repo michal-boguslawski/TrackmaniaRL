@@ -3,9 +3,7 @@ from typing import Literal
 from pydantic import Field
 
 from rl_lib.config_base import StrictModel
-from rl_lib.tracking.config.callbacks.episode_statistics import (
-    EpisodeStatisticsCallbackSettings,
-)
+from rl_lib.tracking.config.callbacks import CallbackSettings
 
 
 class TrackingSettings(StrictModel):
@@ -33,4 +31,4 @@ class TrackingSettings(StrictModel):
         default=2,
         description="Metric detail: 0 none, 1 core training losses only, 2 everything.",
     )
-    callbacks: list[EpisodeStatisticsCallbackSettings] = Field(default_factory=list)
+    callbacks: list[CallbackSettings] = Field(default_factory=list)

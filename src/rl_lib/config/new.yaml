@@ -71,3 +71,5 @@ tracking:
   callbacks:
     - name: episode_statistics
       mode: step
+    - name: metrics_logger
+      granularity: train_end

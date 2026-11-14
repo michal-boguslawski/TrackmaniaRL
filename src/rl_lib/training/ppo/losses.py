@@ -98,6 +98,9 @@ class PPOLosses:
             - self._entropy_decay.coefficient * entropy_loss
         )
         metrics["loss/total"] = total_loss.detach()
+        metrics = {
+            key: value for key, value in metrics.items() if not key.startswith("helper")
+        }
         return total_loss, metrics
 
     @staticmethod

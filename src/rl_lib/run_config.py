@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Literal
 
 import yaml
-from pydantic import Field, PositiveInt, model_validator
+from pydantic import Field, PositiveInt
 
 from rl_lib.config_base import StrictModel
 from rl_lib.envs.settings.env import EnvironmentSettings
-from rl_lib.envs.settings.wrappers import (
-    RecordVideoWrapperSettings,
-    WrapperSettings,
-)
 from rl_lib.tracking.config.metrics_logger import TrackingSettings
 from rl_lib.training.ppo.config.algorithm import PPOAlgorithmConfig
 
@@ -33,36 +29,9 @@ class RunSettings(StrictModel):
     log_config: str | None = None
 
 
-class RuntimeSettings(StrictModel):
-    """Process-level facts resolved at startup. Never authored in YAML: the
-    entrypoint fills this in via RunConfig.with_runtime once logging, the device
-    and the environment are known."""
-
-    session_id: str = ""
-    config_path: str | None = None
-    device: str = "cpu"
-    observation_shape: list[int] = Field(default_factory=list)
-    action_shape: list[int] = Field(default_factory=list)
-    video_folder: str = ""
-    total_steps_unit: str = "vector-environment steps"
-    mlflow_experiment_name: str | None = None
-    mlflow_run_name: str | None = None
-
-
 class CheckpointsCallbackConfig(StrictModel):
     name: Literal["checkpoints"]
     interval: PositiveInt = 200
-
-
-class MetricsCallbackConfig(StrictModel):
-    name: Literal["metrics"]
-    granularity: Literal["minibatch", "epoch", "batch"] = "batch"
-
-
-class EpisodeStatisticsCallbackConfig(StrictModel):
-    name: Literal["episode_statistics"]
-    mode: Literal["step", "mean"] = "mean"
-    stats_key: str = Field(default="episode", min_length=1)
 
 
 class EvaluationCallbackConfig(StrictModel):
@@ -76,43 +45,6 @@ class RecordVideoCallbackConfig(StrictModel):
     name: Literal["record_video"]
     interval: PositiveInt = 50_000
     folder: str = "./logs/videos"
-    skip: PositiveInt | None = None
-    normalize_rewards: bool = False
-    recording: RecordVideoWrapperSettings = Field(
-        default_factory=RecordVideoWrapperSettings
-    )
-    wrappers: list[WrapperSettings] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def validate_video_wrapper(self):
-        if self.recording.name != "record_video":
-            raise ValueError(
-                "record_video callback recording must have name='record_video'"
-            )
-        stats_wrappers = [
-            wrapper
-            for wrapper in self.wrappers
-            if wrapper.name == "record_episode_stats"
-        ]
-        if len(stats_wrappers) != 1:
-            raise ValueError(
-                "record_video callback requires exactly one record_episode_stats wrapper"
-            )
-        return self
-
-
-CallbackSettings = Annotated[
-    CheckpointsCallbackConfig
-    | MetricsCallbackConfig
-    | EpisodeStatisticsCallbackConfig
-    | EvaluationCallbackConfig
-    | RecordVideoCallbackConfig,
-    Field(discriminator="name"),
-]
-
-
-class MetricsCallbackSettings(StrictModel):
-    granularity: Literal["minibatch", "epoch", "batch"]
 
 
 class EvaluationCallbackSettings(StrictModel):
@@ -153,7 +85,6 @@ class RunConfig(StrictModel):
     environment: EnvironmentSettings = Field(default_factory=EnvironmentSettings)
     algorithm: PPOAlgorithmConfig = Field(default_factory=PPOAlgorithmConfig)
     tracking: TrackingSettings = Field(default_factory=TrackingSettings)
-    # runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
 
 
 def load_config(path: str) -> RunConfig:
