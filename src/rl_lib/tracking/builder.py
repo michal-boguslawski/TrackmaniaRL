@@ -27,13 +27,13 @@ def _build_console_metrics_sink(
 def build_metrics_logger(
     tracking_settings: TrackingSettings, session_id: str
 ) -> CompositeMetricsLogger:
-    metrics_logger = CompositeMetricsLogger()
+    logger = CompositeMetricsLogger()
     if tracking_settings.mlflow:
-        metrics_logger.add_sink(_build_mlflow_metrics_sink(tracking_settings))
+        logger.add_sink(_build_mlflow_metrics_sink(tracking_settings))
 
     if tracking_settings.console:
-        metrics_logger.add_sink(_build_console_metrics_sink(tracking_settings))
-    return metrics_logger
+        logger.add_sink(_build_console_metrics_sink(tracking_settings))
+    return logger
 
 
 def build_callbacks(

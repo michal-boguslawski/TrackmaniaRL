@@ -9,5 +9,5 @@ from rl_lib.tracking.config.callbacks.metrics_logger import MetricsCallbackSetti
 
 CallbackSettings = Annotated[
     EpisodeStatisticsCallbackSettings | MetricsCallbackSettings,
-    Field(disctimination="name"),
+    Field(discriminator="name"),
 ]

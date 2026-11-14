@@ -83,7 +83,8 @@ class PPOTrainer:
 
     def maybe_update(self, global_step: int) -> bool:
         if self.rollout_buffer.is_full():
-            self._callbacks.on_event(CallbackEvent.TRAIN_START)
+            if self._callbacks:
+                self._callbacks.on_event(CallbackEvent.TRAIN_START, step=global_step)
             batch = self.rollout_buffer.get()
             run_ppo_update_loop(
                 batch=batch,
@@ -95,7 +96,8 @@ class PPOTrainer:
             )
 
             self.rollout_buffer.reset_counter()
-            self._callbacks.on_event(CallbackEvent.TRAIN_END, step=global_step)
+            if self._callbacks:
+                self._callbacks.on_event(CallbackEvent.TRAIN_END, step=global_step)
             return True
         return False
 
