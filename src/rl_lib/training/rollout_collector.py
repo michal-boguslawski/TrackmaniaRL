@@ -73,12 +73,12 @@ class RolloutCollector:
         """Notify callbacks that rollout collection has ended."""
         if self._callbacks:
             self._callbacks.on_event(CallbackEvent.ROLLOUT_END, *args, **kwargs)
-            self._callbacks.flush(*args, **kwargs)
+            self._callbacks.flush()
 
-    def _callback_flush(self, *args, **kwargs):
+    def _callback_flush(self):
         """Flush callback buffers (e.g., write metrics to MLflow)."""
         if self._callbacks:
-            self._callbacks.flush(*args, **kwargs)
+            self._callbacks.flush()
 
     def run(
         self,
