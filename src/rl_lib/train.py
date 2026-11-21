@@ -93,8 +93,15 @@ def run_training(
             action_space=env.single_action_space,
         )
         metrics_logger = build_metrics_logger(config.tracking, session_id)
-        callbacks = build_callbacks(metrics_logger, config.tracking.callbacks)
-        policy, trainer = build_ppo(build_ctx, callbacks)
+        policy, trainer = build_ppo(build_ctx)
+        callbacks = build_callbacks(
+            metrics_logger,
+            config.tracking.callbacks,
+            base_env=config.environment,
+            device=device,
+            run_seed=config.run.seed,
+        )
+        trainer.set_callbacks(callbacks)
 
         collector = RolloutCollector(
             env,

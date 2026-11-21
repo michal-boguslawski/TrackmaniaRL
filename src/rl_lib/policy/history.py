@@ -1,4 +1,5 @@
 from collections import deque
+from typing import Self
 
 import torch as T
 
@@ -25,4 +26,15 @@ class History:
         )
 
     def reset(self) -> None:
-        self.window.clear()
+        self.feature_window.clear()
+        self.done_window.clear()
+
+    def copy(self) -> Self:
+        new_history = History(self.max_length)
+
+        new_history.feature_window.extend(
+            feature.clone() for feature in self.feature_window
+        )
+        new_history.done_window.extend(done.clone() for done in self.done_window)
+
+        return new_history

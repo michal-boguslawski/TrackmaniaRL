@@ -13,7 +13,7 @@ from pathlib import Path
 from rl_lib.checkpoint_loaders import LocalCheckpointLoader, MLflowCheckpointLoader
 from rl_lib.device import resolve_device
 from rl_lib.envs.make_env import make_env
-from rl_lib.evaluation.inference import log_evaluation_results, run_inference
+from rl_lib.evaluation.inference import run_inference
 from rl_lib.evaluation.runtime import _default_metrics_loggers, _episode_stats_key
 from rl_lib.networks.mixed_precision import resolve_cnn_autocast_dtype
 from rl_lib.run_config import RunConfig

@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Literal
 
 from pydantic import Field, NonNegativeInt, PositiveInt
@@ -21,26 +22,22 @@ class RecordVideoWrapperSettings(StrictModel):
     name: Literal["record_video"] = Field(
         default="record_video", description="Select the video-recording wrapper."
     )
-    video_folder: str | None = Field(
-        default=None,
+    video_folder: str = Field(
         description="Output directory; defaults to the environment video folder.",
     )
-    episode_trigger: Literal["all", "interval"] = Field(
-        default="all", description="Record all episodes or episodes at an interval."
-    )
-    episode_interval: PositiveInt = Field(
-        default=1, description="Episode interval when episode_trigger is interval."
+    episode_trigger: Callable[[int], bool] | None = Field(
+        description="Record all episodes or episodes at an interval."
     )
     video_length: NonNegativeInt = Field(
         default=0,
         description="Maximum recorded episode length; zero records complete episodes.",
     )
-    video_name_prefix: str = Field(
+    name_prefix: str = Field(
         default="rl-video", description="Prefix used for recorded video filenames."
     )
-    video_fps: PositiveInt | None = Field(
+    fps: PositiveInt | None = Field(
         default=None, description="Optional playback frame rate override."
     )
-    video_disable_logger: bool = Field(
+    disable_logger: bool = Field(
         default=True, description="Disable Gymnasium's video recorder logger."
     )

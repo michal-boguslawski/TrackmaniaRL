@@ -34,6 +34,8 @@ class EpisodeStatisticLoggerCallback(Callback):
         self,
         logger: MetricsSink,
         config: EpisodeStatisticsCallbackSettings,
+        *args,
+        **kwargs,
     ) -> None:
         """Initialize the episode-statistics callback.
 

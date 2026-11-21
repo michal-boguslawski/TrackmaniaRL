@@ -3,9 +3,7 @@ from __future__ import annotations
 from rl_lib.evaluation.checkpoint import evaluate_checkpoint
 from rl_lib.evaluation.inference import (
     EpisodeResult,
-    log_evaluation_results,
     run_inference,
-    summarize_returns,
 )
 from rl_lib.evaluation.mlflow_evaluation import (
     MLflowModelRef,
@@ -16,9 +14,7 @@ from rl_lib.evaluation.mlflow_evaluation import (
 
 __all__ = [
     "EpisodeResult",
-    "log_evaluation_results",
     "run_inference",
-    "summarize_returns",
     "evaluate_checkpoint",
     "evaluate_mlflow",
     "select_mlflow_run",

@@ -57,29 +57,6 @@ class EvaluationCallbackSettings(StrictModel):
     seed: int
 
 
-class VideoCallbackSettings(StrictModel):
-    """Everything the video callback needs, resolved from the environment,
-    callback and run sections. The evaluation environment is a single
-    synchronous env that records frames."""
-
-    environment: EnvironmentSettings
-    interval: PositiveInt
-    seed: int
-
-    @property
-    def stats_key(self) -> str:
-        stats_wrappers = [
-            wrapper
-            for wrapper in self.environment.wrappers
-            if wrapper.name == "record_episode_stats"
-        ]
-        if len(stats_wrappers) != 1:
-            raise ValueError(
-                "the video environment needs exactly one record_episode_stats wrapper to read episode stats"
-            )
-        return stats_wrappers[0].stats_key
-
-
 class RunConfig(StrictModel):
     run: RunSettings = Field(default_factory=RunSettings)
     environment: EnvironmentSettings = Field(default_factory=EnvironmentSettings)

@@ -26,7 +26,9 @@ class MetricsLoggingCallback(Callback):
         _step (int): Next fallback step when an event provides no step.
     """
 
-    def __init__(self, logger: MetricsSink, config: MetricsCallbackSettings):
+    def __init__(
+        self, logger: MetricsSink, config: MetricsCallbackSettings, *args, **kwargs
+    ):
         """Initialize the callback.
 
         Args:

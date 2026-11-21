@@ -6,12 +6,18 @@ environment, logs the video as an artifact, and logs episode metrics.
 
 from logging import getLogger
 
+import torch as T
+
+from rl_lib.envs.eval_env import eval_env_settings
 from rl_lib.envs.make_env import make_env
-from rl_lib.evaluation.inference import log_evaluation_results, run_inference
-from rl_lib.run_config import VideoCallbackSettings
+from rl_lib.envs.settings.env import EnvironmentSettings
+from rl_lib.envs.settings.wrappers.record_video import RecordVideoWrapperSettings
+from rl_lib.evaluation.inference import prepare_stats_from_results, run_inference
+from rl_lib.policy.policy import Policy
 from rl_lib.tracking.artifacts import step_artifact_path
-from rl_lib.tracking.callbacks.base import Callback
+from rl_lib.tracking.callbacks.base import Callback, CallbackEvent
 from rl_lib.tracking.callbacks.utils import stop_video_recording
+from rl_lib.tracking.config.callbacks.record_video import RecordVideoCallbackSettings
 from rl_lib.tracking.sinks.base import MetricsSink
 
 logger = getLogger(__name__)
@@ -26,7 +32,7 @@ class RecordVideoCallback(Callback):
 
     Attributes:
         agent: Evaluation agent (copy of training agent).
-        cfg: VideoCallbackSettings (interval, environment, seed, etc.).
+        cfg: RecordVideoCallbackSettings (interval, folder, etc.).
         _loggers: MetricsLogger backends for artifact/metric logging.
         env: Video recording environment (single env, sync).
         _step: Counter for video artifact naming.
@@ -35,8 +41,13 @@ class RecordVideoCallback(Callback):
 
     def __init__(
         self,
-        metrics_loggers: list[MetricsSink],
-        config: VideoCallbackSettings,
+        logger: MetricsSink,
+        config: RecordVideoCallbackSettings,
+        base_env: EnvironmentSettings,
+        device: T.device | str = "cpu",
+        run_seed: int | None = None,
+        *args,
+        **kwargs,
     ):
         """Initialize video recording callback.
 
@@ -46,20 +57,21 @@ class RecordVideoCallback(Callback):
             config: Video settings including environment, interval, seed.
         """
         self.cfg = config
-        self._loggers = metrics_loggers
-        # SAME_STEP autoreset resets the wrapped environment on the terminal
-        # step, which makes RecordVideo start the next episode before we stop
-        # the current recording. That leaves a one-frame video for the next
-        # callback invocation. NEXT_STEP lets run_inference stop at the
-        # terminal transition and the next explicit reset start the next video.
-        video_environment = config.environment.model_copy(
-            update={"autoreset_mode": "next_step"}
-        )
-        self.env = make_env(video_environment, device=agent.device)
-        self._step = 0
-        self._last_step = 0
+        self._logger = logger
+        self.device = device
+        self.run_seed = run_seed
 
-    def record(self, step: int):
+        self._env = make_env(
+            eval_env_settings(
+                base_env,
+                recording=RecordVideoWrapperSettings(
+                    video_folder=config.video_folder, episode_trigger=lambda _: True
+                ),
+            ),
+            device=device,
+        )
+
+    def record(self, policy: Policy) -> dict[str, float]:
         """Run one episode, capture video, log metrics and video artifact.
 
         Args:
@@ -67,45 +79,36 @@ class RecordVideoCallback(Callback):
         """
         logger.debug("Recording video...")
         results = run_inference(
-            self.agent,
-            self.env,
+            policy.fork(),
+            self._env,
             episodes=1,
-            seed=self.cfg.seed,
-            temperature=self.agent.cfg.deterministic_temperature,
-            episode_stats_key=self.cfg.stats_key,
+            seed=self.run_seed,
+            device=self.device,
         )
 
-        video_path = stop_video_recording(self.env.envs[0])
-        log_evaluation_results(results, self._loggers, step=step, scope="video")
+        _ = stop_video_recording(self._env.env.envs[0])
 
-        if video_path:
-            artifact_path = step_artifact_path("videos", self._step)
-            [
-                lgr.log_artifact(video_path, artifact_path=artifact_path)
-                for lgr in self._loggers
-            ]
+        # log_evaluation_results(results, self._loggers, step=step, scope="video")
 
-        self._step += 1
+        # if video_path:
+        #     artifact_path = step_artifact_path("videos", self._step)
+        #     [
+        #         lgr.log_artifact(video_path, artifact_path=artifact_path)
+        #         for lgr in self._loggers
+        #     ]
+        return prepare_stats_from_results(results, "video")
 
-    def on_rollout_start(self, *args, **kwargs):
-        pass
+    def on_event(
+        self, event: CallbackEvent, step: int, policy: Policy | None = None, **kwargs
+    ) -> None:
+        if (
+            event is CallbackEvent.ENV_STEP and step % self.cfg.interval == 0
+        ) or event is CallbackEvent.ROLLOUT_END:
+            if policy is None:
+                raise TypeError("Missing policy")
+            metrics = self.record(policy)
+            self._logger.log_metrics(metrics, step)
+        if event is CallbackEvent.ROLLOUT_END:
+            self._env.close()
 
-    def on_env_step(self, step: int, *args, **kwargs):
-        """Record video at configured step interval."""
-        self._last_step = step
-        if step % self.cfg.interval == 0:
-            self.record(step)
-
-    def on_rollout_end(self, *args, **kwargs):
-        """Record final video, ensure agent returns to train mode."""
-        # The collector ends a rollout without a step number, so continue from
-        # the last one it reported; the environment is closed either way, and a
-        # failed recording must not leave the policy in eval mode
-        try:
-            self.record(self._last_step + 1)
-        finally:
-            self.env.close()
-            self.agent.train()
-
-    def flush(self, *args, **kwargs):
-        pass
+    def flush(self) -> None: ...

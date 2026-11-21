@@ -7,16 +7,13 @@ from rl_lib.networks.critic import VCritic
 from rl_lib.networks.encoder import Encoder
 from rl_lib.policy.history import History
 from rl_lib.policy.policy import Policy
-from rl_lib.tracking.callbacks.base import Callback
 from rl_lib.training.base import BuildContext
 from rl_lib.training.ppo.config.network import PPONetworkConfig
 from rl_lib.training.ppo.modules import ActorCritic
 from rl_lib.training.ppo.trainer import PPOTrainer
 
 
-def build_ppo(
-    ctx: BuildContext, callbacks: Callback | None = None
-) -> tuple[Policy, PPOTrainer]:
+def build_ppo(ctx: BuildContext) -> tuple[Policy, PPOTrainer]:
     cfg, device = ctx.config, ctx.device
     network_settings = cfg.algorithm.network
     assert isinstance(network_settings, PPONetworkConfig)
@@ -51,6 +48,6 @@ def build_ppo(
         History(encoder.stack_size),
     )
     trainer = PPOTrainer(
-        modules, cfg.algorithm.trainer, callbacks
+        modules, cfg.algorithm.trainer
     )  # builds optimizer, buffer, scheduler
     return policy, trainer

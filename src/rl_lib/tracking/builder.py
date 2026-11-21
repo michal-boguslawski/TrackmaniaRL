@@ -1,3 +1,7 @@
+import torch as T
+
+from rl_lib.envs.settings.env import EnvironmentSettings
+from rl_lib.policy.policy import Policy
 from rl_lib.tracking.callbacks.base import CallbackList
 from rl_lib.tracking.callbacks.registry import CALLBACK_REGISTRY
 from rl_lib.tracking.composite_logger import CompositeMetricsLogger
@@ -39,12 +43,21 @@ def build_metrics_logger(
 def build_callbacks(
     metrics_logger: MetricsSink,
     callback_settings_list: list[CallbackSettings],
+    base_env: EnvironmentSettings,
+    device: T.device | str = "cpu",
+    run_seed: int | None = None,
 ) -> CallbackList | None:
     if not callback_settings_list:
         return
     return CallbackList(
         [
-            CALLBACK_REGISTRY[callback_settings.name](metrics_logger, callback_settings)
+            CALLBACK_REGISTRY[callback_settings.name](
+                logger=metrics_logger,
+                config=callback_settings,
+                base_env=base_env,
+                device=device,
+                run_seed=run_seed,
+            )
             for callback_settings in callback_settings_list
         ]
     )

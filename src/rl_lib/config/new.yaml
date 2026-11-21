@@ -73,3 +73,6 @@ tracking:
       mode: step
     - name: metrics_logger
       granularity: train_end
+    - name: record_video
+      video_folder: logs/videos
+      interval: 100_000

@@ -32,6 +32,10 @@ class Policy:
         self._encoder.train()
         self._actor.train()
 
+    @property
+    def training(self) -> bool:
+        return self._encoder.training
+
     def act(
         self,
         obs: T.Tensor,
@@ -39,7 +43,6 @@ class Policy:
         temperature: float | None = None,
         *,
         deterministic: bool = False,
-        random: bool = False,
     ) -> tuple[T.Tensor, dict]:
         with T.no_grad():
             temporal = self.encode(obs, done)
@@ -56,5 +59,12 @@ class Policy:
         }
         return (action, extras)
 
+    def fork(self):
+        return Policy(
+            encoder=self._encoder,
+            actor=self._actor,
+            history=self._history.copy(),
+        )
+
     def reset(self):
-        self.history.reset()
+        self._history.reset()

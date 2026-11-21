@@ -114,7 +114,7 @@ class RolloutCollector:
                     )
 
             state = transition.next_obs
-            self._on_env_step(step=i, info=info)
+            self._on_env_step(step=i, info=info, policy=self.policy)
             done = terminated | truncated
 
             updated = self.trainer.maybe_update(i)
@@ -124,4 +124,4 @@ class RolloutCollector:
             if profiler is not None:
                 profiler.step()
 
-        self._on_rollout_end()
+        self._on_rollout_end(step=training_steps, policy=self.policy)

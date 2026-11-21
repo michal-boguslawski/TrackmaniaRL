@@ -66,6 +66,9 @@ class PPOTrainer:
         self.losses = PPOLosses(config.loss)
         # self._callbacks = CallbackList(callbacks)
 
+    def set_callbacks(self, callbacks: Callback) -> None:
+        self._callbacks = callbacks
+
     def observe(self, t: Transition) -> None:
         with T.no_grad():
             value = self.modules.critic(t.extras["temporal"])
