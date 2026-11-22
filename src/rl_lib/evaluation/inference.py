@@ -78,6 +78,7 @@ def run_inference(
     policy.reset()
 
     try:
+        cnt = 0
         observation, _ = env.reset(seed=seed)
         done = T.zeros(env.num_envs, dtype=T.bool, device=device)
         episode_returns = T.zeros(env.num_envs, dtype=T.float32, device=device)
@@ -106,9 +107,10 @@ def run_inference(
                     progress.update(len(temp))
 
                     for result in temp:
+                        cnt += 1
                         logger.debug(
                             "Inference episode %d/%d: return=%.3f length=%d",
-                            len(results),
+                            cnt,
                             episodes,
                             result.return_,
                             result.length,

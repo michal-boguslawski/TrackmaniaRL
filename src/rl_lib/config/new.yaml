@@ -76,3 +76,13 @@ tracking:
     - name: record_video
       video_folder: logs/videos
       interval: 100_000
+    - name: evaluation
+      interval: 10_000
+      episodes: 1
+      num_envs: 1
+      on_event: env_step
+    - name: evaluation
+      interval: 1
+      episodes: 4
+      num_envs: 2
+      on_event: rollout_end

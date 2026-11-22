@@ -34,29 +34,6 @@ class CheckpointsCallbackConfig(StrictModel):
     interval: PositiveInt = 200
 
 
-class EvaluationCallbackConfig(StrictModel):
-    name: Literal["evaluation"]
-    interval: PositiveInt = 50_000
-    episodes: PositiveInt = 10
-    final_episodes: PositiveInt = 1_000
-
-
-class RecordVideoCallbackConfig(StrictModel):
-    name: Literal["record_video"]
-    interval: PositiveInt = 50_000
-    folder: str = "./logs/videos"
-
-
-class EvaluationCallbackSettings(StrictModel):
-    """Resolved settings for scheduled and final policy evaluation."""
-
-    environment: EnvironmentSettings
-    interval: PositiveInt
-    episodes: PositiveInt
-    final_episodes: PositiveInt
-    seed: int
-
-
 class RunConfig(StrictModel):
     run: RunSettings = Field(default_factory=RunSettings)
     environment: EnvironmentSettings = Field(default_factory=EnvironmentSettings)

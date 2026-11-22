@@ -7,12 +7,20 @@ intervals and at the end of training.
 
 from __future__ import annotations
 
+from logging import getLogger
+
+import torch as T
+
+from rl_lib.envs.eval_env import eval_env_settings
 from rl_lib.envs.make_env import make_env
-from rl_lib.evaluation.inference import log_evaluation_results, run_inference
-from rl_lib.evaluation.runtime import _episode_stats_key
-from rl_lib.run_config import EvaluationCallbackSettings
-from rl_lib.tracking.callbacks.base import Callback
+from rl_lib.envs.settings.env import EnvironmentSettings
+from rl_lib.evaluation.inference import prepare_stats_from_results, run_inference
+from rl_lib.policy.policy import Policy
+from rl_lib.tracking.callbacks.base import Callback, CallbackEvent
+from rl_lib.tracking.config.callbacks.evaluation import EvaluationCallbackSettings
 from rl_lib.tracking.sinks.base import MetricsSink
+
+logger = getLogger(__name__)
 
 
 class EvaluationCallback(Callback):
@@ -34,8 +42,13 @@ class EvaluationCallback(Callback):
 
     def __init__(
         self,
-        metrics_loggers: list[MetricsSink],
+        logger: MetricsSink,
         config: EvaluationCallbackSettings,
+        base_env: EnvironmentSettings,
+        device: T.device | str = "cpu",
+        run_seed: int | None = None,
+        *args,
+        **kwargs,
     ):
         """Initialize evaluation callback.
 
@@ -45,67 +58,37 @@ class EvaluationCallback(Callback):
             config: Evaluation settings including environment, interval, episodes.
         """
         self.cfg = config
-        self._loggers = metrics_loggers
-        self.env = make_env(config.environment, device=self.agent.device)
-        self._training_steps: int | None = None
-        self._evaluation_index = 0
-        self._last_evaluation_step: int | None = None
+        self._logger = logger
+        self.device = device
+        self.run_seed = run_seed
 
-    def _evaluate(self, episodes: int, step: int, scope: str) -> None:
-        """Run evaluation episodes and log results.
-
-        Args:
-            episodes: Number of episodes to run.
-            step: Training step for logging.
-            scope: 'periodic' or 'final' for metric prefix.
-        """
-        seed = (self.cfg.seed + self._evaluation_index) % (2**32)
-        self._evaluation_index += 1
-        results = run_inference(
-            self.agent,
-            self.env,
-            episodes=episodes,
-            seed=seed,
-            temperature=self.agent.cfg.deterministic_temperature,
-            episode_stats_key=_episode_stats_key(self.cfg.environment),
+        self._env = make_env(
+            eval_env_settings(
+                base_env,
+                num_envs=self.cfg.num_envs,
+            ),
+            device=device,
         )
-        summary = log_evaluation_results(results, self._loggers, step=step, scope=scope)
-        if scope == "final":
-            episode_records = [
-                {"return": result.return_, "length": result.length}
-                for result in results
-            ]
-            for metrics_logger in self._loggers:
-                metrics_logger.log_evaluation(
-                    episode_records,
-                    summary,
-                    step,
-                    scope,
-                )
-        self._last_evaluation_step = step
 
-    def on_rollout_start(self, config: dict | None = None, *args, **kwargs) -> None:
-        """Capture total training steps from collector config."""
-        if config:
-            self._training_steps = config.get("training_steps")
+    def _evaluate(self, policy: Policy, episodes: int) -> dict[str, float]:
+        """Run evaluation episodes and log results."""
 
-    def on_env_step(self, step: int, *args, **kwargs) -> None:
-        """Run periodic evaluation at configured interval."""
-        completed_steps = step + 1
-        if completed_steps % self.cfg.interval != 0:
-            return
-        # The final evaluation supersedes a periodic one on the last step.
-        if self._training_steps is not None and completed_steps >= self._training_steps:
-            return
-        self._evaluate(self.cfg.episodes, completed_steps, "periodic")
+        logger.debug(f"Start evaluation on {self.cfg.on_event}")
+        results = run_inference(
+            policy.fork(),
+            self._env,
+            episodes=episodes,
+            seed=self.run_seed,
+            device=self.device,
+        )
+        return prepare_stats_from_results(results, "evaluation")
 
-    def on_rollout_end(self, *args, **kwargs) -> None:
-        """Run final evaluation with more episodes, then close environment."""
-        final_step = self._training_steps or (self._last_evaluation_step or 0)
-        try:
-            self._evaluate(self.cfg.final_episodes, final_step, "final")
-        finally:
-            self.env.close()
+    def on_event(
+        self, event: CallbackEvent, step: int, policy: Policy | None = None, **kwargs
+    ) -> None:
+        if event is self.cfg.on_event and step % self.cfg.interval == 0:
+            metrics = self._evaluate(policy, self.cfg.episodes)
+            self._logger.log_metrics(metrics, step)
 
     def flush(self, *args, **kwargs) -> None:
         pass

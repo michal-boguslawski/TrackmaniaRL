@@ -8,11 +8,12 @@ def eval_env_settings(
     base_env: EnvironmentSettings,
     *,
     recording: RecordVideoWrapperSettings | None = None,
+    num_envs: int = 1,
 ) -> EnvironmentSettings:
     render_mode = "rgb_array" if recording else base_env.render_mode
     env_settings = base_env.model_copy(
         update={
-            "num_envs": 1,
+            "num_envs": num_envs,
             "render_mode": render_mode,
             "vectorization_mode": "sync",
             "autoreset_mode": AutoresetMode.NEXT_STEP,
