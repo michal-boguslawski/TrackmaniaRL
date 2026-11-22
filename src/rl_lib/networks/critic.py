@@ -3,11 +3,15 @@
 Maps temporal encoding features to a scalar state value estimate.
 """
 
+from logging import getLogger
+
 import torch as T
 from torch import nn
 
 from rl_lib.networks.settings.critic import VCriticSettings
-from rl_lib.networks.utils import init_layer, make_activation
+from rl_lib.networks.utils import init_layer, make_activation, split_parameter_groups
+
+logger = getLogger(__name__)
 
 
 class VCritic(nn.Module):
@@ -46,6 +50,7 @@ class VCritic(nn.Module):
             )
         )
         self._network = nn.Sequential(*modules)
+        logger.debug("Initialized %s", self)
 
     @property
     def out_dim(self) -> int:
@@ -80,3 +85,6 @@ class VCritic(nn.Module):
             **self.cfg.model_dump(),
             "n_params": sum(p.numel() for p in super().parameters()),
         }
+
+    def parameter_groups(self) -> dict[str, list[nn.Parameter]]:
+        return split_parameter_groups(self)

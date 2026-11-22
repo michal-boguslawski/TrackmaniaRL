@@ -21,6 +21,7 @@ from rl_lib.training.ppo.metrics import _tensor_metrics_to_scalars
 from rl_lib.training.ppo.modules import ActorCritic
 from rl_lib.training.ppo.update_loop import run_ppo_update_loop
 from rl_lib.training.transitions import Transition
+from rl_lib.training.utils import build_optimizer
 
 logger = getLogger(__name__)
 
@@ -60,7 +61,18 @@ class PPOTrainer:
         self.stack_size = self.modules.encoder.stack_size
         self.rollout_config = config.rollout
         self.rollout_buffer = RolloutBuffer(self.rollout_config, self.stack_size)
-        self._optimizer = self._build_optimizer(modules)
+        self._optimizer = build_optimizer(
+            self.modules.optimizer_parameter_groups(
+                self.cfg.optimizer.cnn_lr,
+                self.cfg.optimizer.sequence_encoder_lr,
+                self.cfg.optimizer.actor_lr,
+                self.cfg.optimizer.critic_lr,
+                self.cfg.optimizer.weight_decay,
+                self.cfg.optimizer.no_decay_weight_decay,
+            ),
+            self.cfg.optimizer.name,
+            self.cfg.optimizer.eps,
+        )
         self._callbacks = callbacks
         # self._scheduler = None
         self.losses = PPOLosses(config.loss)
@@ -89,6 +101,7 @@ class PPOTrainer:
             if self._callbacks:
                 self._callbacks.on_event(CallbackEvent.TRAIN_START, step=global_step)
             batch = self.rollout_buffer.get()
+            self.modules.train()
             run_ppo_update_loop(
                 batch=batch,
                 stack_size=self.stack_size,
@@ -145,10 +158,3 @@ class PPOTrainer:
         clip_grad_norm_(self.modules.parameters(), 0.5)
         self._optimizer.step()
         return {"loss/total": loss.item(), **metrics}
-
-    def _build_optimizer(self, modules: ActorCritic) -> Optimizer:
-        return Adam(
-            modules.parameters(),
-            lr=self.cfg.optimizer.backbone_lr,
-            eps=self.cfg.optimizer.eps,
-        )

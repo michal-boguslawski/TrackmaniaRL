@@ -8,6 +8,8 @@ from torch import nn
 
 from rl_lib.networks.settings.layer import LinearLayerSettings
 
+DECAY_MODULES = (nn.Linear, nn.Conv1d, nn.Conv2d)
+
 
 def init_layer(
     layer: nn.Module,
@@ -91,3 +93,28 @@ def update_weighted_state_dict(
     for key, source_value in source.items():
         if key in target:
             target[key].data.mul_(1 - alpha).add_(source_value.data, alpha=alpha)
+
+
+from torch import nn
+from torch.nn.parameter import Parameter
+
+
+def split_parameter_groups(
+    module: nn.Module,
+) -> dict[str, list[Parameter]]:
+    groups = {
+        "decay": [],
+        "no_decay": [],
+    }
+
+    for submodule in module.modules():
+        for name, param in submodule.named_parameters(recurse=False):
+            if not param.requires_grad:
+                continue
+
+            if isinstance(submodule, DECAY_MODULES) and name == "weight":
+                groups["decay"].append(param)
+            else:
+                groups["no_decay"].append(param)
+
+    return groups

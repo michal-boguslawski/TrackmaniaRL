@@ -28,11 +28,6 @@ class OptimizerSettings(StrictModel):
     name: Literal["AdamW", "Adam"] = Field(
         default="AdamW", description="Optimizer implementation."
     )
-    backbone_lr: float = Field(
-        default=1e-4,
-        gt=0,
-        description="Fallback rate for CNN and sequence encoder groups.",
-    )
     cnn_lr: float | None = Field(
         default=None,
         gt=0,
@@ -43,10 +38,15 @@ class OptimizerSettings(StrictModel):
         gt=0,
         description="Optional sequence-encoder rate; defaults to backbone_lr.",
     )
-    head_lr: float = Field(
+    actor_lr: float = Field(
         default=1e-4,
         gt=0,
-        description="Actor and critic head learning rate.",
+        description="Actor learning rate.",
+    )
+    critic_lr: float = Field(
+        default=1e-4,
+        gt=0,
+        description="Critic learning rate.",
     )
     weight_decay: float = Field(
         default=0.0,
@@ -72,3 +72,7 @@ class OptimizerSettings(StrictModel):
         default=True,
         description="Use fused Adam/AdamW kernels on CUDA; ignored on CPU.",
     )
+
+    def __post__init__(self):
+        self.cnn_lr = self.cnn_lr or self.actor_lr
+        self.sequence_encoder_lr = self.sequence_encoder_lr or self.actor_lr

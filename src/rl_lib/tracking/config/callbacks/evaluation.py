@@ -12,7 +12,7 @@ class EvaluationCallbackSettings(StrictModel):
         description="Callback registry name.",
     )
 
-    interval: PositiveInt = Field(gt=0)
+    interval: PositiveInt = Field(default=1, gt=0)
     episodes: PositiveInt = Field(default=1, gt=0)
     num_envs: PositiveInt = Field(default=1, gt=0)
     on_event: CallbackEvent = Field(default="env_step")

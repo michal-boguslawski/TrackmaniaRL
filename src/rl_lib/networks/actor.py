@@ -5,6 +5,8 @@ dimension, transformed via AffineTransform to the environment's action bounds.
 This provides bounded continuous actions with differentiable log-prob gradients.
 """
 
+from logging import getLogger
+
 import numpy as np
 import torch as T
 import torch.nn.functional as F
@@ -13,7 +15,9 @@ from torch.distributions import Beta, Distribution, TransformedDistribution
 from torch.distributions.transforms import AffineTransform, TanhTransform
 
 from rl_lib.networks.settings.actor import ActorSettings
-from rl_lib.networks.utils import init_layer, make_activation
+from rl_lib.networks.utils import init_layer, make_activation, split_parameter_groups
+
+logger = getLogger(__name__)
 
 
 class StableTanhTransform(TanhTransform):
@@ -99,6 +103,7 @@ class Actor(nn.Module):
         high = T.tensor(action_high)
         self.register_buffer("_affine_loc", low)
         self.register_buffer("_affine_scale", high - low)
+        logger.debug("Initialized %s", self)
 
     @property
     def out_dim(self) -> int:
@@ -184,7 +189,13 @@ class Actor(nn.Module):
 
     def __repr__(self) -> str:
         n_params = sum(p.numel() for p in super().parameters())
-        return f"{self.__class__.__name__}(action_dim={self.action_dim}, in_dim={self.in_dim}, config={self.cfg.model_dump()}, params={n_params:,})"
+        return (
+            f"{self.__class__.__name__}("
+            f"action_dim={self.action_dim}, "
+            f"in_dim={self.in_dim}, "
+            f"config={self.cfg.model_dump()}, "
+            f"params={n_params:,})"
+        )
 
     def config(self) -> dict[str, int | float | str]:
         """Flat, MLflow-loggable hyperparameters."""
@@ -196,3 +207,6 @@ class Actor(nn.Module):
             "n_params": sum(p.numel() for p in params),
             "n_trainable_params": sum(p.numel() for p in params if p.requires_grad),
         }
+
+    def parameter_groups(self) -> dict[str, list[nn.Parameter]]:
+        return split_parameter_groups(self)

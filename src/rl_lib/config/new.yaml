@@ -53,15 +53,17 @@ algorithm:
 
     optimizer:
       name: Adam
-      backbone_lr: 1e-4
       cnn_lr: 1e-4
+      sequence_encoder_lr: 1e-4
+      actor_lr: 1e-4
+      critic_lr: 1e-4
 
     rollout:
       steps_per_env: 512
 
     optimization:
       minibatch_size: 512
-      epochs: 1
+      epochs: 3
       minibatch_indexing_mode: iid
 
 tracking:

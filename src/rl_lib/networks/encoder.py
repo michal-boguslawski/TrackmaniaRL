@@ -71,3 +71,9 @@ class Encoder(nn.Module):
     @property
     def stack_size(self) -> int:
         return self.cfg.stack_size
+
+    def parameter_groups(self) -> dict[str, dict[str, list[nn.Parameter]]]:
+        return {
+            "cnn": self.cnn.parameter_groups(),
+            "temporal": self.sequence_encoder.parameter_groups(),
+        }

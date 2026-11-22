@@ -5,12 +5,15 @@ and MLP head to produce fixed-dimensional feature vectors.
 """
 
 import json
+from logging import getLogger
 
 import torch as T
 from torch import nn
 
 from rl_lib.networks.settings.cnn import CNNSettings
-from rl_lib.networks.utils import init_layer, make_activation
+from rl_lib.networks.utils import init_layer, make_activation, split_parameter_groups
+
+logger = getLogger(__name__)
 
 
 class CNN(nn.Module):
@@ -76,6 +79,7 @@ class CNN(nn.Module):
             init_layer(output, self.cfg.output_init_gain, self.cfg.output_init_bias)
         )
         self._network = nn.Sequential(*layers)
+        logger.debug("Initialized %s", self)
 
     @property
     def out_dim(self) -> int:
@@ -120,7 +124,13 @@ class CNN(nn.Module):
 
     def __repr__(self) -> str:
         n_params = sum(p.numel() for p in super().parameters())
-        return f"{self.__class__.__name__}(observation_dim={self.observation_dim}, out_dim={self.out_dim}, config={self.cfg.model_dump()}, params={n_params:,})"
+        return (
+            f"{self.__class__.__name__}("
+            f"observation_dim={self.observation_dim}, "
+            f"out_dim={self.out_dim}, "
+            f"config={self.cfg.model_dump()}, "
+            f"params={n_params:,})"
+        )
 
     def config(self) -> dict[str, int | float | str]:
         """Flat, MLflow-loggable hyperparameters."""
@@ -136,3 +146,6 @@ class CNN(nn.Module):
             "n_params": sum(p.numel() for p in super().parameters()),
         }
         return config
+
+    def parameter_groups(self) -> dict[str, list[nn.Parameter]]:
+        return split_parameter_groups(self)

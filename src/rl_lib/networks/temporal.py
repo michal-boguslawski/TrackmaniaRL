@@ -4,10 +4,15 @@ Reduces a (batch, stack_size, feature_dim) sequence to (batch, out_dim)
 via a single full-length Conv1d kernel, with optional LayerNorm.
 """
 
+from logging import getLogger
+
 import torch as T
 from torch import nn
 
 from rl_lib.networks.settings.temporal import TemporalSettings
+from rl_lib.networks.utils import split_parameter_groups
+
+logger = getLogger(__name__)
 
 
 class TemporalCNN1D(nn.Module):
@@ -48,6 +53,7 @@ class TemporalCNN1D(nn.Module):
             if self.cfg.normalize_output
             else nn.Identity()
         )
+        logger.debug("Initialized %s", self)
 
     @property
     def out_dim(self) -> int:
@@ -89,3 +95,6 @@ class TemporalCNN1D(nn.Module):
             **self.cfg.model_dump(),
             "n_params": sum(p.numel() for p in super().parameters()),
         }
+
+    def parameter_groups(self) -> dict[str, list[nn.Parameter]]:
+        return split_parameter_groups(self)
