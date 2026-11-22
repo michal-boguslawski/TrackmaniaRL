@@ -1,21 +1,19 @@
-"""Optimizer settings and parameter-group learning rates."""
+"""Optimizer settings and algorithm-specific parameter-group rates."""
 
 from typing import Literal
 
 from pydantic import Field
 
 from rl_lib.config_base import StrictModel
+from rl_lib.training.ppo.config.learning_rates import PPOLearningRateSettings
 
 
 class OptimizerSettings(StrictModel):
-    """Optimizer choice, parameter-group rates, and Adam-family options.
+    """Optimizer choice, PPO learning rates, and Adam-family options.
 
     Attributes:
         name: Adam or AdamW implementation.
-        backbone_lr: Fallback rate for CNN and sequence encoder parameter groups.
-        cnn_lr: Optional CNN-specific rate.
-        sequence_encoder_lr: Optional sequence-encoder-specific rate.
-        head_lr: Actor and critic head rate.
+        learning_rates: PPO learning rates for the network parameter groups.
         weight_decay: Decay for regularized parameter groups.
         no_decay_weight_decay: Decay for bias and normalization groups.
         eps: Adam numerical stability constant.
@@ -28,25 +26,9 @@ class OptimizerSettings(StrictModel):
     name: Literal["AdamW", "Adam"] = Field(
         default="AdamW", description="Optimizer implementation."
     )
-    cnn_lr: float | None = Field(
-        default=None,
-        gt=0,
-        description="Optional CNN rate; defaults to backbone_lr.",
-    )
-    sequence_encoder_lr: float | None = Field(
-        default=None,
-        gt=0,
-        description="Optional sequence-encoder rate; defaults to backbone_lr.",
-    )
-    actor_lr: float = Field(
-        default=1e-4,
-        gt=0,
-        description="Actor learning rate.",
-    )
-    critic_lr: float = Field(
-        default=1e-4,
-        gt=0,
-        description="Critic learning rate.",
+    learning_rates: PPOLearningRateSettings = Field(
+        default_factory=PPOLearningRateSettings,
+        description="Learning rates for the PPO network parameter groups.",
     )
     weight_decay: float = Field(
         default=0.0,
@@ -72,7 +54,3 @@ class OptimizerSettings(StrictModel):
         default=True,
         description="Use fused Adam/AdamW kernels on CUDA; ignored on CPU.",
     )
-
-    def __post__init__(self):
-        self.cnn_lr = self.cnn_lr or self.actor_lr
-        self.sequence_encoder_lr = self.sequence_encoder_lr or self.actor_lr

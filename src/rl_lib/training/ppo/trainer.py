@@ -63,10 +63,7 @@ class PPOTrainer:
         self.rollout_buffer = RolloutBuffer(self.rollout_config, self.stack_size)
         self._optimizer = build_optimizer(
             self.modules.optimizer_parameter_groups(
-                self.cfg.optimizer.cnn_lr,
-                self.cfg.optimizer.sequence_encoder_lr,
-                self.cfg.optimizer.actor_lr,
-                self.cfg.optimizer.critic_lr,
+                self.cfg.optimizer.learning_rates,
                 self.cfg.optimizer.weight_decay,
                 self.cfg.optimizer.no_decay_weight_decay,
             ),

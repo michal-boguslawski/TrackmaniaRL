@@ -1,3 +1,7 @@
+"""PPO actor-critic module and optimizer parameter-group assembly."""
+
+from typing import Any
+
 import torch as T
 from torch import nn
 from torch.distributions import Distribution
@@ -5,9 +9,18 @@ from torch.distributions import Distribution
 from rl_lib.networks.actor import Actor
 from rl_lib.networks.critic import VCritic
 from rl_lib.networks.encoder import Encoder
+from rl_lib.training.ppo.config.learning_rates import PPOLearningRateSettings
 
 
 class ActorCritic(nn.Module):
+    """Shared-encoder policy and value network with grouped parameters.
+
+    Attributes:
+        encoder: Shared observation encoder exposing CNN and temporal groups.
+        actor: Policy head.
+        critic: Value head.
+    """
+
     def __init__(self, encoder: Encoder, actor: Actor, critic: VCritic):
         super().__init__()
         self.encoder = encoder
@@ -24,24 +37,35 @@ class ActorCritic(nn.Module):
 
     def optimizer_parameter_groups(
         self,
-        cnn_lr: float,
-        sequence_encoder_lr: float,
-        actor_lr: float,
-        crtic_lr: float,
+        learning_rates: PPOLearningRateSettings,
         weight_decay: float,
         no_decay_weight_decay: float,
-    ) -> list[dict]:
-        groups = []
+    ) -> list[dict[str, Any]]:
+        """Build optimizer groups from a single optimizer settings object.
+
+        Args:
+            settings: Optimizer settings carrying the PPO learning rates and
+                weight-decay values for decay and no-decay groups.
+
+        Returns:
+            Parameter-group dictionaries with ``params``, ``lr``,
+            ``weight_decay``, and ``name`` entries.
+        """
+        groups: list[dict[str, Any]] = []
         encoder_param_groups = self.encoder.parameter_groups()
         decay_weights = (
             ("decay", weight_decay),
             ("no_decay", no_decay_weight_decay),
         )
         components = (
-            ("cnn", encoder_param_groups["cnn"], cnn_lr),
-            ("temporal", encoder_param_groups["temporal"], sequence_encoder_lr),
-            ("actor", self.actor.parameter_groups(), actor_lr),
-            ("critic", self.critic.parameter_groups(), crtic_lr),
+            ("cnn", encoder_param_groups["cnn"], learning_rates.cnn_lr),
+            (
+                "temporal",
+                encoder_param_groups["temporal"],
+                learning_rates.sequence_encoder_lr,
+            ),
+            ("actor", self.actor.parameter_groups(), learning_rates.actor_lr),
+            ("critic", self.critic.parameter_groups(), learning_rates.critic_lr),
         )
 
         for name, param_groups, lr in components:

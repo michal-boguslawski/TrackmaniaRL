@@ -53,10 +53,11 @@ algorithm:
 
     optimizer:
       name: Adam
-      cnn_lr: 1e-4
-      sequence_encoder_lr: 1e-4
-      actor_lr: 1e-4
-      critic_lr: 1e-4
+      learning_rates:
+        cnn_lr: 1e-4
+        sequence_encoder_lr: 1e-4
+        actor_lr: 1e-4
+        critic_lr: 1e-4
 
     rollout:
       steps_per_env: 512
