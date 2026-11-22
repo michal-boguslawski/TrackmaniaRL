@@ -7,10 +7,7 @@ from rl_lib.config_base import StrictModel
 from rl_lib.training.ppo.config.loss import PPOLossConfig
 from rl_lib.training.ppo.config.optimization import PPOOptimizationSettings
 from rl_lib.training.settings.optimizer import OptimizerSettings
-from rl_lib.training.settings.scheduler import (
-    CosineSchedulerSettings,
-    # SchedulerSettings,
-)
+from rl_lib.training.settings.scheduler import SchedulerSettings
 
 
 class KLControlSettings(StrictModel):
@@ -103,10 +100,10 @@ class PPOTrainerSettings(StrictModel):
         default_factory=OptimizerSettings,
         description="Optimizer implementation and parameter-group settings.",
     )
-    # scheduler: SchedulerSettings = Field(
-    #     default_factory=CosineSchedulerSettings,
-    #     description="Learning-rate scheduler variant and its options.",
-    # )
+    scheduler: SchedulerSettings | None = Field(
+        default=None,
+        description="Learning-rate scheduler variant and its options.",
+    )
     optimization: PPOOptimizationSettings = Field(
         ..., description="Optimization settings"
     )

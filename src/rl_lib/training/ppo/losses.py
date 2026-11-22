@@ -132,7 +132,7 @@ class PPOLosses:
         actor_loss = surrogate_loss
 
         metrics = {
-            "loss/actor": actor_loss.detach(),
+            "loss/policy": actor_loss.detach(),
             "helper/log_ratio": log_ratio.detach(),
         }
         return actor_loss, metrics
@@ -141,7 +141,7 @@ class PPOLosses:
     def actor_metrics(metrics: dict[str, T.Tensor]) -> dict[str, T.Tensor]:
         """Compute additional actor metrics from the surrogate loss."""
         log_ratio = metrics["helper/log_ratio"]
-        metrics["metrics/approx_kl"] = calc_approx_kl_divergence(log_ratio)
+        metrics["ppo/approx_kl"] = calc_approx_kl_divergence(log_ratio)
         return metrics
 
     @staticmethod
@@ -164,7 +164,7 @@ class PPOLosses:
         loss_unclipped = critic_loss_fn(values, returns)
         loss_clipped = critic_loss_fn(clipped_values, returns)
         critic_loss = T.maximum(loss_unclipped, loss_clipped).mean()
-        return critic_loss, {"loss/critic": critic_loss.detach()}
+        return critic_loss, {"loss/value": critic_loss.detach()}
 
     @staticmethod
     def entropy_loss(dist: Distribution) -> tuple[T.Tensor, dict[str, T.Tensor]]:

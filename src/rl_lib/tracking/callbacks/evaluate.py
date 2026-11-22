@@ -81,7 +81,7 @@ class EvaluationCallback(Callback):
             seed=self.run_seed,
             device=self.device,
         )
-        return prepare_stats_from_results(results, "evaluation")
+        return prepare_stats_from_results(results, "eval/episode")
 
     def on_event(
         self, event: CallbackEvent, step: int, policy: Policy | None = None, **kwargs

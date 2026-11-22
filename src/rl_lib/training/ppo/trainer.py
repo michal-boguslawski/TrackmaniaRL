@@ -4,22 +4,16 @@ from logging import getLogger
 
 import torch as T
 from torch.nn.utils import clip_grad_norm_
-from torch.optim import Adam, AdamW, Optimizer
-from torch.optim.lr_scheduler import CosineAnnealingLR, ExponentialLR, LinearLR
-from torch.profiler import record_function
+from torch.optim import Optimizer
 
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
 from rl_lib.policy.masks import episode_mask
 from rl_lib.tracking.callbacks.base import Callback, CallbackEvent
-
-# from rl_lib.run_config import RolloutSettings, RunSettings
-from rl_lib.tracking.verbosity import as_verbosity, is_core_loss
-from rl_lib.training.base import BuildContext
 from rl_lib.training.ppo.config.trainer import PPOTrainerSettings
 from rl_lib.training.ppo.losses import PPOLosses
-from rl_lib.training.ppo.metrics import _tensor_metrics_to_scalars
 from rl_lib.training.ppo.modules import ActorCritic
 from rl_lib.training.ppo.update_loop import run_ppo_update_loop
+from rl_lib.training.schedulers.factory import build_scheduler
 from rl_lib.training.transitions import Transition
 from rl_lib.training.utils import build_optimizer
 
@@ -41,8 +35,8 @@ class PPOTrainer:
         self,
         modules: ActorCritic,
         config: PPOTrainerSettings,
+        total_steps: int,
         callbacks: Callback | None = None,
-        # ctx: BuildContext,
     ):
         """Initialize the PPO trainer.
 
@@ -61,7 +55,7 @@ class PPOTrainer:
         self.stack_size = self.modules.encoder.stack_size
         self.rollout_config = config.rollout
         self.rollout_buffer = RolloutBuffer(self.rollout_config, self.stack_size)
-        self._optimizer = build_optimizer(
+        self._optimizer: Optimizer = build_optimizer(
             self.modules.optimizer_parameter_groups(
                 self.cfg.optimizer.learning_rates,
                 self.cfg.optimizer.weight_decay,
@@ -71,9 +65,13 @@ class PPOTrainer:
             self.cfg.optimizer.eps,
         )
         self._callbacks = callbacks
-        # self._scheduler = None
+        self._scheduler = build_scheduler(
+            self._optimizer,
+            self.cfg.scheduler,
+            total_steps=total_steps,
+            steps_per_training=self.cfg.rollout.steps_per_env,
+        )
         self.losses = PPOLosses(config.loss)
-        # self._callbacks = CallbackList(callbacks)
 
     def set_callbacks(self, callbacks: Callback) -> None:
         self._callbacks = callbacks
@@ -110,7 +108,16 @@ class PPOTrainer:
 
             self.rollout_buffer.reset_counter()
             if self._callbacks:
-                self._callbacks.on_event(CallbackEvent.TRAIN_END, step=global_step)
+                metrics = {
+                    f"optimization/lr_{pg['name']}": pg["lr"]
+                    for pg in self._optimizer.param_groups
+                }
+                self._callbacks.on_event(
+                    CallbackEvent.TRAIN_END, step=global_step, metrics=metrics
+                )
+
+            if self._scheduler:
+                self._scheduler.step()
             return True
         return False
 

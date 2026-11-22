@@ -64,7 +64,7 @@ def run_ppo_update_loop(
                     step=training_step,
                     metrics=minibatch_metrics,
                 )
-            epoch_kls.append(minibatch_metrics["metrics/approx_kl"])
+            epoch_kls.append(minibatch_metrics["ppo/approx_kl"])
 
             # if (
             #     minibatch_metrics["metrics/approx_kl"]

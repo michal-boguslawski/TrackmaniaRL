@@ -73,12 +73,12 @@ class EpisodeStatisticLoggerCallback(Callback):
         if batch is None:
             return
 
-        returns, lengths = batch
-        episode_count = int(returns.size)
+        rewards, lengths = batch
+        episode_count = int(rewards.size)
         metrics = {
-            "episode/returns": float(returns.mean()),
-            "episode/lengths": float(lengths.mean()),
-            "episode/n": float(episode_count),
+            "train/episode/reward_mean": float(rewards.mean()),
+            "train/episode/length_mean": float(lengths.mean()),
+            "train/episode/n": float(episode_count),
         }
         self._buffer.append((metrics, int(step)))
         if len(self._buffer) >= self.cfg.buffer_length:
@@ -98,9 +98,9 @@ class EpisodeStatisticLoggerCallback(Callback):
         mask_key = f"_{self.cfg.stats_key}"
         if self.cfg.stats_key in episode_info and mask_key in episode_info:
             dones = episode_info[mask_key]
-            returns = episode_info[self.cfg.stats_key]["r"][dones]
+            rewards = episode_info[self.cfg.stats_key]["r"][dones]
             lengths = episode_info[self.cfg.stats_key]["l"][dones]
-            return returns, lengths
+            return rewards, lengths
 
     def flush(self) -> None:
         """Write buffered episode metrics and clear the buffer."""
@@ -111,23 +111,27 @@ class EpisodeStatisticLoggerCallback(Callback):
             for metrics, step in self._buffer:
                 self._logger.log_metrics(metrics, step=step)
         else:
+            episodes_number_key = "train/episode/n"
             episode_count = sum(
-                int(metrics["episode/n"]) for metrics, _ in self._buffer
+                int(metrics[episodes_number_key]) for metrics, _ in self._buffer
             )
-            metrics = {
-                "episode/returns": sum(
-                    entry["episode/returns"] * entry["episode/n"]
-                    for entry, _ in self._buffer
+            metrics = {}
+            for metric in set(self._buffer.keys()):
+                metrics[metric] = (
+                    sum(
+                        entry[metric]
+                        * (
+                            entry[episodes_number_key]
+                            if metric != episodes_number_key
+                            else 1
+                        )
+                        for entry in self._buffer
+                    )
+                    / episode_count
                 )
-                / episode_count,
-                "episode/lengths": sum(
-                    entry["episode/lengths"] * entry["episode/n"]
-                    for entry, _ in self._buffer
+
+            if metrics:
+                self._logger.log_metrics(
+                    metrics, step=max(step for _, step in self._buffer)
                 )
-                / episode_count,
-                "episode/n": float(episode_count),
-            }
-            self._logger.log_metrics(
-                metrics, step=max(step for _, step in self._buffer)
-            )
         self._buffer.clear()

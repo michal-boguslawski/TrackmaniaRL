@@ -104,7 +104,7 @@ class RecordVideoCallback(Callback):
         #         lgr.log_artifact(video_path, artifact_path=artifact_path)
         #         for lgr in self._loggers
         #     ]
-        return prepare_stats_from_results(results, "video")
+        return prepare_stats_from_results(results, "video/episode")
 
     def on_event(
         self, event: CallbackEvent, step: int, policy: Policy | None = None, **kwargs

@@ -36,38 +36,22 @@ class LinearSchedulerSettings(StrictModel):
 
     Attributes:
         name: Discriminator selecting linear decay.
-        min_lr: Learning rate at the end of the schedule.
-        start_factor: Initial learning-rate multiplier.
-        extra_iters: Additional iterations beyond the computed schedule length.
     """
 
     name: Literal["linear"] = Field(
         default="linear", description="Scheduler type discriminator."
     )
-    min_lr: float = Field(
-        default=1e-8,
+    end_factor: float = Field(
+        default=1e-4,
         ge=0,
-        description="Minimum learning rate at the end of the schedule.",
+        le=1,
+        description="Minimum learning rate multiplier at the end of the schedule.",
     )
     start_factor: float = Field(
         default=1.0, gt=0, le=1, description="Initial rate multiplier."
     )
-    extra_iters: int = Field(
-        default=1,
-        ge=0,
-        description="Iterations added to the computed schedule length.",
-    )
-
-
-class NoSchedulerSettings(StrictModel):
-    """Disabled learning-rate scheduler configuration.
-
-    Attributes:
-        name: Discriminator selecting no scheduler.
-    """
-
-    name: Literal["none"] = Field(
-        default="none", description="Scheduler type discriminator."
+    end_fraction: float = Field(
+        default=1.0, gt=0, le=1, description="Fraction of training at which decay ends"
     )
 
 
@@ -91,9 +75,6 @@ class ExponentialSchedulerSettings(StrictModel):
 
 
 SchedulerSettings = Annotated[
-    CosineSchedulerSettings
-    | LinearSchedulerSettings
-    | ExponentialSchedulerSettings
-    | NoSchedulerSettings,
+    CosineSchedulerSettings | LinearSchedulerSettings | ExponentialSchedulerSettings,
     Field(discriminator="name"),
 ]

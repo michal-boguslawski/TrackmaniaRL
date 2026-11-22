@@ -48,6 +48,6 @@ def build_ppo(ctx: BuildContext) -> tuple[Policy, PPOTrainer]:
         History(encoder.stack_size),
     )
     trainer = PPOTrainer(
-        modules, cfg.algorithm.trainer
+        modules, cfg.algorithm.trainer, cfg.run.total_steps
     )  # builds optimizer, buffer, scheduler
     return policy, trainer

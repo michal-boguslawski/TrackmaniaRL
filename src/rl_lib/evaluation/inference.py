@@ -26,11 +26,11 @@ class EpisodeResult:
     """Single completed episode result.
 
     Attributes:
-        return_: Episode return (sum of rewards).
+        reward: Episode reward.
         length: Episode length in steps.
     """
 
-    return_: float
+    reward: float
     length: int
 
 
@@ -44,9 +44,9 @@ def get_results_from_info(
     mask_key = f"_{stats_key}"
     if stats_key in episode_info and mask_key in episode_info:
         dones = episode_info[mask_key]
-        returns = episode_info[stats_key]["r"][dones]
+        rewards = episode_info[stats_key]["r"][dones]
         lengths = episode_info[stats_key]["l"][dones]
-        return [EpisodeResult(float(r), int(l)) for r, l in zip(returns, lengths)]
+        return [EpisodeResult(float(r), int(l)) for r, l in zip(rewards, lengths)]
 
 
 def prepare_stats_from_results(
@@ -56,7 +56,7 @@ def prepare_stats_from_results(
         return {}
 
     return {
-        f"{prefix}/return": mean(r.return_ for r in results),
+        f"{prefix}/reward": mean(r.reward for r in results),
         f"{prefix}/length": mean(r.length for r in results),
     }
 
@@ -81,7 +81,7 @@ def run_inference(
         cnt = 0
         observation, _ = env.reset(seed=seed)
         done = T.zeros(env.num_envs, dtype=T.bool, device=device)
-        episode_returns = T.zeros(env.num_envs, dtype=T.float32, device=device)
+        episode_rewards = T.zeros(env.num_envs, dtype=T.float32, device=device)
         episode_lengths = T.zeros(env.num_envs, dtype=T.int32, device=device)
         results: list[EpisodeResult] = []
 
@@ -89,7 +89,7 @@ def run_inference(
             while len(results) < episodes:
                 action, _ = policy.act(observation, done, deterministic=True)
                 next_state, reward, terminated, truncated, info = env.step(action)
-                episode_returns += reward
+                episode_rewards += reward
                 episode_lengths += 1
                 done = terminated | truncated
 
@@ -99,7 +99,7 @@ def run_inference(
                     if not temp:
                         for env_index in T.nonzero(done):
                             result = EpisodeResult(
-                                return_=float(episode_returns[env_index]),
+                                reward=float(episode_rewards[env_index]),
                                 length=int(episode_lengths[env_index]),
                             )
                             temp.append(result)
@@ -109,13 +109,13 @@ def run_inference(
                     for result in temp:
                         cnt += 1
                         logger.debug(
-                            "Inference episode %d/%d: return=%.3f length=%d",
+                            "Inference episode %d/%d: reward=%.3f length=%d",
                             cnt,
                             episodes,
-                            result.return_,
+                            result.reward,
                             result.length,
                         )
-                    episode_returns[done] = 0.0
+                    episode_rewards[done] = 0.0
                     episode_lengths[done] = 0
 
                 observation = next_state

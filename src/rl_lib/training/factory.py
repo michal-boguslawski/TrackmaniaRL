@@ -18,9 +18,10 @@ _TRAINER_REGISTRY: dict[str, Callable[..., Trainer]] = {}
 # Packages inside this one that hold algorithms rather than shared machinery.
 _NON_ALGORITHM_PACKAGES = frozenset({"callbacks"})
 _algorithms_discovered = False
+type TrainerType = Callable[..., T_Trainer]
 
 
-def register_trainer(algorithm: str, trainer_type: Callable[..., T_Trainer]) -> None:
+def register_trainer(algorithm: str, trainer_type: TrainerType) -> None:
     """Register a trainer constructor for an algorithm name.
 
     Algorithm packages call this from their ``__init__``, so importing the

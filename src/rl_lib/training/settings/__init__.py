@@ -6,7 +6,6 @@ from rl_lib.training.settings.scheduler import (
     CosineSchedulerSettings,
     ExponentialSchedulerSettings,
     LinearSchedulerSettings,
-    NoSchedulerSettings,
     SchedulerSettings,
 )
 
@@ -15,7 +14,6 @@ __all__ = [
     "EntropySettings",
     "ExponentialSchedulerSettings",
     "LinearSchedulerSettings",
-    "NoSchedulerSettings",
     "OptimizerSettings",
     "SchedulerSettings",
 ]

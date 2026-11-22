@@ -27,7 +27,12 @@ class MetricsLoggingCallback(Callback):
     """
 
     def __init__(
-        self, logger: MetricsSink, config: MetricsCallbackSettings, *args, **kwargs
+        self,
+        logger: MetricsSink,
+        config: MetricsCallbackSettings,
+        prefix: str = "train",
+        *args,
+        **kwargs,
     ):
         """Initialize the callback.
 
@@ -39,11 +44,15 @@ class MetricsLoggingCallback(Callback):
         self.cfg = config
         self._average_buffer: dict[str, list[float]] = {}
         self._log_buffer: list[tuple[dict[str, float], int]] = []
+        self.prefix = prefix
 
     def flush(self) -> None:
         """Write every pending metrics record without merging equal steps."""
         for metrics, step in self._log_buffer:
-            self._logger.log_metrics(metrics, step)
+            self._logger.log_metrics(
+                {f"{self.prefix}/{metric}": value for metric, value in metrics.items()},
+                step,
+            )
         self._log_buffer.clear()
 
     def on_event(
