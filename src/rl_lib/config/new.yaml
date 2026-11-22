@@ -67,7 +67,7 @@ algorithm:
 tracking:
   console: true
   mlflow: false
-  experiment_name: test
+  # experiment_name: test
   callbacks:
     - name: episode_statistics
       mode: step

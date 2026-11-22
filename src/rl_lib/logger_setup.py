@@ -10,7 +10,6 @@ from __future__ import annotations
 import atexit
 import logging
 import logging.config
-import logging.handlers
 import os
 import socket
 import uuid
@@ -57,6 +56,8 @@ def setup_logging(
     config_path: str | Path = _DEFAULT_CONFIG,
     default_level: int = logging.DEBUG,
     session_id: str | None = None,
+    experiment_name: str | None = None,
+    filename: str = "app.log",
 ) -> str:
     """Configure logging from YAML, inject session ID, start queue listener.
 
@@ -91,8 +92,10 @@ def setup_logging(
         config = yaml.safe_load(f)
 
     for handler in config.get("handlers", {}).values():
-        if "filename" in handler:
-            Path(handler["filename"]).parent.mkdir(parents=True, exist_ok=True)
+        if "foldername" in handler:
+            path = Path(handler.pop("foldername")) / experiment_name / session_id
+            path.mkdir(parents=True, exist_ok=True)
+            handler["filename"] = str(path / filename)
 
     logging.config.dictConfig(config)
 

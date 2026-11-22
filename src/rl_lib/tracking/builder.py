@@ -44,6 +44,8 @@ def build_callbacks(
     metrics_logger: MetricsSink,
     callback_settings_list: list[CallbackSettings],
     base_env: EnvironmentSettings,
+    session_id: str,
+    experiment_name: str | None = None,
     device: T.device | str = "cpu",
     run_seed: int | None = None,
 ) -> CallbackList | None:
@@ -56,6 +58,8 @@ def build_callbacks(
                 config=callback_settings,
                 base_env=base_env,
                 device=device,
+                session_id=session_id,
+                experiment=experiment_name or base_env.id,
                 run_seed=run_seed,
             )
             for callback_settings in callback_settings_list

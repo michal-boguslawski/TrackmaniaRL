@@ -5,6 +5,7 @@ environment, logs the video as an artifact, and logs episode metrics.
 """
 
 from logging import getLogger
+from pathlib import Path
 
 import torch as T
 
@@ -44,6 +45,8 @@ class RecordVideoCallback(Callback):
         logger: MetricsSink,
         config: RecordVideoCallbackSettings,
         base_env: EnvironmentSettings,
+        session_id: str,
+        experiment: str,
         device: T.device | str = "cpu",
         run_seed: int | None = None,
         *args,
@@ -65,7 +68,10 @@ class RecordVideoCallback(Callback):
             eval_env_settings(
                 base_env,
                 recording=RecordVideoWrapperSettings(
-                    video_folder=config.video_folder, episode_trigger=lambda _: True
+                    video_folder=str(
+                        Path(config.video_folder) / experiment / session_id
+                    ),
+                    episode_trigger=lambda _: True,
                 ),
             ),
             device=device,
@@ -86,7 +92,9 @@ class RecordVideoCallback(Callback):
             device=self.device,
         )
 
-        _ = stop_video_recording(self._env.env.envs[0])
+        video_path = stop_video_recording(self._env.env.envs[0])
+
+        logger.debug(f"Video saved in {video_path}")
 
         # log_evaluation_results(results, self._loggers, step=step, scope="video")
 

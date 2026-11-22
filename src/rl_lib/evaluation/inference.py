@@ -6,9 +6,11 @@ log_evaluation_results() for logging per-episode and aggregate metrics.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from logging import getLogger
 from statistics import mean
+from typing import Any
 
 import torch as T
 from gymnasium.vector import VectorEnv
@@ -30,6 +32,21 @@ class EpisodeResult:
 
     return_: float
     length: int
+
+
+def get_results_from_info(
+    info: dict[str, Any], stats_key: str = "episode"
+) -> list[EpisodeResult]:
+    episode_info = info.get("final_info")
+    if not isinstance(episode_info, Mapping) or stats_key not in episode_info:
+        episode_info = info
+
+    mask_key = f"_{stats_key}"
+    if stats_key in episode_info and mask_key in episode_info:
+        dones = episode_info[mask_key]
+        returns = episode_info[stats_key]["r"][dones]
+        lengths = episode_info[stats_key]["l"][dones]
+        return [EpisodeResult(float(r), int(l)) for r, l in zip(returns, lengths)]
 
 
 def prepare_stats_from_results(
@@ -70,27 +87,34 @@ def run_inference(
         with tqdm(total=episodes, desc="Evaluation", unit="episode") as progress:
             while len(results) < episodes:
                 action, _ = policy.act(observation, done, deterministic=True)
-                next_state, reward, terminated, truncated, _ = env.step(action)
+                next_state, reward, terminated, truncated, info = env.step(action)
                 episode_returns += reward
                 episode_lengths += 1
                 done = terminated | truncated
 
-                for env_index in T.nonzero(done):
-                    result = EpisodeResult(
-                        return_=float(episode_returns[env_index]),
-                        length=int(episode_lengths[env_index]),
-                    )
-                    results.append(result)
-                    progress.update()
-                    logger.debug(
-                        "Inference episode %d/%d: return=%.3f length=%d",
-                        len(results),
-                        episodes,
-                        result.return_,
-                        result.length,
-                    )
-                    episode_returns[env_index] = 0.0
-                    episode_lengths[env_index] = 0
+                temp = []
+                if done.any():
+                    temp = get_results_from_info(info)
+                    if not temp:
+                        for env_index in T.nonzero(done):
+                            result = EpisodeResult(
+                                return_=float(episode_returns[env_index]),
+                                length=int(episode_lengths[env_index]),
+                            )
+                            temp.append(result)
+                    results.extend(temp)
+                    progress.update(len(temp))
+
+                    for result in temp:
+                        logger.debug(
+                            "Inference episode %d/%d: return=%.3f length=%d",
+                            len(results),
+                            episodes,
+                            result.return_,
+                            result.length,
+                        )
+                    episode_returns[done] = 0.0
+                    episode_lengths[done] = 0
 
                 observation = next_state
 

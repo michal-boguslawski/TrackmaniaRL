@@ -66,9 +66,16 @@ def run_training(
     """
     level = getattr(logging, config.run.log_level)
     session_id = (
-        setup_logging(config.run.log_config, default_level=level)
+        setup_logging(
+            config.run.log_config,
+            default_level=level,
+            experiment_name=config.tracking.experiment_name or config.environment.id,
+        )
         if config.run.log_config
-        else setup_logging(default_level=level)
+        else setup_logging(
+            default_level=level,
+            experiment_name=config.tracking.experiment_name or config.environment.id,
+        )
     )
     logger = logging.getLogger(__name__)
     device = resolve_device(config)
@@ -98,6 +105,8 @@ def run_training(
             metrics_logger,
             config.tracking.callbacks,
             base_env=config.environment,
+            session_id=session_id,
+            experiment_name=config.tracking.experiment_name,
             device=device,
             run_seed=config.run.seed,
         )
