@@ -64,6 +64,7 @@ class MLflowMetricsSink(MetricsSink):
         self,
         experiment_name: str = "MLflow Quickstart",
         run_name: str | None = None,
+        tags: dict[str, str] | None = None,
         registered_model_name: str | None = None,
         log_system_metrics: bool = True,
     ):
@@ -82,7 +83,7 @@ class MLflowMetricsSink(MetricsSink):
 
         self._registered_model_name = registered_model_name
         self._run = mlflow.start_run(
-            run_name=run_name, log_system_metrics=log_system_metrics
+            run_name=run_name, tags=tags, log_system_metrics=log_system_metrics
         )
 
     @staticmethod

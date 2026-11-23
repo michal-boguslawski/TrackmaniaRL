@@ -1,13 +1,13 @@
 run:
-  total_steps: 10_000
+  total_steps: 1_000_000
   seed: 42
-  device: cpu
+  device: cuda
   log_level: DEBUG
   channels_last: true
 
 environment:
   id: CarRacing-v3
-  num_envs: 2
+  num_envs: 8
   continuous: true
   normalize_rewards: true
   reward_normalization_gamma: 0.99
@@ -61,18 +61,19 @@ algorithm:
 
     scheduler:
       name: linear
+      end_fraction: 0.6
 
     rollout:
       steps_per_env: 2048
 
     optimization:
-      minibatch_size: 512
+      minibatch_size: 256
       epochs: 3
       minibatch_indexing_mode: iid
 
 tracking:
   console: true
-  mlflow: false
+  mlflow: true
   # experiment_name: test
   callbacks:
     - name: episode_statistics
@@ -83,12 +84,12 @@ tracking:
       video_folder: logs/videos
       interval: 100_000
     - name: evaluation
-      interval: 10_000
-      episodes: 1
+      interval: 100_000
+      episodes: 10
       num_envs: 1
       on_event: env_step
     - name: evaluation
       interval: 1
-      episodes: 4
-      num_envs: 2
+      episodes: 1_000
+      num_envs: 8
       on_event: rollout_end

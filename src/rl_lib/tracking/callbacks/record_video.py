@@ -47,6 +47,7 @@ class RecordVideoCallback(Callback):
         base_env: EnvironmentSettings,
         session_id: str,
         experiment: str,
+        algorithm: str | None = None,
         device: T.device | str = "cpu",
         run_seed: int | None = None,
         *args,
@@ -69,7 +70,7 @@ class RecordVideoCallback(Callback):
                 base_env,
                 recording=RecordVideoWrapperSettings(
                     video_folder=str(
-                        Path(config.video_folder) / experiment / session_id
+                        Path(config.video_folder) / experiment / algorithm / session_id
                     ),
                     episode_trigger=lambda _: True,
                 ),

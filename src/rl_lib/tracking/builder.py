@@ -14,26 +14,46 @@ from rl_lib.tracking.sinks.mlflow_sink import MLflowMetricsSink
 
 def _build_mlflow_metrics_sink(
     tracking_settings: TrackingSettings,
+    env_id: str,
+    session_id: str,
+    algorithm: str | None = None,
+    *args,
+    **kwargs,
 ) -> MLflowMetricsSink:
     return MLflowMetricsSink(
-        experiment_name=tracking_settings.experiment_name,
-        run_name=tracking_settings.run_name,
+        experiment_name=tracking_settings.experiment_name or env_id,
+        run_name=tracking_settings.run_name or session_id,
+        tags={"algorithm": algorithm} if algorithm else None,
         log_system_metrics=tracking_settings.log_system_metrics,
     )
 
 
 def _build_console_metrics_sink(
     tracking_settings: TrackingSettings,
+    *args,
+    **kwargs,
 ) -> ConsoleMetricsSink:
     return ConsoleMetricsSink()
 
 
 def build_metrics_logger(
-    tracking_settings: TrackingSettings, session_id: str
+    tracking_settings: TrackingSettings,
+    env_id: str,
+    session_id: str,
+    algorithm: str | None = None,
+    *args,
+    **kwargs,
 ) -> CompositeMetricsLogger:
     logger = CompositeMetricsLogger()
     if tracking_settings.mlflow:
-        logger.add_sink(_build_mlflow_metrics_sink(tracking_settings))
+        logger.add_sink(
+            _build_mlflow_metrics_sink(
+                tracking_settings,
+                env_id=env_id,
+                session_id=session_id,
+                algorithm=algorithm,
+            )
+        )
 
     if tracking_settings.console:
         logger.add_sink(_build_console_metrics_sink(tracking_settings))
@@ -46,6 +66,7 @@ def build_callbacks(
     base_env: EnvironmentSettings,
     session_id: str,
     experiment_name: str | None = None,
+    algorithm: str | None = None,
     device: T.device | str = "cpu",
     run_seed: int | None = None,
 ) -> CallbackList | None:
@@ -60,6 +81,7 @@ def build_callbacks(
                 device=device,
                 session_id=session_id,
                 experiment=experiment_name or base_env.id,
+                algorithm=algorithm,
                 run_seed=run_seed,
             )
             for callback_settings in callback_settings_list

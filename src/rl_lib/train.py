@@ -70,24 +70,26 @@ def run_training(
             config.run.log_config,
             default_level=level,
             experiment_name=config.tracking.experiment_name or config.environment.id,
+            algorithm=config.algorithm.name,
         )
         if config.run.log_config
         else setup_logging(
             default_level=level,
             experiment_name=config.tracking.experiment_name or config.environment.id,
+            algorithm=config.algorithm.name,
         )
     )
     logger = logging.getLogger(__name__)
     device = resolve_device(config)
     _seed_everything(config.run.seed)
     gc.collect()
-    if device.type == "cuda":
-        # Convolution shapes are static across updates, so cuDNN's autotuner
-        # pays its search cost once per shape and caches the winner.
-        T.backends.cudnn.benchmark = config.run.cudnn_benchmark
-        if config.run.clear_cuda_cache:
-            T.cuda.empty_cache()
-            T.cuda.reset_peak_memory_stats(device)
+    # if device.type == "cuda":
+    # Convolution shapes are static across updates, so cuDNN's autotuner
+    # pays its search cost once per shape and caches the winner.
+    # T.backends.cudnn.benchmark = config.run.cudnn_benchmark
+    # if config.run.clear_cuda_cache:
+    #     T.cuda.empty_cache()
+    #     T.cuda.reset_peak_memory_stats(device)
 
     verbosity = config.tracking.verbosity
     with ExitStack() as stack:
@@ -99,7 +101,12 @@ def run_training(
             obs_shape=env.observation_space.shape,
             action_space=env.single_action_space,
         )
-        metrics_logger = build_metrics_logger(config.tracking, session_id)
+        metrics_logger = build_metrics_logger(
+            config.tracking,
+            env_id=config.environment.id,
+            session_id=session_id,
+            algorithm=config.algorithm.name,
+        )
         policy, trainer = build_ppo(build_ctx)
         callbacks = build_callbacks(
             metrics_logger,
@@ -107,6 +114,7 @@ def run_training(
             base_env=config.environment,
             session_id=session_id,
             experiment_name=config.tracking.experiment_name,
+            algorithm=config.algorithm.name,
             device=device,
             run_seed=config.run.seed,
         )
