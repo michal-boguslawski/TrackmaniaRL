@@ -1,7 +1,7 @@
 import torch as T
 
 from rl_lib.envs.settings.env import EnvironmentSettings
-from rl_lib.policy.policy import Policy
+from rl_lib.paths import RunPaths
 from rl_lib.tracking.callbacks.base import CallbackList
 from rl_lib.tracking.callbacks.registry import CALLBACK_REGISTRY
 from rl_lib.tracking.composite_logger import CompositeMetricsLogger
@@ -64,9 +64,7 @@ def build_callbacks(
     metrics_logger: MetricsSink,
     callback_settings_list: list[CallbackSettings],
     base_env: EnvironmentSettings,
-    session_id: str,
-    experiment_name: str | None = None,
-    algorithm: str | None = None,
+    run_paths: RunPaths,
     device: T.device | str = "cpu",
     run_seed: int | None = None,
 ) -> CallbackList | None:
@@ -78,10 +76,8 @@ def build_callbacks(
                 logger=metrics_logger,
                 config=callback_settings,
                 base_env=base_env,
+                run_paths=run_paths,
                 device=device,
-                session_id=session_id,
-                experiment=experiment_name or base_env.id,
-                algorithm=algorithm,
                 run_seed=run_seed,
             )
             for callback_settings in callback_settings_list

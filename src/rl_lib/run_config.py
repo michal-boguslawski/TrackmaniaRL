@@ -16,6 +16,7 @@ class RunSettings(StrictModel):
     total_steps: PositiveInt = 3_000_000  # vector-environment steps
     seed: int = Field(default=1, ge=0, le=2**32 - 1)
     device: str = "auto"
+    logs_root: str = Field(default="logs")
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "DEBUG"
     channels_last: bool = Field(
         default=True,

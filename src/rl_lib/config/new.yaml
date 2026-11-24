@@ -23,9 +23,9 @@ environment:
     - name: reward_on_done
       on_terminated: null
       on_truncated: 0.0
-      on_win: 100.0
-    # - name: off_track_penalty
-    #   penalty_weight: 0.05
+      on_win: 70.0
+    - name: off_track_penalty
+      penalty_weight: 0.05
     - name: max_and_skip
       skip: 2
 
@@ -36,26 +36,34 @@ algorithm:
     # name: ppo
     encoder:
       stack_size: 4
-    actor: {}
+    actor:
+      hidden_layers:
+      - out_dim: 1024
+        activation: gelu
+        init_gain: 1.41421356237
+        init_bias: 0.0
+        bias: true
     critic: {}
 
   trainer:
     loss:
       actor_loss_cfg:
         advantage_normalization_strategy: global
-        ppo_epsilon: 0.2
+        ppo_epsilon: 0.1
 
       critic_loss_cfg:
-        critic_beta: 0.5
+        critic_beta: 0.8
 
       entropy:
-        coefficient: 0.001
+        coefficient: 0.05
+        decay: 0.9998
+        min_coefficient:  0.01
 
     optimizer:
       name: Adam
       learning_rates:
         cnn_lr: 1e-4
-        sequence_encoder_lr: 1e-4
+        sequence_encoder_lr: 3e-5
         actor_lr: 1e-4
         critic_lr: 1e-4
 
@@ -67,7 +75,7 @@ algorithm:
       steps_per_env: 2048
 
     optimization:
-      minibatch_size: 256
+      minibatch_size: 512
       epochs: 3
       minibatch_indexing_mode: iid
 
@@ -81,7 +89,6 @@ tracking:
     - name: metrics_logger
       granularity: train_end
     - name: record_video
-      video_folder: logs/videos
       interval: 100_000
     - name: evaluation
       interval: 100_000

@@ -19,7 +19,6 @@ handlers:
     class: logging.handlers.RotatingFileHandler
     level: DEBUG
     formatter: standard
-    foldername: logs
     maxBytes: 5242880
     backupCount: 3
     encoding: utf8

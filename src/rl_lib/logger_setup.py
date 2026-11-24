@@ -52,14 +52,17 @@ def _install_session_id_factory(session_id: str) -> None:
     logging.setLogRecordFactory(record_factory)
 
 
+def resolve_session_id(explicit: str | None = None) -> str:
+    """One owner of the precedence: explicit → RL_LIB_SESSION_ID → generated."""
+    return explicit or os.environ.get("RL_LIB_SESSION_ID") or _generate_session_id()
+
+
 def setup_logging(
+    session_id: str,
+    logs_filepath: Path,
     config_path: str | Path = _DEFAULT_CONFIG,
     default_level: int = logging.DEBUG,
-    session_id: str | None = None,
-    experiment_name: str | None = None,
-    algorithm: str | None = None,
-    filename: str = "app.log",
-) -> str:
+) -> None:
     """Configure logging from YAML, inject session ID, start queue listener.
 
     Args:
@@ -75,9 +78,6 @@ def setup_logging(
         - Starts queue handler listener thread
         - Registers shutdown_logging at exit
     """
-    session_id = (
-        session_id or os.environ.get("RL_LIB_SESSION_ID") or _generate_session_id()
-    )
     _install_session_id_factory(session_id)
 
     config_path = Path(config_path)
@@ -87,21 +87,14 @@ def setup_logging(
         logging.getLogger(__name__).warning(
             "Logging config '%s' not found, falling back to basicConfig.", config_path
         )
-        return session_id
 
     with config_path.open("rt") as f:
         config = yaml.safe_load(f)
 
-    for handler in config.get("handlers", {}).values():
-        if "foldername" in handler:
-            path = (
-                Path(handler.pop("foldername"))
-                / experiment_name
-                / algorithm
-                / session_id
-            )
-            path.mkdir(parents=True, exist_ok=True)
-            handler["filename"] = str(path / filename)
+    for key, handler in config.get("handlers", {}).items():
+        if key == "file":
+            logs_filepath.parent.mkdir(parents=True, exist_ok=True)
+            handler["filename"] = str(logs_filepath)
 
     logging.config.dictConfig(config)
 
@@ -110,7 +103,6 @@ def setup_logging(
         queue_handler.listener.start()
 
     atexit.register(shutdown_logging)
-    return session_id
 
 
 def shutdown_logging() -> None:

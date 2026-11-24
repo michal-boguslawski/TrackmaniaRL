@@ -27,7 +27,8 @@ import torch as T
 
 from rl_lib.device import resolve_device
 from rl_lib.envs.make_env import make_env
-from rl_lib.logger_setup import setup_logging, shutdown_logging
+from rl_lib.logger_setup import resolve_session_id, setup_logging, shutdown_logging
+from rl_lib.paths import RunPaths
 from rl_lib.run_config import RunConfig, load_config
 from rl_lib.tracking.builder import build_callbacks, build_metrics_logger
 from rl_lib.training.base import BuildContext
@@ -65,18 +66,25 @@ def run_training(
         profiling_config: Optional settings for a bounded PyTorch profiler trace.
     """
     level = getattr(logging, config.run.log_level)
-    session_id = (
+    session_id = resolve_session_id()
+    run_paths = RunPaths(
+        Path(config.run.logs_root),
+        session_id,
+        experiment=config.tracking.experiment_name or config.environment.id,
+        algorithm=config.algorithm.name,
+    )
+    (
         setup_logging(
+            session_id,
+            run_paths.log_file,
             config.run.log_config,
             default_level=level,
-            experiment_name=config.tracking.experiment_name or config.environment.id,
-            algorithm=config.algorithm.name,
         )
         if config.run.log_config
         else setup_logging(
+            session_id,
+            run_paths.log_file,
             default_level=level,
-            experiment_name=config.tracking.experiment_name or config.environment.id,
-            algorithm=config.algorithm.name,
         )
     )
     logger = logging.getLogger(__name__)
@@ -112,9 +120,7 @@ def run_training(
             metrics_logger,
             config.tracking.callbacks,
             base_env=config.environment,
-            session_id=session_id,
-            experiment_name=config.tracking.experiment_name,
-            algorithm=config.algorithm.name,
+            run_paths=run_paths,
             device=device,
             run_seed=config.run.seed,
         )

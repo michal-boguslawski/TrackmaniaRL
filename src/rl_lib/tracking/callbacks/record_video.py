@@ -14,6 +14,7 @@ from rl_lib.envs.make_env import make_env
 from rl_lib.envs.settings.env import EnvironmentSettings
 from rl_lib.envs.settings.wrappers.record_video import RecordVideoWrapperSettings
 from rl_lib.evaluation.inference import prepare_stats_from_results, run_inference
+from rl_lib.paths import RunPaths
 from rl_lib.policy.policy import Policy
 from rl_lib.tracking.artifacts import step_artifact_path
 from rl_lib.tracking.callbacks.base import Callback, CallbackEvent
@@ -45,9 +46,7 @@ class RecordVideoCallback(Callback):
         logger: MetricsSink,
         config: RecordVideoCallbackSettings,
         base_env: EnvironmentSettings,
-        session_id: str,
-        experiment: str,
-        algorithm: str | None = None,
+        run_paths: RunPaths,
         device: T.device | str = "cpu",
         run_seed: int | None = None,
         *args,
@@ -69,9 +68,7 @@ class RecordVideoCallback(Callback):
             eval_env_settings(
                 base_env,
                 recording=RecordVideoWrapperSettings(
-                    video_folder=str(
-                        Path(config.video_folder) / experiment / algorithm / session_id
-                    ),
+                    video_folder=str(run_paths.video_dir),
                     episode_trigger=lambda _: True,
                 ),
             ),

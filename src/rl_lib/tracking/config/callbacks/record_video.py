@@ -12,9 +12,6 @@ class RecordVideoCallbackSettings(StrictModel):
         default="record_video",
         description="Callback registry name.",
     )
-    video_folder: str = Field(
-        description="Output directory; defaults to the environment video folder.",
-    )
     interval: PositiveInt = Field(
         default=100_000,
     )
