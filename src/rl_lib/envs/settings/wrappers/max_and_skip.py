@@ -2,10 +2,10 @@ from typing import Literal
 
 from pydantic import Field, PositiveInt
 
-from rl_lib.config_base import StrictModel
+from rl_lib.envs.settings.wrappers.base import BaseWrapperSettings
 
 
-class MaxAndSkipWrapperSettings(StrictModel):
+class MaxAndSkipWrapperSettings(BaseWrapperSettings):
     """Settings for repeating actions and max-pooling observations.
 
     Attributes:

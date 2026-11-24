@@ -2,10 +2,10 @@ from typing import Literal
 
 from pydantic import Field, FiniteFloat
 
-from rl_lib.config_base import StrictModel
+from rl_lib.envs.settings.wrappers.base import BaseWrapperSettings
 
 
-class RewardOnDoneWrapperSettings(StrictModel):
+class RewardOnDoneWrapperSettings(BaseWrapperSettings):
     """Reward overrides applied when an episode terminates or truncates.
 
     Attributes:

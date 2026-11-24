@@ -3,10 +3,10 @@ from typing import Literal
 
 from pydantic import Field, NonNegativeInt, PositiveInt
 
-from rl_lib.config_base import StrictModel
+from rl_lib.envs.settings.wrappers.base import BaseWrapperSettings
 
 
-class RecordVideoWrapperSettings(StrictModel):
+class RecordVideoWrapperSettings(BaseWrapperSettings):
     """Settings for recording environment episodes to video.
 
     Attributes:

@@ -2,10 +2,10 @@ from typing import Literal
 
 from pydantic import Field, FiniteFloat
 
-from rl_lib.config_base import StrictModel
+from rl_lib.envs.settings.wrappers.base import BaseWrapperSettings
 
 
-class OffTrackPenaltyWrapperSettings(StrictModel):
+class OffTrackPenaltyWrapperSettings(BaseWrapperSettings):
     """Settings for penalizing distance beyond the track edge.
 
     Attributes:

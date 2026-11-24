@@ -12,6 +12,7 @@ from gymnasium.wrappers import (
     RecordVideo,
 )
 
+from rl_lib.envs.wrappers.action_couple import CoupledGasBrakeWrapper
 from rl_lib.envs.wrappers.off_track_penalty_wrapper import OffTrackPenaltyWrapper
 from rl_lib.envs.wrappers.reward_wrappers import RewardOnEpisodeEndWrapper
 
@@ -23,4 +24,5 @@ WRAPPERS_REGISTRY = {
     "max_and_skip": MaxAndSkipObservation,
     "reward_on_done": RewardOnEpisodeEndWrapper,
     "off_track_penalty": OffTrackPenaltyWrapper,
+    "action_couple": CoupledGasBrakeWrapper,
 }

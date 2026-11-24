@@ -21,4 +21,4 @@ class RunPaths:
 
     @property
     def video_dir(self) -> Path:
-        return self.run_dir / "artifacts"
+        return self.run_dir / "artifacts" / "videos"

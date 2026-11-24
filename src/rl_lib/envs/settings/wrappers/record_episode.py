@@ -2,10 +2,10 @@ from typing import Literal
 
 from pydantic import Field, PositiveInt
 
-from rl_lib.config_base import StrictModel
+from rl_lib.envs.settings.wrappers.base import BaseWrapperSettings
 
 
-class RecordEpisodeStatisticsWrapperSettings(StrictModel):
+class RecordEpisodeStatisticsWrapperSettings(BaseWrapperSettings):
     """Settings for tracking episode rewards and lengths.
 
     Attributes:
