@@ -1,4 +1,5 @@
 import torch as T
+from torch import nn
 
 from rl_lib.envs.settings.env import EnvironmentSettings
 from rl_lib.paths import RunPaths
@@ -59,6 +60,7 @@ def build_callbacks(
     run_paths: RunPaths,
     device: T.device | str = "cpu",
     run_seed: int | None = None,
+    modules: nn.Module | None = None,
 ) -> CallbackList | None:
     if not callback_settings_list:
         return
@@ -71,6 +73,7 @@ def build_callbacks(
                 run_paths=run_paths,
                 device=device,
                 run_seed=run_seed,
+                modules=modules,
             )
             for callback_settings in callback_settings_list
         ]

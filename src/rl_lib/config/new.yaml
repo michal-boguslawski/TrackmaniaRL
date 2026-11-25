@@ -96,3 +96,6 @@ tracking:
       episodes: 4
       num_envs: 2
       on_event: rollout_end
+
+    - name: model_checkpoint
+      interval: 50

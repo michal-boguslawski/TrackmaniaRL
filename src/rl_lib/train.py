@@ -122,6 +122,7 @@ def run_training(
             run_paths=run_paths,
             device=device,
             run_seed=config.run.seed,
+            modules=trainer.modules,
         )
         trainer.set_callbacks(callbacks)
 
