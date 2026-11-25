@@ -101,7 +101,7 @@ class MLflowMetricsSink(MetricsSink):
         short_id = uuid.uuid4().hex[:6]
         return f"{host}-{ts}-{short_id}"
 
-    def log_metrics(self, metrics: dict[str, float], step: int) -> None:
+    def log_metrics(self, metrics: dict[str, float], step: int | None = None) -> None:
         """Log metrics to MLflow."""
         mlflow.log_metrics(metrics, step=step)
 
@@ -118,30 +118,34 @@ class MLflowMetricsSink(MetricsSink):
     def log_model(
         self,
         model: torch.nn.Module,
-        artifact_path: str = "model",
+        artifact_path: str = "model.pt",
         registered_model_name: str | None = None,
     ) -> None:
         """Log PyTorch model to MLflow with optional registry."""
         mlflow.pytorch.log_model(
             model,
-            artifact_path=normalize_artifact_path(artifact_path),
+            name=artifact_path,
             registered_model_name=registered_model_name or self._registered_model_name,
             serialization_format=mlflow.pytorch.SERIALIZATION_FORMAT_PICKLE,
+            pip_requirements=[f"torch=={torch.__version__.split('+')[0]}", "mlflow"],
         )
 
     def log_state_dict(
-        self, state_dict: dict, artifact_path: str = "checkpoints"
+        self, state_dict: dict, artifact_path: str = "checkpoints/step"
     ) -> None:
         """Log state dict as MLflow artifact."""
-        mlflow.pytorch.log_state_dict(
-            state_dict, artifact_path=normalize_artifact_path(artifact_path)
-        )
+        mlflow.pytorch.log_state_dict(state_dict, artifact_path=artifact_path)
 
     def log_artifact(self, local_path: str, artifact_path: str | None = None) -> None:
         """Log local file (e.g., video) as MLflow artifact."""
-        mlflow.log_artifact(
-            local_path, artifact_path=normalize_artifact_path(artifact_path)
-        )
+        mlflow.log_artifact(local_path, artifact_path=artifact_path)
+
+    def log_evaluation(
+        self,
+        results: dict[str, float | dict[str, float] | list[dict[str, float]]],
+        artifact_path: str = "evaluation/final_results.json",
+    ) -> None:
+        mlflow.log_dict(results, artifact_path)
 
     def close(self, status: str = "FINISHED") -> None:
         """End MLflow run with given status."""

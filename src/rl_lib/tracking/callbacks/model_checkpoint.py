@@ -56,17 +56,15 @@ class ModelCheckpointCallback(Callback):
 
     def on_event(self, event: CallbackEvent, step: int, *args, **kwargs) -> None:
         if event is CallbackEvent.ENV_STEP and step % self.cfg.interval == 0:
-            file_name = f"checkpoints/step_{step}.pt"
+            file_name = f"checkpoints/step_{step}"
             self._logger.log_state_dict(self._modules.state_dict(), file_name)
             logger.debug(f"State dict saved at {file_name}")
 
         if event is CallbackEvent.ROLLOUT_END:
-            self._logger.log_model(self._modules, "final_model.pt")
-            logger.debug("Final model saved at final_model.pt")
-            self._logger.log_state_dict(
-                self._modules.state_dict(), "final_state_dict.pt"
-            )
-            logger.debug("Final state dict saved at final_state_dict.pt")
+            self._logger.log_model(self._modules, "final_model")
+            logger.debug("Final model saved at final_model")
+            self._logger.log_state_dict(self._modules.state_dict(), "final_state_dict")
+            logger.debug("Final state dict saved at final_state_dict")
 
     def flush(self) -> None:
         pass

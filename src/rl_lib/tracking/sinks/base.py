@@ -17,7 +17,7 @@ class MetricsSink(ABC):
     """
 
     @abstractmethod
-    def log_metrics(self, metrics: dict[str, float], step: int) -> None:
+    def log_metrics(self, metrics: dict[str, float], step: int | None = None) -> None:
         """Log scalar metrics at a training step.
 
         Args:

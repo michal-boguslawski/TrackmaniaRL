@@ -41,10 +41,10 @@ class LocalMetricsSink(MetricsSink):
         file_path.parent.mkdir(exist_ok=True, parents=True)
         return file_path
 
-    def log_metrics(self, metrics: dict[str, float], step: int) -> None:
+    def log_metrics(self, metrics: dict[str, float], step: int | None = None) -> None:
         """Log metrics to local at DEBUG level."""
         formatted = {k: f"{v:.6f}" for k, v in metrics.items()}
-        logger.debug(f"Step {step}: {formatted}")
+        logger.debug(f"Step {step or ''}: {formatted}")
 
     def log_parameters(
         self,
@@ -79,18 +79,20 @@ class LocalMetricsSink(MetricsSink):
     def log_model(
         self,
         model: nn.Module,
-        artifact_path: str = "model.pt",
+        artifact_path: str = "model",
         registered_model_name: str | None = None,
+        extension: str = ".pt",
     ) -> None:
-        filepath = self._resolve_path(artifact_path)
+        filepath = self._resolve_path(artifact_path + extension)
         T.save(model, filepath)
 
     def log_state_dict(
         self,
         state_dict: dict[str, Any],
-        artifact_path: str = "checkpoints/state_dict.pt",
+        artifact_path: str = "checkpoints/state_dict",
+        extension: str = ".pt",
     ):
-        filepath = self._resolve_path(artifact_path)
+        filepath = self._resolve_path(artifact_path + extension)
         T.save(state_dict, filepath)
 
     def log_artifact(self, local_path: str, artifact_path: str | None = None) -> None:

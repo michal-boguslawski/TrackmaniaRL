@@ -93,13 +93,14 @@ class EvaluationCallback(Callback):
     ) -> None:
         if event is self.cfg.on_event and step % self.cfg.interval == 0:
             results = self._evaluate(policy, self.cfg.episodes)
-            if event is CallbackEvent.ROLLOUT_END:
-                summary = prepare_results_summary(results, "eval/final")
-                self._logger.log_evaluation(summary)
-                self._logger.log_metrics(summary["summary"], step)
-            else:
-                metrics = prepare_mean_stats_from_results(results, "eval/episode")
-                self._logger.log_metrics(metrics, step)
+            metrics = prepare_mean_stats_from_results(results, "eval/episode")
+            self._logger.log_metrics(metrics, step)
+
+        if event is CallbackEvent.ROLLOUT_END:
+            results = self._evaluate(policy, self.cfg.episodes)
+            summary = prepare_results_summary(results, "eval/final")
+            self._logger.log_evaluation(summary)
+            self._logger.log_metrics(summary["summary"])
 
     def flush(self, *args, **kwargs) -> None:
         pass

@@ -1,13 +1,13 @@
 run:
-  total_steps: 100
+  total_steps: 200_000
   seed: 42
-  device: cpu
+  device: cuda
   log_level: DEBUG
   channels_last: true
 
 environment:
   id: CarRacing-v3
-  num_envs: 2
+  num_envs: 8
   continuous: true
   normalize_rewards: true
   reward_normalization_gamma: 0.99
@@ -25,16 +25,14 @@ environment:
     - name: off_track_penalty
       penalty_weight: 0.05
     - name: reward_on_done
-      on_terminated: null
       on_truncated: 0.0
       on_win: 70.0
-    - name: action_couple
+    # - name: action_couple
 
 algorithm:
   name: ppo
 
   network:
-    # name: ppo
     encoder:
       stack_size: 4
     actor: {}
@@ -53,14 +51,14 @@ algorithm:
       entropy:
         coefficient: 0.02
         decay: 0.9995
-        min_coefficient: 0.001
+        min_coefficient:  0.001
 
     optimizer:
       name: Adam
       learning_rates:
-        cnn_lr: 3e-5
-        sequence_encoder_lr: 3e-5
-        actor_lr: 3e-5
+        cnn_lr: 1e-4
+        sequence_encoder_lr: 1e-4
+        actor_lr: 1e-4
         critic_lr: 1e-4
 
     scheduler:
@@ -68,34 +66,38 @@ algorithm:
       end_fraction: 0.6
 
     rollout:
-      steps_per_env: 32
+      steps_per_env: 1024
 
     optimization:
-      minibatch_size: 16
-      epochs: 1
+      minibatch_size: 256
+      epochs: 6
       minibatch_indexing_mode: iid
 
 tracking:
   console: true
-  mlflow: false
+  mlflow: true
   # experiment_name: test
   callbacks:
     - name: episode_statistics
       mode: step
+
     - name: metrics_logger
       granularity: train_end
-    # - name: record_video
-    #   interval: 100_000
-    # - name: evaluation
-    #   interval: 100_000
-    #   episodes: 2
-    #   num_envs: 2
-    #   on_event: env_step
+
+    - name: record_video
+      interval: 50_000
+
+    - name: evaluation
+      interval: 50_000
+      episodes: 10
+      num_envs: 2
+      on_event: env_step
+
     - name: evaluation
       interval: 1
-      episodes: 4
-      num_envs: 2
+      episodes: 100
+      num_envs: 8
       on_event: rollout_end
 
     - name: model_checkpoint
-      interval: 50
+      interval: 50_000
