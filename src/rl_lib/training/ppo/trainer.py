@@ -104,6 +104,7 @@ class PPOTrainer:
                 training_step=global_step,
                 train_step=self.train_step,
                 metrics_logger=self._callbacks,
+                kl_control_settings=self.cfg.kl,
             )
 
             self.rollout_buffer.reset_counter()
@@ -145,7 +146,9 @@ class PPOTrainer:
         Returns:
             Dict of loss and metric scalars for logging.
         """
-        action_dist, critic_values = self.modules(observation, episode_mask(dones))
+        action_dist, critic_values, action_mean = self.modules(
+            observation, episode_mask(dones)
+        )
         log_probs = action_dist.log_prob(action)
         loss, metrics = self.losses.calculate_losses(
             log_probs,
@@ -155,6 +158,7 @@ class PPOTrainer:
             returns,
             old_log_probs,
             old_values,
+            action_mean,
         )
 
         self._optimizer.zero_grad()

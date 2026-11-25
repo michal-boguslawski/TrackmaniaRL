@@ -27,13 +27,15 @@ class ActorCritic(nn.Module):
         self.actor = actor
         self.critic = critic
 
-    def forward(self, x: T.Tensor, mask: T.Tensor) -> tuple[Distribution, T.Tensor]:
+    def forward(
+        self, x: T.Tensor, mask: T.Tensor
+    ) -> tuple[Distribution, T.Tensor, T.Tensor]:
         features = self.encoder(
             x, mask
         )  # (B,T,H,W,C) -> (B,D), the training entry point
-        action_dist, _ = self.actor(features)
+        action_dist, action_mean = self.actor(features)
         critic_value = self.critic(features)
-        return action_dist, critic_value
+        return action_dist, critic_value, action_mean
 
     def optimizer_parameter_groups(
         self,

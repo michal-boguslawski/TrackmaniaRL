@@ -3,10 +3,12 @@
 from collections.abc import Callable
 from logging import getLogger
 
+import numpy as np
 import torch as T
 
 from rl_lib.tracking.callbacks.base import Callback, CallbackEvent
 from rl_lib.training.ppo.config.optimization import PPOOptimizationSettings
+from rl_lib.training.ppo.config.trainer import KLControlSettings
 from rl_lib.training.ppo.minibatches import get_iid_minibatches
 
 logger = getLogger(__name__)
@@ -19,6 +21,7 @@ def run_ppo_update_loop(
     training_step: int,
     train_step: Callable[..., dict[str, float]],
     metrics_logger: Callback | None = None,
+    kl_control_settings: KLControlSettings | None = None,
     # current_update_step: Callable[[], int],
     # on_minibatch: Callable[..., None],
     # on_epoch: Callable[..., None],
@@ -64,34 +67,37 @@ def run_ppo_update_loop(
                     step=training_step,
                     metrics=minibatch_metrics,
                 )
-            epoch_kls.append(minibatch_metrics["ppo/approx_kl"])
+            epoch_kls.append(minibatch_metrics["ppo/approx_kl"].item())
 
-            # if (
-            #     minibatch_metrics["metrics/approx_kl"]
-            #     > cfg.kl.target_kl * cfg.kl.stop_multiplier
-            #     and training_step > cfg.kl.warmup_steps
-            #     and cfg.kl.hard_stop
-            # ):
-            #     logger.warning(
-            #         "Hard stop mid-epoch: KL %.4f",
-            #         minibatch_metrics["metrics/approx_kl"],
-            #     )
-            #     break
+            if (
+                kl_control_settings is not None
+                and minibatch_metrics["ppo/approx_kl"]
+                > kl_control_settings.target_kl * kl_control_settings.stop_multiplier
+                and training_step > kl_control_settings.warmup_steps
+                and kl_control_settings.hard_stop
+            ):
+                logger.warning(
+                    "Hard stop mid-epoch: KL %.4f",
+                    minibatch_metrics["ppo/approx_kl"],
+                )
+                break
 
-            # on_minibatch(metrics=minibatch_metrics, step=current_update_step())
-
-        # mean_epoch_kl = float(np.mean(epoch_kls)) if epoch_kls else None
-        # on_epoch()
-        # if (
-        #     mean_epoch_kl is not None
-        #     and mean_epoch_kl > cfg.kl.target_kl
-        #     and training_step > cfg.kl.warmup_steps
-        #     and cfg.kl.hard_stop
-        # ):
-        #     logger.warning(
-        #         "Early stop epoch %s: KL %.4f > %.4f",
-        #         epoch,
-        #         mean_epoch_kl,
-        #         cfg.kl.target_kl,
-        #     )
-        #     break
+        mean_epoch_kl = float(np.mean(epoch_kls)) if epoch_kls else None
+        metrics_logger.on_event(
+            CallbackEvent.EPOCH_END,
+            step=training_step,
+        )
+        if (
+            kl_control_settings is not None
+            and mean_epoch_kl is not None
+            and mean_epoch_kl > kl_control_settings.target_kl
+            and training_step > kl_control_settings.warmup_steps
+            and kl_control_settings.hard_stop
+        ):
+            logger.warning(
+                "Early stop epoch %s: KL %.4f > %.4f",
+                epoch,
+                mean_epoch_kl,
+                kl_control_settings.target_kl,
+            )
+            break

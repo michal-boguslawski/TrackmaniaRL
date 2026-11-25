@@ -75,10 +75,11 @@ class PPOLosses:
         returns: T.Tensor,
         old_log_probs: T.Tensor,
         old_values: T.Tensor,
+        actions: T.Tensor,
     ) -> tuple[T.Tensor, dict[str, T.Tensor]]:
         """Compute PPO losses while retaining metrics as device tensors."""
         actor_loss, actor_metrics = self.actor_loss(
-            self.cfg.actor_loss_cfg, advantages, log_probs, old_log_probs
+            self.cfg.actor_loss_cfg, advantages, log_probs, old_log_probs, actions
         )
         actor_metrics = self.actor_metrics(actor_metrics)
 
@@ -109,6 +110,7 @@ class PPOLosses:
         advantages: T.Tensor,
         log_probs: T.Tensor,
         old_log_probs: T.Tensor,
+        actions: T.Tensor,
     ) -> tuple[T.Tensor, dict[str, T.Tensor]]:
         """Compute actor loss and leave diagnostic tensors on their device."""
         if actor_loss_cfg.advantage_normalization_strategy == "batch":
@@ -128,8 +130,9 @@ class PPOLosses:
             ratio * advantages, clipped_ratio * advantages
         ).mean()
 
+        mean_ref = (actions**2).mean()
         # Zero represents no input for steering, gas, and brake
-        actor_loss = surrogate_loss
+        actor_loss = surrogate_loss + actor_loss_cfg.mean_reg_coef * mean_ref
 
         metrics = {
             "loss/policy": actor_loss.detach(),

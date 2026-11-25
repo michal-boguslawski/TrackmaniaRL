@@ -1,5 +1,5 @@
 run:
-  total_steps: 1_000_000
+  total_steps: 200_000
   seed: 42
   device: cuda
   log_level: DEBUG
@@ -45,14 +45,15 @@ algorithm:
       actor_loss_cfg:
         advantage_normalization_strategy: global
         ppo_epsilon: 0.1
+        mean_reg_coef: 0.05
 
       critic_loss_cfg:
         critic_beta: 0.8
 
       entropy:
-        coefficient: 0.05
-        decay: 0.9998
-        min_coefficient:  0.01
+        coefficient: 0.02
+        decay: 0.9995
+        min_coefficient:  0.001
 
     optimizer:
       name: Adam
@@ -71,7 +72,7 @@ algorithm:
 
     optimization:
       minibatch_size: 256
-      epochs: 3
+      epochs: 6
       minibatch_indexing_mode: iid
 
 tracking:
@@ -88,10 +89,10 @@ tracking:
     - name: evaluation
       interval: 100_000
       episodes: 10
-      num_envs: 1
+      num_envs: 2
       on_event: env_step
     - name: evaluation
       interval: 1
-      episodes: 1_000
+      episodes: 100
       num_envs: 8
       on_event: rollout_end
