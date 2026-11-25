@@ -20,6 +20,7 @@ from rl_lib.envs.settings.settings import (
     RecordEpisodeStatisticsWrapperSettings,
     RecordVideoWrapperSettings,
 )
+from rl_lib.tracking.callbacks.record_statistics import RecordStatisticLoggerCallback
 
 from rl_lib.run_config import (
     EnvironmentSettings,
@@ -33,7 +34,6 @@ from rl_lib.tracking.callbacks.base import (
 )
 from rl_lib.tracking.callbacks.metrics_logger import MetricsLoggingCallback
 from rl_lib.tracking.callbacks.params_logger import ParamsLoggingCallback
-from rl_lib.tracking.callbacks.record_statistics import RecordStatisticLoggerCallback
 from rl_lib.tracking.callbacks.record_video import RecordVideoCallback
 from rl_lib.tracking.callbacks.utils import stop_video_recording
 from rl_lib.tracking.sinks.base import MetricsSink
@@ -150,7 +150,7 @@ def test_callback_list_forwards_positional_arguments():
 
 
 def test_console_logger_formats_metrics(caplog):
-    from rl_lib.tracking.sinks.console_sink import ConsoleMetricsLogger
+    from rl_lib.tracking.sinks.local_sink import ConsoleMetricsLogger
 
     with caplog.at_level(logging.DEBUG, logger="rl_lib.tracking.console_logger"):
         ConsoleMetricsLogger().log_metrics({"loss/total": 1.5}, step=7)
@@ -160,7 +160,7 @@ def test_console_logger_formats_metrics(caplog):
 
 
 def test_console_logger_formats_parameters(caplog):
-    from rl_lib.tracking.sinks.console_sink import ConsoleMetricsLogger
+    from rl_lib.tracking.sinks.local_sink import ConsoleMetricsLogger
 
     with caplog.at_level(logging.DEBUG, logger="rl_lib.tracking.console_logger"):
         ConsoleMetricsLogger().log_parameters({"lr": 1e-4})

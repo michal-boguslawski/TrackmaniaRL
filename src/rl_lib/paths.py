@@ -20,5 +20,9 @@ class RunPaths:
         return self.run_dir / "app.log"
 
     @property
+    def artifacts_dir(self) -> Path:
+        return self.run_dir / "artifacts"
+
+    @property
     def video_dir(self) -> Path:
-        return self.run_dir / "artifacts" / "videos"
+        return self.artifacts_dir / "videos"

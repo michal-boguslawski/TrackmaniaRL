@@ -14,7 +14,12 @@ import torch as T
 from rl_lib.envs.eval_env import eval_env_settings
 from rl_lib.envs.make_env import make_env
 from rl_lib.envs.settings.env import EnvironmentSettings
-from rl_lib.evaluation.inference import prepare_stats_from_results, run_inference
+from rl_lib.evaluation.inference import run_inference
+from rl_lib.evaluation.models import EpisodeResult
+from rl_lib.evaluation.utils import (
+    prepare_mean_stats_from_results,
+    prepare_results_summary,
+)
 from rl_lib.policy.policy import Policy
 from rl_lib.tracking.callbacks.base import Callback, CallbackEvent
 from rl_lib.tracking.config.callbacks.evaluation import EvaluationCallbackSettings
@@ -70,7 +75,7 @@ class EvaluationCallback(Callback):
             device=device,
         )
 
-    def _evaluate(self, policy: Policy, episodes: int) -> dict[str, float]:
+    def _evaluate(self, policy: Policy, episodes: int) -> list[EpisodeResult]:
         """Run evaluation episodes and log results."""
 
         logger.debug(f"Start evaluation on {self.cfg.on_event}")
@@ -81,14 +86,20 @@ class EvaluationCallback(Callback):
             seed=self.run_seed,
             device=self.device,
         )
-        return prepare_stats_from_results(results, "eval/episode")
+        return results
 
     def on_event(
         self, event: CallbackEvent, step: int, policy: Policy | None = None, **kwargs
     ) -> None:
         if event is self.cfg.on_event and step % self.cfg.interval == 0:
-            metrics = self._evaluate(policy, self.cfg.episodes)
-            self._logger.log_metrics(metrics, step)
+            results = self._evaluate(policy, self.cfg.episodes)
+            if event is CallbackEvent.ROLLOUT_END:
+                summary = prepare_results_summary(results, "eval/final")
+                self._logger.log_evaluation(summary)
+                self._logger.log_metrics(summary["summary"], step)
+            else:
+                metrics = prepare_mean_stats_from_results(results, "eval/episode")
+                self._logger.log_metrics(metrics, step)
 
     def flush(self, *args, **kwargs) -> None:
         pass

@@ -1,13 +1,13 @@
 run:
-  total_steps: 200_000
+  total_steps: 100
   seed: 42
-  device: cuda
+  device: cpu
   log_level: DEBUG
   channels_last: true
 
 environment:
   id: CarRacing-v3
-  num_envs: 8
+  num_envs: 2
   continuous: true
   normalize_rewards: true
   reward_normalization_gamma: 0.99
@@ -53,7 +53,7 @@ algorithm:
       entropy:
         coefficient: 0.02
         decay: 0.9995
-        min_coefficient:  0.001
+        min_coefficient: 0.001
 
     optimizer:
       name: Adam
@@ -68,31 +68,31 @@ algorithm:
       end_fraction: 0.6
 
     rollout:
-      steps_per_env: 1024
+      steps_per_env: 32
 
     optimization:
-      minibatch_size: 256
-      epochs: 6
+      minibatch_size: 16
+      epochs: 1
       minibatch_indexing_mode: iid
 
 tracking:
   console: true
-  mlflow: true
+  mlflow: false
   # experiment_name: test
   callbacks:
     - name: episode_statistics
       mode: step
     - name: metrics_logger
       granularity: train_end
-    - name: record_video
-      interval: 100_000
-    - name: evaluation
-      interval: 100_000
-      episodes: 10
-      num_envs: 2
-      on_event: env_step
+    # - name: record_video
+    #   interval: 100_000
+    # - name: evaluation
+    #   interval: 100_000
+    #   episodes: 2
+    #   num_envs: 2
+    #   on_event: env_step
     - name: evaluation
       interval: 1
-      episodes: 100
-      num_envs: 8
+      episodes: 4
+      num_envs: 2
       on_event: rollout_end

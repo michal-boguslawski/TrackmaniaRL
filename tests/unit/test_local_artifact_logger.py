@@ -4,7 +4,7 @@ import pytest
 import torch as T
 import yaml
 
-from rl_lib.tracking.local_artifact_logger import LocalArtifactLogger
+from rl_lib.tracking.sinks.local_artifact_sink import LocalArtifactLogger
 
 
 def test_local_logger_persists_state_dict_and_model_under_artifact_paths(tmp_path):

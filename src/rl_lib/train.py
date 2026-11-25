@@ -111,9 +111,7 @@ def run_training(
         )
         metrics_logger = build_metrics_logger(
             config.tracking,
-            env_id=config.environment.id,
-            session_id=session_id,
-            algorithm=config.algorithm.name,
+            run_paths=run_paths,
         )
         policy, trainer = build_ppo(build_ctx)
         callbacks = build_callbacks(

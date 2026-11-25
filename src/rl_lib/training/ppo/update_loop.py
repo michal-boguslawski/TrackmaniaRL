@@ -2,8 +2,8 @@
 
 from collections.abc import Callable
 from logging import getLogger
+from statistics import mean
 
-import numpy as np
 import torch as T
 
 from rl_lib.tracking.callbacks.base import Callback, CallbackEvent
@@ -82,7 +82,7 @@ def run_ppo_update_loop(
                 )
                 break
 
-        mean_epoch_kl = float(np.mean(epoch_kls)) if epoch_kls else None
+        mean_epoch_kl = float(mean(epoch_kls)) if epoch_kls else None
         metrics_logger.on_event(
             CallbackEvent.EPOCH_END,
             step=training_step,

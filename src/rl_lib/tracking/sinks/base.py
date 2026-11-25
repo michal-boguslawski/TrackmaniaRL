@@ -25,41 +25,40 @@ class MetricsSink(ABC):
             step: Global step (e.g., environment steps or minibatch count).
         """
 
-    def log_parameters(self, parameters: dict[str, Any]) -> None:
+    @abstractmethod
+    def log_parameters(
+        self,
+        parameters: dict[str, Any],
+        artifact_path: str = "config/parameters.json",
+    ) -> None:
         """Log hyperparameters/configuration (optional).
 
         Args:
             parameters: Dict of parameter name -> value.
         """
 
+    @abstractmethod
     def log_config(
-        self, config: dict, artifact_file: str = "config/run_config.yaml"
+        self,
+        config: dict,
+        artifact_path: str = "config/run_config.yaml",
     ) -> None:
         """Log full configuration as an artifact (optional).
 
         Args:
             config: Full configuration dict.
-            artifact_file: Path within artifact store.
+            artifaartifact_pathct_file: Path within artifact store.
         """
 
+    @abstractmethod
     def log_evaluation(
         self,
-        episodes: list[dict[str, float | int]],
-        summary: dict[str, float],
-        step: int,
-        scope: str,
-        config_artifact: str = "config/run_config.yaml",
+        results: dict[str, float | dict[str, float] | list[dict[str, float]]],
+        artifact_path: str = "evaluation/final_results.json",
     ) -> None:
-        """Persist evaluation details when supported by the backend.
+        """Persist evaluation details when supported by the backend."""
 
-        Args:
-            episodes: Per-episode returns and lengths.
-            summary: Aggregate evaluation metrics.
-            step: Training step at which the evaluation ran.
-            scope: Evaluation scope, such as ``final`` or ``periodic``.
-            config_artifact: Run-relative path to the config used for evaluation.
-        """
-
+    @abstractmethod
     def log_model(
         self,
         model: Any,
@@ -74,6 +73,7 @@ class MetricsSink(ABC):
             registered_model_name: Optional name for model registry.
         """
 
+    @abstractmethod
     def log_state_dict(
         self, state_dict: dict, artifact_path: str = "checkpoints"
     ) -> None:
@@ -84,6 +84,7 @@ class MetricsSink(ABC):
             artifact_path: Path within artifact store.
         """
 
+    @abstractmethod
     def log_artifact(self, local_path: str, artifact_path: str | None = None) -> None:
         """Log a local file as an artifact (optional).
 

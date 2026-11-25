@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from logging import getLogger
 
 from rl_lib.tracking.sinks.base import MetricsSink
@@ -5,33 +6,31 @@ from rl_lib.tracking.sinks.base import MetricsSink
 logger = getLogger(__name__)
 
 
-class CompositeMetricsLogger(MetricsSink):
+def _make_forwarder(name: str) -> Callable:
+    def forward(self, *args, **kwargs):
+        for sink in self._sinks:
+            getattr(sink, name)(*args, **kwargs)  # exceptions propagate
+
+    forward.__name__ = name
+    return forward
+
+
+class _SinkBroadcastMixin:
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        for base in cls.__mro__:
+            for name in getattr(base, "__abstractmethods__", ()):
+                still_abstract = getattr(
+                    getattr(cls, name, None), "__isabstractmethod__", False
+                )
+                if still_abstract:
+                    setattr(cls, name, _make_forwarder(name))
+
+
+class CompositeMetricsLogger(_SinkBroadcastMixin, MetricsSink):
     def __init__(self, sinks: list[MetricsSink] | None = None):
         self._sinks = sinks or []
-        # self._log_buffer: list[tuple[dict[str, float], int]] = []
 
     def add_sink(self, sink: MetricsSink) -> None:
         self._sinks.append(sink)
         logger.debug(f"Added metrics sink: {sink.__class__.__name__}")
-
-    def log_metrics(self, metrics: dict[str, float], step: int) -> None:
-        """Log metrics to all sinks, buffering for later flush."""
-        for sink in self._sinks:
-            sink.log_metrics(metrics, step=step)
-        # self._log_buffer.append((metrics, step))
-
-    def log_parameters(self, parameters: dict[str, int | float | str]) -> None:
-        for sink in self._sinks:
-            sink.log_parameters(parameters)
-
-    # def flush(self) -> None:
-    #     """Flush buffered metrics to all sinks, merging by step."""
-    #     merged: dict[int, dict[str, float]] = {}
-    #     for metrics, step in self._log_buffer:
-    #         merged.setdefault(step, {}).update(metrics)
-
-    #     for step, metrics in merged.items():
-    #         for sink in self._sinks:
-    #             sink.log_metrics(metrics, step=step)
-
-    #     self._log_buffer.clear()

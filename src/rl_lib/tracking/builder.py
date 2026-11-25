@@ -8,55 +8,47 @@ from rl_lib.tracking.composite_logger import CompositeMetricsLogger
 from rl_lib.tracking.config.callbacks import CallbackSettings
 from rl_lib.tracking.config.metrics_logger import TrackingSettings
 from rl_lib.tracking.sinks.base import MetricsSink
-from rl_lib.tracking.sinks.console_sink import ConsoleMetricsSink
+from rl_lib.tracking.sinks.local_sink import LocalMetricsSink
 from rl_lib.tracking.sinks.mlflow_sink import MLflowMetricsSink
 
 
 def _build_mlflow_metrics_sink(
     tracking_settings: TrackingSettings,
-    env_id: str,
-    session_id: str,
-    algorithm: str | None = None,
+    run_paths: RunPaths,
     *args,
     **kwargs,
 ) -> MLflowMetricsSink:
     return MLflowMetricsSink(
-        experiment_name=tracking_settings.experiment_name or env_id,
-        run_name=tracking_settings.run_name or session_id,
-        tags={"algorithm": algorithm} if algorithm else None,
+        experiment_name=run_paths.experiment,
+        run_name=run_paths.session_id,
+        tags={"algorithm": run_paths.algorithm} if run_paths.algorithm else None,
         log_system_metrics=tracking_settings.log_system_metrics,
     )
 
 
 def _build_console_metrics_sink(
     tracking_settings: TrackingSettings,
+    run_paths: RunPaths,
     *args,
     **kwargs,
-) -> ConsoleMetricsSink:
-    return ConsoleMetricsSink()
+) -> LocalMetricsSink:
+    return LocalMetricsSink(run_paths=run_paths)
 
 
 def build_metrics_logger(
     tracking_settings: TrackingSettings,
-    env_id: str,
-    session_id: str,
-    algorithm: str | None = None,
+    run_paths: RunPaths,
     *args,
     **kwargs,
 ) -> CompositeMetricsLogger:
     logger = CompositeMetricsLogger()
     if tracking_settings.mlflow:
         logger.add_sink(
-            _build_mlflow_metrics_sink(
-                tracking_settings,
-                env_id=env_id,
-                session_id=session_id,
-                algorithm=algorithm,
-            )
+            _build_mlflow_metrics_sink(tracking_settings, run_paths=run_paths)
         )
 
     if tracking_settings.console:
-        logger.add_sink(_build_console_metrics_sink(tracking_settings))
+        logger.add_sink(_build_console_metrics_sink(tracking_settings, run_paths))
     return logger
 
 

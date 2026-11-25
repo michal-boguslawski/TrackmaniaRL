@@ -6,59 +6,17 @@ log_evaluation_results() for logging per-episode and aggregate metrics.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
 from logging import getLogger
-from statistics import mean
-from typing import Any
 
 import torch as T
 from gymnasium.vector import VectorEnv
 from tqdm import tqdm
 
+from rl_lib.evaluation.models import EpisodeResult
+from rl_lib.evaluation.utils import get_results_from_info
 from rl_lib.policy.policy import Policy
 
 logger = getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class EpisodeResult:
-    """Single completed episode result.
-
-    Attributes:
-        reward: Episode reward.
-        length: Episode length in steps.
-    """
-
-    reward: float
-    length: int
-
-
-def get_results_from_info(
-    info: dict[str, Any], stats_key: str = "episode"
-) -> list[EpisodeResult]:
-    episode_info = info.get("final_info")
-    if not isinstance(episode_info, Mapping) or stats_key not in episode_info:
-        episode_info = info
-
-    mask_key = f"_{stats_key}"
-    if stats_key in episode_info and mask_key in episode_info:
-        dones = episode_info[mask_key]
-        rewards = episode_info[stats_key]["r"][dones]
-        lengths = episode_info[stats_key]["l"][dones]
-        return [EpisodeResult(float(r), int(l)) for r, l in zip(rewards, lengths)]
-
-
-def prepare_stats_from_results(
-    results: list[EpisodeResult], prefix: str
-) -> dict[str, float]:
-    if not results:
-        return {}
-
-    return {
-        f"{prefix}/reward": mean(r.reward for r in results),
-        f"{prefix}/length": mean(r.length for r in results),
-    }
 
 
 def run_inference(

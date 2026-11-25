@@ -62,13 +62,13 @@ def _evaluate() -> None:
     """Run evaluation of local checkpoint or MLflow model."""
     from rl_lib.evaluation import evaluate_checkpoint, evaluate_mlflow
     from rl_lib.run_config import load_config
-    from rl_lib.tracking.sinks.console_sink import ConsoleMetricsLogger
+    from rl_lib.tracking.sinks.local_sink import LocalMetricsSink
 
     source = _ask("Model source: 1 local checkpoint, 2 MLflow", "1")
     episodes = _positive_int("Number of episodes", "5")
     num_envs = _positive_int("Number of evaluation environments")
     record_video = _ask("Record video? (y/N)", "N").lower() in {"y", "yes"}
-    metrics_loggers = [ConsoleMetricsLogger()]
+    metrics_loggers = [LocalMetricsSink()]
 
     if source == "1":
         config_path = _ask("Config", DEFAULT_CONFIG)
@@ -186,5 +186,5 @@ def main() -> None:
             actions[choice][1]()
         except KeyboardInterrupt:
             print("\nOperation interrupted.")
-        except Exception as exc:
-            logger.exception("Operation failed: %s", exc)
+        except Exception:
+            logger.exception("Operation failed")

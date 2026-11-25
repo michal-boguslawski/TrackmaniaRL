@@ -5,7 +5,6 @@ environment, logs the video as an artifact, and logs episode metrics.
 """
 
 from logging import getLogger
-from pathlib import Path
 
 import torch as T
 
@@ -13,7 +12,8 @@ from rl_lib.envs.eval_env import eval_env_settings
 from rl_lib.envs.make_env import make_env
 from rl_lib.envs.settings.env import EnvironmentSettings
 from rl_lib.envs.settings.wrappers.record_video import RecordVideoWrapperSettings
-from rl_lib.evaluation.inference import prepare_stats_from_results, run_inference
+from rl_lib.evaluation.inference import run_inference
+from rl_lib.evaluation.utils import prepare_mean_stats_from_results
 from rl_lib.paths import RunPaths
 from rl_lib.policy.policy import Policy
 from rl_lib.tracking.artifacts import step_artifact_path
@@ -102,7 +102,7 @@ class RecordVideoCallback(Callback):
         #         lgr.log_artifact(video_path, artifact_path=artifact_path)
         #         for lgr in self._loggers
         #     ]
-        return prepare_stats_from_results(results, "video/episode")
+        return prepare_mean_stats_from_results(results, "video/episode")
 
     def on_event(
         self, event: CallbackEvent, step: int, policy: Policy | None = None, **kwargs
