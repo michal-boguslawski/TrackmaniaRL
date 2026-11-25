@@ -12,7 +12,6 @@ class TrackingSettings(StrictModel):
     Attributes:
         console: Enable the console metrics logger.
         mlflow: Enable the MLflow tracking backend.
-        local_artifacts: Enable local artifact logging. Artifacts are stored in logs folder.
         experiment_name: MLflow experiment (defaults to the environment id).
         run_name: MLflow run name (defaults to "<run name>/<session id>").
         log_system_metrics: Let MLflow sample host metrics; only honoured at
@@ -23,7 +22,6 @@ class TrackingSettings(StrictModel):
 
     console: bool = True
     mlflow: bool = True
-    local_artifacts: bool = False
     experiment_name: str | None = None
     run_name: str | None = None
     log_system_metrics: bool = True

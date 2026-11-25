@@ -9,6 +9,7 @@ from torch.distributions import Distribution
 from rl_lib.networks.actor import Actor
 from rl_lib.networks.critic import VCritic
 from rl_lib.networks.encoder import Encoder
+from rl_lib.networks.utils import flatten_dict
 from rl_lib.training.ppo.config.learning_rates import PPOLearningRateSettings
 
 
@@ -83,3 +84,11 @@ class ActorCritic(nn.Module):
                     )
 
         return groups
+
+    def config(self) -> dict[str, int | float | str]:
+        config_dict = {
+            "actor": self.actor.config(),
+            "critic": self.critic.config(),
+            "encoder": self.encoder.config(),
+        }
+        return flatten_dict(config_dict)

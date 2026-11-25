@@ -4,6 +4,7 @@ from torch import nn
 from rl_lib.networks.cnn import CNN
 from rl_lib.networks.settings.encoder import EncoderConfig
 from rl_lib.networks.temporal import TemporalCNN1D
+from rl_lib.networks.utils import flatten_dict
 
 
 class Encoder(nn.Module):
@@ -77,3 +78,10 @@ class Encoder(nn.Module):
             "cnn": self.cnn.parameter_groups(),
             "temporal": self.sequence_encoder.parameter_groups(),
         }
+
+    def config(self) -> dict[str, int | float | str]:
+        config_dict = {
+            "cnn": self.cnn.config(),
+            "sequence_encoder": self.sequence_encoder.config(),
+        }
+        return flatten_dict(config_dict)

@@ -49,14 +49,13 @@ class LocalMetricsSink(MetricsSink):
     def log_parameters(
         self,
         parameters: dict[str, Any],
-        artifact_path: str = "config/parameters.json",
     ) -> None:
         """Log parameters to local at DEBUG level."""
         formatted = {k: f"{v}" for k, v in parameters.items()}
         logger.debug(formatted)
 
-        filepath = self._resolve_path(artifact_path)
-        self._save_json(parameters, filepath)
+        # filepath = self._resolve_path(artifact_path)
+        # self._save_json(parameters, filepath)
 
     def log_config(
         self,

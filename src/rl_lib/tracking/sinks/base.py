@@ -29,7 +29,6 @@ class MetricsSink(ABC):
     def log_parameters(
         self,
         parameters: dict[str, Any],
-        artifact_path: str = "config/parameters.json",
     ) -> None:
         """Log hyperparameters/configuration (optional).
 

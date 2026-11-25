@@ -4,6 +4,9 @@ Provides orthogonal weight initialization and activation function factory
 for consistent network construction across modules.
 """
 
+from collections.abc import MutableMapping
+from typing import Any
+
 from torch import nn
 
 from rl_lib.networks.settings.layer import LinearLayerSettings
@@ -118,3 +121,20 @@ def split_parameter_groups(
                 groups["no_decay"].append(param)
 
     return groups
+
+
+def flatten_dict(
+    dict_: MutableMapping, parent_key: str = "", separator: str = "/"
+) -> dict[str, str | int | float]:
+    items = []
+    for key, value in dict_.items():
+        new_key = parent_key + separator + key if parent_key else key
+        if isinstance(value, MutableMapping):
+            items.extend(flatten_dict(value, new_key, separator=separator).items())
+        elif isinstance(value, list) and isinstance(value[0], MutableMapping | list):
+            for i, item in enumerate(value):
+                new_key += "_" + str(i)
+                items.extend(flatten_dict(item, new_key, separator=separator).items())
+        else:
+            items.append((new_key, value))
+    return dict(items)

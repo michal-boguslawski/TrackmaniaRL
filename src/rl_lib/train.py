@@ -28,6 +28,7 @@ import torch as T
 from rl_lib.device import resolve_device
 from rl_lib.envs.make_env import make_env
 from rl_lib.logger_setup import resolve_session_id, setup_logging, shutdown_logging
+from rl_lib.networks.utils import flatten_dict
 from rl_lib.paths import RunPaths
 from rl_lib.run_config import RunConfig, load_config
 from rl_lib.tracking.builder import build_callbacks, build_metrics_logger
@@ -123,6 +124,14 @@ def run_training(
             run_seed=config.run.seed,
         )
         trainer.set_callbacks(callbacks)
+
+        metrics_logger.log_config(config.model_dump(mode="json"))
+        metrics_logger.log_parameters(
+            flatten_dict(
+                config.model_dump(mode="json", exclude={"algorithm": {"network"}})
+            )
+        )
+        metrics_logger.log_parameters(trainer.modules.config())
 
         collector = RolloutCollector(
             env,
