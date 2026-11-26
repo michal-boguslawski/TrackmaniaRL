@@ -8,7 +8,7 @@ import sys
 import torch as T
 
 _PROBE_PATH = (
-    Path(__file__).resolve().parents[2]
+    Path(__file__).resolve().parents[3]
     / "scripts"
     / "benchmarks"
     / "representation_probe.py"

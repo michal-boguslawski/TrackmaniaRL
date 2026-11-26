@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from scripts.benchmarking import benchmark_callable, benchmark_callables
 from scripts.benchmarks.compare_reports import compare_report_data

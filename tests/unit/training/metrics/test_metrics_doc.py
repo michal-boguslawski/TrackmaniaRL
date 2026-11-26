@@ -16,9 +16,9 @@ import re
 
 import pytest
 
-DOC_PATH = Path(__file__).resolve().parents[2] / "docs" / "metrics.md"
+DOC_PATH = Path(__file__).resolve().parents[4] / "docs" / "metrics.md"
 INVENTORY_PATH = (
-    Path(__file__).resolve().parents[2]
+    Path(__file__).resolve().parents[4]
     / "scripts"
     / "benchmarks"
     / "metric_inventory.py"
