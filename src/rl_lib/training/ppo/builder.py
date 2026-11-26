@@ -9,6 +9,7 @@ from rl_lib.policy.history import History
 from rl_lib.policy.policy import Policy
 from rl_lib.training.base import BuildContext
 from rl_lib.training.ppo.config.network import PPONetworkConfig
+from rl_lib.training.ppo.metrics.build import build_ppo_metrics_factory
 from rl_lib.training.ppo.modules import ActorCritic
 from rl_lib.training.ppo.trainer import PPOTrainer
 
@@ -48,6 +49,9 @@ def build_ppo(ctx: BuildContext) -> tuple[Policy, PPOTrainer]:
         History(encoder.stack_size),
     )
     trainer = PPOTrainer(
-        modules, cfg.algorithm.trainer, cfg.run.total_steps
+        modules,
+        cfg.algorithm.trainer,
+        cfg.run.total_steps,
+        metrics_factory=build_ppo_metrics_factory(),
     )  # builds optimizer, buffer, scheduler
     return policy, trainer

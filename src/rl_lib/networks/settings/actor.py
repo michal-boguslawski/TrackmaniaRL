@@ -30,7 +30,7 @@ class ActorSettings(StrictModel):
     output_init_gain: PositiveFloat = 0.01
     output_init_bias: FiniteFloat = -2.0
     output_bias: bool = True
-    concentration_offset: PositiveFloat = 0.5
+    concentration_offset: PositiveFloat | list[PositiveFloat] = 1.0
     softplus_beta: PositiveFloat = 1.0
     softplus_threshold: PositiveFloat = 20.0
     deterministic_distribution_temperature: PositiveFloat = 1.0

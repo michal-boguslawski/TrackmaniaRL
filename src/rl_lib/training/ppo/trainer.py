@@ -1,5 +1,6 @@
 """PPO trainer orchestration, optimizer management, and rollout lifecycle."""
 
+from dataclasses import fields
 from logging import getLogger
 
 import torch as T
@@ -9,13 +10,16 @@ from torch.optim import Optimizer
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
 from rl_lib.policy.masks import episode_mask
 from rl_lib.tracking.callbacks.base import Callback, CallbackEvent
+from rl_lib.training.metrics.contexts import OptimizationContext, RolloutContext
+from rl_lib.training.metrics.factory import MetricsFactory
 from rl_lib.training.ppo.config.trainer import PPOTrainerSettings
 from rl_lib.training.ppo.losses import PPOLosses
+from rl_lib.training.ppo.metrics.contexts import PPOUpdateContext
 from rl_lib.training.ppo.modules import ActorCritic
 from rl_lib.training.ppo.update_loop import run_ppo_update_loop
 from rl_lib.training.schedulers.factory import build_scheduler
 from rl_lib.training.transitions import Transition
-from rl_lib.training.utils import build_optimizer
+from rl_lib.training.utils import build_optimizer, tensor_metrics_to_scalars
 
 logger = getLogger(__name__)
 
@@ -36,6 +40,7 @@ class PPOTrainer:
         modules: ActorCritic,
         config: PPOTrainerSettings,
         total_steps: int,
+        metrics_factory: MetricsFactory | None = None,
         callbacks: Callback | None = None,
     ):
         """Initialize the PPO trainer.
@@ -72,6 +77,7 @@ class PPOTrainer:
             steps_per_training=self.cfg.rollout.steps_per_env,
         )
         self.losses = PPOLosses(config.loss)
+        self.metrics_factory = metrics_factory
 
     def set_callbacks(self, callbacks: Callback) -> None:
         self._callbacks = callbacks
@@ -96,6 +102,20 @@ class PPOTrainer:
             if self._callbacks:
                 self._callbacks.on_event(CallbackEvent.TRAIN_START, step=global_step)
             batch = self.rollout_buffer.get()
+
+            rollout_context = RolloutContext(
+                batch["action"],
+                batch["returns"],
+                batch["advantages"],
+                batch["dones"],
+                batch["critic_value"],
+            )
+            rollout_metrics = self.metrics_factory.rollout.calculate(rollout_context)
+            self._callbacks.on_event(
+                CallbackEvent.TRAIN_START,
+                step=global_step,
+                metrics=rollout_metrics,
+            )
             self.modules.train()
             run_ppo_update_loop(
                 batch=batch,
@@ -107,15 +127,8 @@ class PPOTrainer:
                 kl_control_settings=self.cfg.kl,
             )
 
+            self._callbacks.on_event(CallbackEvent.TRAIN_END, step=global_step)
             self.rollout_buffer.reset_counter()
-            if self._callbacks:
-                metrics = {
-                    f"optimization/lr_{pg['name']}": pg["lr"]
-                    for pg in self._optimizer.param_groups
-                }
-                self._callbacks.on_event(
-                    CallbackEvent.TRAIN_END, step=global_step, metrics=metrics
-                )
 
             if self._scheduler:
                 self._scheduler.step()
@@ -150,19 +163,36 @@ class PPOTrainer:
             observation, episode_mask(dones)
         )
         log_probs = action_dist.log_prob(action)
-        loss, metrics = self.losses.calculate_losses(
-            log_probs,
-            critic_values,
-            action_dist,
-            advantages,
-            returns,
-            old_log_probs,
-            old_values,
-            action_mean,
+
+        update_context = PPOUpdateContext(
+            values=critic_values,
+            returns=returns,
+            dist=action_dist,
+            old_log_probs=old_log_probs,
+            new_log_probs=log_probs,
+            advantages=advantages,
+            actions=action_mean,
+            old_values=old_values,
         )
+        loss = self.losses.calculate_losses(update_context)
+        with T.no_grad():
+            update_metrics = self.metrics_factory.update.calculate(update_context)
 
         self._optimizer.zero_grad()
-        loss.backward()
+        loss.total.backward()
         clip_grad_norm_(self.modules.parameters(), 0.5)
+
+        optimization_context = OptimizationContext(optimizer=self._optimizer)
+        with T.no_grad():
+            optimization_metrics = self.metrics_factory.optimization.calculate(
+                optimization_context
+            )
         self._optimizer.step()
-        return {"loss/total": loss.item(), **metrics}
+
+        return {
+            **tensor_metrics_to_scalars(
+                {f.name: getattr(loss, f.name) for f in fields(loss)}
+            ),
+            **update_metrics,
+            **optimization_metrics,
+        }

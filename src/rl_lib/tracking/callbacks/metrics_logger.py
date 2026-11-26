@@ -75,10 +75,11 @@ class MetricsLoggingCallback(Callback):
             CallbackEvent.MINIBATCH_END,
             CallbackEvent.EPOCH_END,
             CallbackEvent.TRAIN_END,
+            CallbackEvent.TRAIN_START,
         ]:
             if metrics:
                 for name, value in metrics.items():
-                    self._average_buffer.setdefault(name, []).append(float(value))
+                    self._average_buffer.setdefault(name, []).append(value)
 
             self._collect(step, event)
 

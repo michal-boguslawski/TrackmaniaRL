@@ -28,7 +28,7 @@ class PPOActorLossSettings(StrictModel):
         default=0.2, gt=0, lt=1, description="PPO policy clipping range."
     )
     mean_reg_coef: float = Field(
-        default=0.01, ge=0, description="Policy mean regularization coefficient."
+        default=0.0, ge=0, description="Policy mean regularization coefficient."
     )
 
     @model_validator(mode="after")

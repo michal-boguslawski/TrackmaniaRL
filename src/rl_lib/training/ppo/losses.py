@@ -1,5 +1,7 @@
 """PPO objective terms and their diagnostic metrics."""
 
+from dataclasses import dataclass
+
 import torch as T
 from torch import nn
 from torch.distributions import Distribution
@@ -10,10 +12,18 @@ from rl_lib.training.ppo.config.loss import (
     PPOCriticLossSettings,
     PPOLossConfig,
 )
-from rl_lib.training.ppo.metrics import calc_approx_kl_divergence
+from rl_lib.training.ppo.metrics.contexts import PPOUpdateContext
 from rl_lib.training.settings.loss import (
     EntropySettings,
 )
+
+
+@dataclass
+class PPOLossOutput:
+    total: T.Tensor
+    policy: T.Tensor
+    value: T.Tensor
+    entropy: T.Tensor
 
 
 class EntropyDecay:
@@ -66,60 +76,36 @@ class PPOLosses:
         )
         self._entropy_decay = EntropyDecay(cfg.entropy)
 
-    def calculate_losses(
-        self,
-        log_probs: T.Tensor,
-        critic_values: T.Tensor,
-        dist: Distribution,
-        advantages: T.Tensor,
-        returns: T.Tensor,
-        old_log_probs: T.Tensor,
-        old_values: T.Tensor,
-        actions: T.Tensor,
-    ) -> tuple[T.Tensor, dict[str, T.Tensor]]:
+    def calculate_losses(self, update_context: PPOUpdateContext) -> PPOLossOutput:
         """Compute PPO losses while retaining metrics as device tensors."""
-        actor_loss, actor_metrics = self.actor_loss(
-            self.cfg.actor_loss_cfg, advantages, log_probs, old_log_probs, actions
-        )
-        actor_metrics = self.actor_metrics(actor_metrics)
+        actor_loss = self.actor_loss(self.cfg.actor_loss_cfg, update_context)
 
-        critic_loss, critic_metrics = self.critic_loss(
-            self.cfg.critic_loss_cfg,
-            self._critic_loss_fn,
-            returns,
-            critic_values,
-            old_values,
+        critic_loss = self.critic_loss(
+            self.cfg.critic_loss_cfg, self._critic_loss_fn, update_context
         )
-        entropy_loss, entropy_metrics = self.entropy_loss(dist)
-        metrics = {**actor_metrics, **critic_metrics, **entropy_metrics}
+        entropy_loss = self.entropy_loss(update_context)
 
         total_loss = (
             actor_loss
             + self.cfg.critic_loss_cfg.critic_beta * critic_loss
             - self._entropy_decay.coefficient * entropy_loss
         )
-        metrics["loss/total"] = total_loss.detach()
-        metrics = {
-            key: value for key, value in metrics.items() if not key.startswith("helper")
-        }
-        return total_loss, metrics
+        return PPOLossOutput(total_loss, actor_loss, critic_loss, entropy_loss)
 
     @staticmethod
     def actor_loss(
         actor_loss_cfg: PPOActorLossSettings,
-        advantages: T.Tensor,
-        log_probs: T.Tensor,
-        old_log_probs: T.Tensor,
-        actions: T.Tensor,
-    ) -> tuple[T.Tensor, dict[str, T.Tensor]]:
+        update_context: PPOUpdateContext,
+    ) -> T.Tensor:
         """Compute actor loss and leave diagnostic tensors on their device."""
+        advantages = update_context.advantages
         if actor_loss_cfg.advantage_normalization_strategy == "batch":
             advantages = (advantages - advantages.mean()) / (
                 advantages.std() + actor_loss_cfg.advantage_epsilon
             )
 
-        assert log_probs.shape == old_log_probs.shape
-        log_ratio = log_probs - old_log_probs
+        assert update_context.new_log_probs.shape == update_context.old_log_probs.shape
+        log_ratio = update_context.new_log_probs - update_context.old_log_probs
         ratio = log_ratio.sum(-1).exp()
         clipped_ratio = ratio.clamp(
             min=1 - actor_loss_cfg.ppo_epsilon, max=1 + actor_loss_cfg.ppo_epsilon
@@ -130,32 +116,23 @@ class PPOLosses:
             ratio * advantages, clipped_ratio * advantages
         ).mean()
 
-        mean_ref = (actions**2).mean()
+        # mean_ref = (update_context.actions**2).mean()
         # Zero represents no input for steering, gas, and brake
-        actor_loss = surrogate_loss + actor_loss_cfg.mean_reg_coef * mean_ref
+        actor_loss = surrogate_loss
+        # + actor_loss_cfg.mean_reg_coef * mean_ref
 
-        metrics = {
-            "loss/policy": actor_loss.detach(),
-            "helper/log_ratio": log_ratio.detach(),
-        }
-        return actor_loss, metrics
-
-    @staticmethod
-    def actor_metrics(metrics: dict[str, T.Tensor]) -> dict[str, T.Tensor]:
-        """Compute additional actor metrics from the surrogate loss."""
-        log_ratio = metrics["helper/log_ratio"]
-        metrics["ppo/approx_kl"] = calc_approx_kl_divergence(log_ratio)
-        return metrics
+        return actor_loss
 
     @staticmethod
     def critic_loss(
         critic_loss_cfg: PPOCriticLossSettings,
         critic_loss_fn: nn.HuberLoss,
-        returns: T.Tensor,
-        values: T.Tensor,
-        old_values: T.Tensor,
-    ) -> tuple[T.Tensor, dict[str, T.Tensor]]:
+        update_context: PPOUpdateContext,
+    ) -> T.Tensor:
         """Compute critic loss and leave its diagnostic tensor on-device."""
+        values = update_context.values
+        old_values = update_context.old_values
+        returns = update_context.returns
         assert values.shape == old_values.shape == returns.shape
         value_clip_epsilon = critic_loss_cfg.value_clip_epsilon
         clipped_values = (
@@ -167,11 +144,12 @@ class PPOLosses:
         loss_unclipped = critic_loss_fn(values, returns)
         loss_clipped = critic_loss_fn(clipped_values, returns)
         critic_loss = T.maximum(loss_unclipped, loss_clipped).mean()
-        return critic_loss, {"loss/value": critic_loss.detach()}
+        return critic_loss
 
     @staticmethod
-    def entropy_loss(dist: Distribution) -> tuple[T.Tensor, dict[str, T.Tensor]]:
+    def entropy_loss(update_context: PPOUpdateContext) -> T.Tensor:
         """Compute entropy and leave diagnostics on-device."""
-        entropy: T.Tensor = dist.base_dist.entropy()
+        entropy = update_context.dist.base_dist.entropy()
+        assert isinstance(entropy, T.Tensor)
         entropy_loss = entropy.sum(dim=-1).mean()
-        return entropy_loss, {"loss/entropy": entropy_loss.detach()}
+        return entropy_loss

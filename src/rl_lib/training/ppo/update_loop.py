@@ -67,18 +67,18 @@ def run_ppo_update_loop(
                     step=training_step,
                     metrics=minibatch_metrics,
                 )
-            epoch_kls.append(minibatch_metrics["ppo/approx_kl"].item())
+            epoch_kls.append(minibatch_metrics["update/approx_kl"])
 
             if (
                 kl_control_settings is not None
-                and minibatch_metrics["ppo/approx_kl"]
+                and minibatch_metrics["update/approx_kl"]
                 > kl_control_settings.target_kl * kl_control_settings.stop_multiplier
                 and training_step > kl_control_settings.warmup_steps
                 and kl_control_settings.hard_stop
             ):
                 logger.warning(
                     "Hard stop mid-epoch: KL %.4f",
-                    minibatch_metrics["ppo/approx_kl"],
+                    minibatch_metrics["update/approx_kl"],
                 )
                 break
 

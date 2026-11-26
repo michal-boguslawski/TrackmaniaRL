@@ -75,6 +75,11 @@ class Actor(nn.Module):
                 f"actor action bounds must each have action_dim={action_dim} values; "
                 f"got {len(action_low)} and {len(action_high)}"
             )
+        if (
+            isinstance(self.cfg.concentration_offset, list)
+            and len(self.cfg.concentration_offset) != action_dim
+        ):
+            raise ValueError("Wrong dim of concentration_offset")
 
         hidden_layers = self.cfg.hidden_layers
         modules: list[nn.Module] = []
@@ -103,23 +108,15 @@ class Actor(nn.Module):
         high = T.tensor(action_high)
         self.register_buffer("_affine_loc", low)
         self.register_buffer("_affine_scale", high - low)
+        self.register_buffer(
+            "_concentration_offet", T.tensor(self.cfg.concentration_offset)
+        )
         logger.debug("Initialized %s", self)
 
     @property
     def out_dim(self) -> int:
         """Output dimension (equals action_dim)."""
         return self.action_dim
-
-    def action_transform(self, action: T.Tensor) -> T.Tensor:
-        """Map action from [0, 1] (Beta support) to environment bounds.
-
-        Args:
-            action: Tensor of shape (..., action_dim) in [0, 1].
-
-        Returns:
-            Tensor of shape (..., action_dim) scaled to [action_low, action_high].
-        """
-        return self._affine_loc + self._affine_scale * action
 
     def _distribution(
         self, alpha: T.Tensor, beta: T.Tensor
@@ -178,8 +175,8 @@ class Actor(nn.Module):
             )
             / temperature
         )
-        alpha = alpha + self.cfg.concentration_offset
-        beta = beta + self.cfg.concentration_offset
+        alpha = alpha + self._concentration_offet
+        beta = beta + self._concentration_offet
         dist, action_mean = self._distribution(alpha, beta)
         if temperature <= 0:
             raise ValueError(

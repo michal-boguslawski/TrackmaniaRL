@@ -133,8 +133,11 @@ def flatten_dict(
             items.extend(flatten_dict(value, new_key, separator=separator).items())
         elif isinstance(value, list) and isinstance(value[0], MutableMapping | list):
             for i, item in enumerate(value):
-                new_key += "_" + str(i)
-                items.extend(flatten_dict(item, new_key, separator=separator).items())
+                items.extend(
+                    flatten_dict(
+                        item, new_key + "_" + str(i), separator=separator
+                    ).items()
+                )
         else:
             items.append((new_key, value))
     return dict(items)
