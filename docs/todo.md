@@ -14,7 +14,7 @@
 - [x] Log pre-clipping gradient norms per optimizer parameter group.
 - [ ] Log per-group relative parameter update size (`||Δw|| / ||w||`) to compare effective update magnitudes across learning-rate configurations.
 - [ ] Fix rollout action standard-deviation logging: calculate a standard deviation rather than repeating the mean, and cover it with a test.
-- [ ] Log per-action-dimension Beta entropy (and retain alpha/beta diagnostics) to show whether the policy distribution is changing or remaining near its initialization.
+- [x] Log per-action-dimension Beta entropy (and retain alpha/beta diagnostics) to show whether the policy distribution is changing or remaining near its initialization.
 - [x] Log the effective entropy coefficient during training. Check whether configured entropy decay is actually advanced; either implement the intended schedule and test it, or remove/clarify unused decay settings.
 
 ## Establish a cheap learning-rate and improvement check

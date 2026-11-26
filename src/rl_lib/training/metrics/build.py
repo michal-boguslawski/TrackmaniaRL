@@ -11,7 +11,10 @@ from rl_lib.training.metrics.rollout.statistics import (
     calculate_returns_and_advantages_and_values,
 )
 from rl_lib.training.metrics.rollout.variance import calculate_explained_variance
-from rl_lib.training.metrics.update.policy import calculate_beta_concentrations
+from rl_lib.training.metrics.update.policy import (
+    calculate_beta_concentrations,
+    calculate_per_step_entropy,
+)
 
 
 def build_optimization_factory() -> MetricRegistry[OptimizationContext]:
@@ -32,4 +35,5 @@ def build_rollout_factory() -> MetricRegistry[RolloutContext]:
 def build_update_factory() -> MetricRegistry[UpdateContext]:
     update_factory = MetricRegistry("update")
     update_factory.register(calculate_beta_concentrations)
+    update_factory.register(calculate_per_step_entropy)
     return update_factory

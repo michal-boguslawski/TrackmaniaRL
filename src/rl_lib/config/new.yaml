@@ -54,7 +54,7 @@ algorithm:
 
       entropy:
         coefficient: 0.02
-        decay: 0.9995
+        decay: 0.9999
         min_coefficient:  0.001
 
     optimizer:
