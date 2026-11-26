@@ -7,15 +7,13 @@ from torch import nn
 from torch.distributions import Distribution
 
 from rl_lib.tracking.verbosity import Verbosity, as_verbosity
+from rl_lib.training.entropy import EntropyDecay
 from rl_lib.training.ppo.config.loss import (
     PPOActorLossSettings,
     PPOCriticLossSettings,
     PPOLossConfig,
 )
 from rl_lib.training.ppo.metrics.contexts import PPOUpdateContext
-from rl_lib.training.settings.loss import (
-    EntropySettings,
-)
 
 
 @dataclass
@@ -24,24 +22,6 @@ class PPOLossOutput:
     policy: T.Tensor
     value: T.Tensor
     entropy: T.Tensor
-
-
-class EntropyDecay:
-    def __init__(self, cfg: EntropySettings):
-        self.coefficient_init = cfg.coefficient
-        self.decay = cfg.decay
-        self.coefficient_min = cfg.min_coefficient
-        self._factor = 1.0
-
-    @property
-    def coefficient(self) -> float:
-        return max(
-            self.coefficient_init * self._factor,
-            self.coefficient_min,
-        )
-
-    def step(self) -> None:
-        self._factor *= self.decay
 
 
 class PPOLosses:
@@ -74,7 +54,7 @@ class PPOLosses:
         self._critic_loss_fn = nn.HuberLoss(
             reduction="none", delta=cfg.critic_loss_cfg.huber_delta
         )
-        self._entropy_decay = EntropyDecay(cfg.entropy)
+        self.entropy_decay = EntropyDecay(cfg.entropy)
 
     def calculate_losses(self, update_context: PPOUpdateContext) -> PPOLossOutput:
         """Compute PPO losses while retaining metrics as device tensors."""
@@ -88,7 +68,7 @@ class PPOLosses:
         total_loss = (
             actor_loss
             + self.cfg.critic_loss_cfg.critic_beta * critic_loss
-            - self._entropy_decay.coefficient * entropy_loss
+            - self.entropy_decay.coefficient * entropy_loss
         )
         return PPOLossOutput(total_loss, actor_loss, critic_loss, entropy_loss)
 

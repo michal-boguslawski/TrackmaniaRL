@@ -10,6 +10,7 @@ from rl_lib.training.ppo.metrics.contexts import PPOUpdateContext
 from rl_lib.training.ppo.metrics.update.policy import (
     calculate_approx_kl,
     calculate_clip_fraction,
+    calculate_entropy_coef,
 )
 
 
@@ -27,6 +28,7 @@ def _build_ppo_update_factory() -> MetricRegistry[PPOUpdateContext]:
     update_factory = build_update_factory()
     update_factory.register(calculate_approx_kl)
     update_factory.register(calculate_clip_fraction)
+    update_factory.register(calculate_entropy_coef)
     return update_factory
 
 

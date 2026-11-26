@@ -27,6 +27,7 @@ def calculate_approx_kl(update_context: PPOUpdateContext) -> dict[str, float]:
 def calculate_clip_fraction(
     update_context: PPOUpdateContext,
 ) -> dict[str, float]:
+    assert isinstance(update_context, PPOUpdateContext)
     log_ratios = update_context.new_log_probs - update_context.old_log_probs
 
     ratios = log_ratios.exp()
@@ -44,3 +45,8 @@ def calculate_clip_fraction(
         metrics[f"action_clip_fraction/{i}"] = fraction
 
     return tensor_metrics_to_scalars(metrics)
+
+
+def calculate_entropy_coef(update_context: PPOUpdateContext) -> dict[str, float]:
+    assert isinstance(update_context, PPOUpdateContext)
+    return {"entropy_coef": update_context.entropy_decay.coefficient}

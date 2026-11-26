@@ -7,7 +7,7 @@ run:
 
 environment:
   id: CarRacing-v3
-  num_envs: 8
+  num_envs: 4
   continuous: true
   normalize_rewards: true
   reward_normalization_gamma: 0.99
@@ -46,11 +46,11 @@ algorithm:
     loss:
       actor_loss_cfg:
         advantage_normalization_strategy: global
-        ppo_epsilon: 0.1
+        ppo_epsilon: 0.2
         # mean_reg_coef: 0.05
 
       critic_loss_cfg:
-        critic_beta: 0.8
+        critic_beta: 0.5
 
       entropy:
         coefficient: 0.02
@@ -60,21 +60,21 @@ algorithm:
     optimizer:
       name: Adam
       learning_rates:
-        cnn_lr: 1e-5
-        sequence_encoder_lr: 1e-5
-        actor_lr: 1e-5
-        critic_lr: 1e-5
+        cnn_lr: 3e-5
+        sequence_encoder_lr: 3e-5
+        actor_lr: 3e-5
+        critic_lr: 3e-5
 
     # scheduler:
     #   name: linear
     #   end_fraction: 0.6
 
     rollout:
-      steps_per_env: 1024
+      steps_per_env: 2048
 
     optimization:
       minibatch_size: 256
-      epochs: 3
+      epochs: 10
       minibatch_indexing_mode: iid
 
 tracking:

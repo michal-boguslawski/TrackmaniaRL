@@ -132,6 +132,7 @@ class PPOTrainer:
 
             if self._scheduler:
                 self._scheduler.step()
+
             return True
         return False
 
@@ -174,6 +175,7 @@ class PPOTrainer:
             actions=action_mean,
             old_values=old_values,
             actor_loss_cfg=self.cfg.loss.actor_loss_cfg,
+            entropy_decay=self.losses.entropy_decay,
         )
         loss = self.losses.calculate_losses(update_context)
         with T.no_grad():
@@ -181,16 +183,15 @@ class PPOTrainer:
 
         self._optimizer.zero_grad()
         loss.total.backward()
-        clip_norm = clip_grad_norm_(self.modules.parameters(), 0.5)
 
-        optimization_context = OptimizationContext(
-            optimizer=self._optimizer, clip_norm=clip_norm
-        )
+        optimization_context = OptimizationContext(optimizer=self._optimizer)
+        clip_grad_norm_(self.modules.parameters(), 0.5)
         with T.no_grad():
             optimization_metrics = self.metrics_factory.optimization.calculate(
                 optimization_context
             )
         self._optimizer.step()
+        self.losses.entropy_decay.step()
 
         return {
             **tensor_metrics_to_scalars(

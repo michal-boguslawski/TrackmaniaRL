@@ -9,13 +9,13 @@
 
 ## Log metrics that diagnose optimization
 
-- [ ] Add PPO clip fraction: the fraction of samples whose probability ratio is outside the clipping interval. Interpret alongside KL; sustained high values can indicate overly large updates, while near-zero values with no policy movement can indicate updates that are too small.
+- [x] Add PPO clip fraction: the fraction of samples whose probability ratio is outside the clipping interval. Interpret alongside KL; sustained high values can indicate overly large updates, while near-zero values with no policy movement can indicate updates that are too small.
 - [ ] Add an occasional same-minibatch objective delta measured before and after the optimizer step. Make the extra forward configurable or run it only every N minibatches; a consistently rising objective can flag overshooting or a sign error.
-- [ ] Log pre-clipping gradient norms per optimizer parameter group.
+- [x] Log pre-clipping gradient norms per optimizer parameter group.
 - [ ] Log per-group relative parameter update size (`||Δw|| / ||w||`) to compare effective update magnitudes across learning-rate configurations.
 - [ ] Fix rollout action standard-deviation logging: calculate a standard deviation rather than repeating the mean, and cover it with a test.
 - [ ] Log per-action-dimension Beta entropy (and retain alpha/beta diagnostics) to show whether the policy distribution is changing or remaining near its initialization.
-- [ ] Log the effective entropy coefficient during training. Check whether configured entropy decay is actually advanced; either implement the intended schedule and test it, or remove/clarify unused decay settings.
+- [x] Log the effective entropy coefficient during training. Check whether configured entropy decay is actually advanced; either implement the intended schedule and test it, or remove/clarify unused decay settings.
 
 ## Establish a cheap learning-rate and improvement check
 

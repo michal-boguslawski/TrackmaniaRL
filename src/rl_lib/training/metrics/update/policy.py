@@ -14,3 +14,10 @@ def calculate_beta_concentrations(update_context: UpdateContext) -> dict[str, fl
         **{f"dist/beta_{i}": value for i, value in enumerate(betas)},
     }
     return tensor_metrics_to_scalars(metrics)
+
+
+def calculate_per_step_entropy(update_context: UpdateContext) -> dict[str, float]:
+    dist = update_context.dist
+    entropy = dist.entropy().mean(0)
+    metrics = {f"dist/entropy_{i}": value for i, value in enumerate(entropy)}
+    return tensor_metrics_to_scalars(metrics)
