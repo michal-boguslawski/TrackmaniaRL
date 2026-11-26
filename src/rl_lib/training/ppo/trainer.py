@@ -185,11 +185,11 @@ class PPOTrainer:
         loss.total.backward()
 
         optimization_context = OptimizationContext(optimizer=self._optimizer)
-        clip_grad_norm_(self.modules.parameters(), 0.5)
         with T.no_grad():
             optimization_metrics = self.metrics_factory.optimization.calculate(
                 optimization_context
             )
+        clip_grad_norm_(self.modules.parameters(), 0.5)
         self._optimizer.step()
         self.losses.entropy_decay.step()
 
