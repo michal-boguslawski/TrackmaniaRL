@@ -173,6 +173,7 @@ class PPOTrainer:
             advantages=advantages,
             actions=action_mean,
             old_values=old_values,
+            actor_loss_cfg=self.cfg.loss.actor_loss_cfg,
         )
         loss = self.losses.calculate_losses(update_context)
         with T.no_grad():
@@ -180,9 +181,11 @@ class PPOTrainer:
 
         self._optimizer.zero_grad()
         loss.total.backward()
-        clip_grad_norm_(self.modules.parameters(), 0.5)
+        clip_norm = clip_grad_norm_(self.modules.parameters(), 0.5)
 
-        optimization_context = OptimizationContext(optimizer=self._optimizer)
+        optimization_context = OptimizationContext(
+            optimizer=self._optimizer, clip_norm=clip_norm
+        )
         with T.no_grad():
             optimization_metrics = self.metrics_factory.optimization.calculate(
                 optimization_context

@@ -22,3 +22,25 @@ def calculate_approx_kl(update_context: PPOUpdateContext) -> dict[str, float]:
         }
     )
     return tensor_metrics_to_scalars(metrics)
+
+
+def calculate_clip_fraction(
+    update_context: PPOUpdateContext,
+) -> dict[str, float]:
+    log_ratios = update_context.new_log_probs - update_context.old_log_probs
+
+    ratios = log_ratios.exp()
+    epsilon = update_context.actor_loss_cfg.ppo_epsilon
+
+    joint_ratio = ratios.prod(dim=-1)
+
+    metrics = {
+        "clip_fraction": ((joint_ratio - 1).abs() > epsilon).float().mean(),
+    }
+
+    action_clip_fractions = ((ratios - 1).abs() > epsilon).float().mean(dim=0)
+
+    for i, fraction in enumerate(action_clip_fractions):
+        metrics[f"action_clip_fraction/{i}"] = fraction
+
+    return tensor_metrics_to_scalars(metrics)

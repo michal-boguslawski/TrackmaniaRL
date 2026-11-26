@@ -24,3 +24,4 @@ class RolloutContext:
 @dataclass
 class OptimizationContext:
     optimizer: Optimizer
+    clip_norm: T.Tensor

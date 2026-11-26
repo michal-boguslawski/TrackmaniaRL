@@ -7,7 +7,10 @@ from rl_lib.training.metrics.contexts import OptimizationContext, RolloutContext
 from rl_lib.training.metrics.factory import MetricsFactory
 from rl_lib.training.metrics.registry import MetricRegistry
 from rl_lib.training.ppo.metrics.contexts import PPOUpdateContext
-from rl_lib.training.ppo.metrics.update.policy import calculate_approx_kl
+from rl_lib.training.ppo.metrics.update.policy import (
+    calculate_approx_kl,
+    calculate_clip_fraction,
+)
 
 
 def _build_ppo_optimization_factory() -> MetricRegistry[OptimizationContext]:
@@ -23,6 +26,7 @@ def _build_ppo_rollout_factory() -> MetricRegistry[RolloutContext]:
 def _build_ppo_update_factory() -> MetricRegistry[PPOUpdateContext]:
     update_factory = build_update_factory()
     update_factory.register(calculate_approx_kl)
+    update_factory.register(calculate_clip_fraction)
     return update_factory
 
 

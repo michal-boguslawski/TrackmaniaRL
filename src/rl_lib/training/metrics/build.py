@@ -3,6 +3,8 @@ from rl_lib.training.metrics.contexts import (
     RolloutContext,
     UpdateContext,
 )
+from rl_lib.training.metrics.optimization.clip_norm import calculate_clip_norms
+from rl_lib.training.metrics.optimization.optimizer import calculate_learning_rates
 from rl_lib.training.metrics.registry import MetricRegistry
 from rl_lib.training.metrics.rollout.statistics import calculate_action_statistics
 from rl_lib.training.metrics.rollout.variance import calculate_explained_variance
@@ -11,6 +13,8 @@ from rl_lib.training.metrics.update.policy import calculate_beta_concentrations
 
 def build_optimization_factory() -> MetricRegistry[OptimizationContext]:
     optimization_factory = MetricRegistry("optimization")
+    optimization_factory.register(calculate_learning_rates)
+    optimization_factory.register(calculate_clip_norms)
     return optimization_factory
 
 
