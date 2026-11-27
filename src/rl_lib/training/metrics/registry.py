@@ -1,8 +1,10 @@
 from collections.abc import Callable
 from typing import TypeVar
 
+import torch as T
+
 ContextT = TypeVar("ContextT")
-type MetricFunction[ContextT] = Callable[[ContextT], dict[str, float]]
+type MetricFunction[ContextT] = Callable[[ContextT], dict[str, T.Tensor]]
 
 
 class MetricRegistry[ContextT]:
@@ -14,8 +16,8 @@ class MetricRegistry[ContextT]:
         self._functions.append(function)
         return function
 
-    def calculate(self, context: ContextT) -> dict[str, float]:
-        metrics: dict[str, float] = {}
+    def calculate(self, context: ContextT) -> dict[str, T.Tensor]:
+        metrics: dict[str, T.Tensor] = {}
         for function in self._functions:
             metrics |= function(context)
         return {

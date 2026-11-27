@@ -1,3 +1,4 @@
+from rl_lib.tracking.verbosity import Verbosity, as_verbosity
 from rl_lib.training.metrics.build import (
     build_optimization_factory,
     build_rollout_factory,
@@ -14,27 +15,49 @@ from rl_lib.training.ppo.metrics.update.policy import (
 )
 
 
-def _build_ppo_optimization_factory() -> MetricRegistry[OptimizationContext]:
-    optimization_factory = build_optimization_factory()
+def _build_ppo_optimization_factory(
+    verbosity: Verbosity,
+) -> MetricRegistry[OptimizationContext]:
+    optimization_factory = build_optimization_factory(verbosity)
     return optimization_factory
 
 
-def _build_ppo_rollout_factory() -> MetricRegistry[RolloutContext]:
-    rollout_factory = build_rollout_factory()
+def _build_ppo_rollout_factory(
+    verbosity: Verbosity,
+) -> MetricRegistry[RolloutContext]:
+    rollout_factory = build_rollout_factory(verbosity)
     return rollout_factory
 
 
-def _build_ppo_update_factory() -> MetricRegistry[PPOUpdateContext]:
-    update_factory = build_update_factory()
-    update_factory.register(calculate_approx_kl)
-    update_factory.register(calculate_clip_fraction)
-    update_factory.register(calculate_entropy_coef)
+def _build_ppo_update_factory(
+    verbosity: Verbosity,
+) -> MetricRegistry[PPOUpdateContext]:
+    update_factory = build_update_factory(verbosity)
+    if verbosity.logs_diagnostics:
+        update_factory.register(calculate_approx_kl)
+        update_factory.register(calculate_clip_fraction)
+        update_factory.register(calculate_entropy_coef)
     return update_factory
 
 
-def build_ppo_metrics_factory() -> MetricsFactory:
+def build_ppo_metrics_factory(
+    verbosity: int | Verbosity = Verbosity.ALL,
+) -> MetricsFactory:
+    """Build PPO metric producers enabled at the requested verbosity.
+
+    Diagnostic registries are empty below ``Verbosity.ALL``. When hard KL
+    stopping is configured, ``PPOTrainer`` computes only the scalar KL required
+    by the update loop outside these registries.
+
+    Args:
+        verbosity: Metric detail level (0, 1, or 2).
+
+    Returns:
+        Metric registries for rollout, update, and optimization calculations.
+    """
+    level = as_verbosity(verbosity)
     return MetricsFactory(
-        optimization=_build_ppo_optimization_factory(),
-        rollout=_build_ppo_rollout_factory(),
-        update=_build_ppo_update_factory(),
+        optimization=_build_ppo_optimization_factory(level),
+        rollout=_build_ppo_rollout_factory(level),
+        update=_build_ppo_update_factory(level),
     )

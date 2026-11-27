@@ -14,18 +14,16 @@ class KLControlSettings(StrictModel):
     """KL-based early stopping controls for PPO updates."""
 
     target_kl: float = Field(
-        default=0.03, gt=0, description="Target approximate KL per update."
+        default=0.03, gt=0, description="Target mean approximate KL per epoch."
     )
     warmup_steps: int = Field(
         default=20_000, ge=0, description="Updates before KL stopping is enabled."
     )
-    stop_multiplier: float = Field(
-        default=3.0,
-        gt=0,
-        description="Multiplier applied to target_kl for hard stopping.",
-    )
     hard_stop: bool = Field(
-        default=True, description="Stop PPO updates when the KL threshold is exceeded."
+        default=True,
+        description=(
+            "Stop PPO epochs when mean approximate KL exceeds target_kl."
+        ),
     )
 
 

@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 from logging import getLogger
-from statistics import mean
 
 import torch as T
 
@@ -19,14 +18,14 @@ def run_ppo_update_loop(
     stack_size: int,
     optimization_settings: PPOOptimizationSettings,
     training_step: int,
-    train_step: Callable[..., dict[str, float]],
+    train_step: Callable[..., dict[str, T.Tensor]],
     metrics_logger: Callback | None = None,
     kl_control_settings: KLControlSettings | None = None,
     # current_update_step: Callable[[], int],
     # on_minibatch: Callable[..., None],
     # on_epoch: Callable[..., None],
 ) -> None:
-    """Run PPO minibatch updates and apply configured KL early stopping.
+    """Run PPO epochs and check the KL stopping condition at epoch boundaries.
 
     Args:
         batch: Rollout batch with temporal observation and done windows.
@@ -39,11 +38,10 @@ def run_ppo_update_loop(
         current_update_step: Callable returning the trainer's current optimizer
             update index for callback logging.
         on_minibatch: Callback dispatcher receiving ``metrics`` and ``step``.
-        on_epoch: Callback dispatcher invoked after each epoch, including a
-            partially completed epoch stopped by the KL threshold.
+        on_epoch: Callback dispatcher invoked after each complete epoch.
     """
     for epoch in range(optimization_settings.epochs):
-        epoch_kls = []
+        epoch_kls: list[T.Tensor] = []
         minibatches = get_iid_minibatches(
             batch,
             optimization_settings.minibatch_size,
@@ -67,22 +65,19 @@ def run_ppo_update_loop(
                     step=training_step,
                     metrics=minibatch_metrics,
                 )
-            epoch_kls.append(minibatch_metrics["update/approx_kl"])
-
-            if (
+            should_check_kl = (
                 kl_control_settings is not None
-                and minibatch_metrics["update/approx_kl"]
-                > kl_control_settings.target_kl * kl_control_settings.stop_multiplier
-                and training_step > kl_control_settings.warmup_steps
                 and kl_control_settings.hard_stop
-            ):
-                logger.warning(
-                    "Hard stop mid-epoch: KL %.4f",
-                    minibatch_metrics["update/approx_kl"],
-                )
-                break
+                and training_step > kl_control_settings.warmup_steps
+            )
+            if should_check_kl:
+                assert kl_control_settings is not None
+                approx_kl_value = minibatch_metrics["update/approx_kl"]
+                assert isinstance(approx_kl_value, T.Tensor)
+                assert not approx_kl_value.requires_grad
+                epoch_kls.append(approx_kl_value)
 
-        mean_epoch_kl = float(mean(epoch_kls)) if epoch_kls else None
+        mean_epoch_kl = T.stack(epoch_kls).mean() if epoch_kls else None
         metrics_logger.on_event(
             CallbackEvent.EPOCH_END,
             step=training_step,
@@ -90,14 +85,14 @@ def run_ppo_update_loop(
         if (
             kl_control_settings is not None
             and mean_epoch_kl is not None
-            and mean_epoch_kl > kl_control_settings.target_kl
             and training_step > kl_control_settings.warmup_steps
             and kl_control_settings.hard_stop
         ):
-            logger.warning(
-                "Early stop epoch %s: KL %.4f > %.4f",
-                epoch,
-                mean_epoch_kl,
-                kl_control_settings.target_kl,
-            )
-            break
+            assert isinstance(mean_epoch_kl, T.Tensor)
+            if bool((mean_epoch_kl > kl_control_settings.target_kl).item()):
+                logger.warning(
+                    "Early stop after epoch %s: mean approximate KL exceeded %.4f",
+                    epoch,
+                    kl_control_settings.target_kl,
+                )
+                break

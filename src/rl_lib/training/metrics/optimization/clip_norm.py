@@ -1,11 +1,11 @@
 import torch as T
-from torch.nn.utils import clip_grad_norm_
 
 from rl_lib.training.metrics.contexts import OptimizationContext
-from rl_lib.training.utils import tensor_metrics_to_scalars
 
 
-def calculate_clip_norms(optimization_context: OptimizationContext) -> dict[str, float]:
+def calculate_clip_norms(
+    optimization_context: OptimizationContext,
+) -> dict[str, T.Tensor]:
     groups = optimization_context.optimizer.param_groups
 
     group_norms = []
@@ -19,4 +19,4 @@ def calculate_clip_norms(optimization_context: OptimizationContext) -> dict[str,
         "clip_norm": T.linalg.vector_norm(group_norms),
         **{f"clip_norm/{pg['name']}": n for pg, n in zip(groups, group_norms)},
     }
-    return tensor_metrics_to_scalars(metrics)
+    return metrics

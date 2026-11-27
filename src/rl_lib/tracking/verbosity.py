@@ -21,9 +21,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from enum import IntEnum
-from typing import Any
+from typing import Any, TypeVar
 
 from rl_lib.tracking.sinks.base import MetricsSink
+
+_MetricT = TypeVar("_MetricT")
 
 
 class Verbosity(IntEnum):
@@ -76,6 +78,7 @@ def as_verbosity(verbosity: int | Verbosity) -> Verbosity:
 # Losses are the ``loss/`` family; the actor surrogate loss is the one loss
 # reported under the ``metrics/`` prefix, so it is named explicitly.
 CORE_LOSS_PREFIXES: tuple[str, ...] = ("loss/",)
+CORE_LOSS_FIELDS: frozenset[str] = frozenset({"total", "policy", "value", "entropy"})
 
 
 def is_core_loss(name: str) -> bool:
@@ -87,12 +90,12 @@ def is_core_loss(name: str) -> bool:
     Returns:
         True for total, actor, critic, and entropy losses.
     """
-    return name.startswith(CORE_LOSS_PREFIXES)
+    return name.startswith(CORE_LOSS_PREFIXES) or name in CORE_LOSS_FIELDS
 
 
 def filter_metrics(
-    metrics: dict[str, float], verbosity: int | Verbosity
-) -> dict[str, float]:
+    metrics: dict[str, _MetricT], verbosity: int | Verbosity
+) -> dict[str, _MetricT]:
     """Select the metrics allowed at a verbosity level.
 
     Args:

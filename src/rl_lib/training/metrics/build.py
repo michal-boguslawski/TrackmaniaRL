@@ -1,3 +1,4 @@
+from rl_lib.tracking.verbosity import Verbosity, as_verbosity
 from rl_lib.training.metrics.contexts import (
     OptimizationContext,
     RolloutContext,
@@ -17,23 +18,59 @@ from rl_lib.training.metrics.update.policy import (
 )
 
 
-def build_optimization_factory() -> MetricRegistry[OptimizationContext]:
+def build_optimization_factory(
+    verbosity: int | Verbosity = Verbosity.ALL,
+) -> MetricRegistry[OptimizationContext]:
+    """Create optimization metric producers enabled at ``verbosity``.
+
+    Args:
+        verbosity: Metric detail level; optimization diagnostics are registered
+            only when diagnostics are enabled.
+
+    Returns:
+        An optimization metric registry.
+    """
     optimization_factory = MetricRegistry("optimization")
-    optimization_factory.register(calculate_learning_rates)
-    optimization_factory.register(calculate_clip_norms)
+    if as_verbosity(verbosity).logs_diagnostics:
+        optimization_factory.register(calculate_learning_rates)
+        optimization_factory.register(calculate_clip_norms)
     return optimization_factory
 
 
-def build_rollout_factory() -> MetricRegistry[RolloutContext]:
+def build_rollout_factory(
+    verbosity: int | Verbosity = Verbosity.ALL,
+) -> MetricRegistry[RolloutContext]:
+    """Create rollout metric producers enabled at ``verbosity``.
+
+    Args:
+        verbosity: Metric detail level; rollout reductions are registered only
+            when diagnostics are enabled.
+
+    Returns:
+        A rollout metric registry.
+    """
     rollout_factory = MetricRegistry("rollout")
-    rollout_factory.register(calculate_action_statistics)
-    rollout_factory.register(calculate_explained_variance)
-    rollout_factory.register(calculate_returns_and_advantages_and_values)
+    if as_verbosity(verbosity).logs_diagnostics:
+        rollout_factory.register(calculate_action_statistics)
+        rollout_factory.register(calculate_explained_variance)
+        rollout_factory.register(calculate_returns_and_advantages_and_values)
     return rollout_factory
 
 
-def build_update_factory() -> MetricRegistry[UpdateContext]:
+def build_update_factory(
+    verbosity: int | Verbosity = Verbosity.ALL,
+) -> MetricRegistry[UpdateContext]:
+    """Create generic update diagnostics enabled at ``verbosity``.
+
+    Args:
+        verbosity: Metric detail level controlling whether diagnostic
+            reductions are registered.
+
+    Returns:
+        An update metric registry.
+    """
     update_factory = MetricRegistry("update")
-    update_factory.register(calculate_beta_concentrations)
-    update_factory.register(calculate_per_step_entropy)
+    if as_verbosity(verbosity).logs_diagnostics:
+        update_factory.register(calculate_beta_concentrations)
+        update_factory.register(calculate_per_step_entropy)
     return update_factory

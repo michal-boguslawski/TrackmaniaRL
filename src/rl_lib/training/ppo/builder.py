@@ -52,6 +52,7 @@ def build_ppo(ctx: BuildContext) -> tuple[Policy, PPOTrainer]:
         modules,
         cfg.algorithm.trainer,
         cfg.run.total_steps,
-        metrics_factory=build_ppo_metrics_factory(),
+        metrics_factory=build_ppo_metrics_factory(ctx.verbosity),
+        verbosity=ctx.verbosity,
     )  # builds optimizer, buffer, scheduler
     return policy, trainer

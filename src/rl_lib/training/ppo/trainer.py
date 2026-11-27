@@ -10,16 +10,19 @@ from torch.optim import Optimizer
 from rl_lib.buffers.rollout_buffer import RolloutBuffer, RolloutStep
 from rl_lib.policy.masks import episode_mask
 from rl_lib.tracking.callbacks.base import Callback, CallbackEvent
+from rl_lib.tracking.verbosity import Verbosity, as_verbosity
 from rl_lib.training.metrics.contexts import OptimizationContext, RolloutContext
 from rl_lib.training.metrics.factory import MetricsFactory
 from rl_lib.training.ppo.config.trainer import PPOTrainerSettings
 from rl_lib.training.ppo.losses import PPOLosses
+from rl_lib.training.ppo.metrics.build import build_ppo_metrics_factory
 from rl_lib.training.ppo.metrics.contexts import PPOUpdateContext
+from rl_lib.training.ppo.metrics.update.policy import calculate_approx_kl
 from rl_lib.training.ppo.modules import ActorCritic
 from rl_lib.training.ppo.update_loop import run_ppo_update_loop
 from rl_lib.training.schedulers.factory import build_scheduler
 from rl_lib.training.transitions import Transition
-from rl_lib.training.utils import build_optimizer, tensor_metrics_to_scalars
+from rl_lib.training.utils import build_optimizer
 
 logger = getLogger(__name__)
 
@@ -42,15 +45,19 @@ class PPOTrainer:
         total_steps: int,
         metrics_factory: MetricsFactory | None = None,
         callbacks: Callback | None = None,
+        verbosity: int | Verbosity = Verbosity.ALL,
     ):
         """Initialize the PPO trainer.
 
         Args:
-            agent: Agent wrapping the policy/value network.
-            config: TrainerSettings with all PPO hyperparameters.
+            modules: Actor and critic modules being optimized.
+            config: PPO settings for rollout, optimization, and losses.
+            total_steps: Total environment steps used to configure the scheduler.
+            metrics_factory: Producers for rollout, update, and optimization
+                metrics.
             callbacks: Callbacks for training events.
-            verbosity: Metric detail level deciding which metrics are computed
-                and handed to the tracking backends.
+            verbosity: Metric detail level controlling which diagnostics are
+                calculated and reported.
 
         Raises:
             ValueError: If verbosity is not one of 0, 1, or 2.
@@ -70,14 +77,19 @@ class PPOTrainer:
             self.cfg.optimizer.eps,
         )
         self._callbacks = callbacks
+        self._verbosity = as_verbosity(verbosity)
         self._scheduler = build_scheduler(
             self._optimizer,
             self.cfg.scheduler,
             total_steps=total_steps,
             steps_per_training=self.cfg.rollout.steps_per_env,
         )
-        self.losses = PPOLosses(config.loss)
-        self.metrics_factory = metrics_factory
+        self.losses = PPOLosses(config.loss, verbosity=self._verbosity)
+        self.metrics_factory = (
+            metrics_factory
+            if metrics_factory is not None
+            else build_ppo_metrics_factory(self._verbosity)
+        )
 
     def set_callbacks(self, callbacks: Callback) -> None:
         self._callbacks = callbacks
@@ -110,7 +122,13 @@ class PPOTrainer:
                 batch["dones"],
                 batch["critic_value"],
             )
-            rollout_metrics = self.metrics_factory.rollout.calculate(rollout_context)
+            if self._verbosity.logs_diagnostics:
+                with T.no_grad():
+                    rollout_metrics = self.metrics_factory.rollout.calculate(
+                        rollout_context
+                    )
+            else:
+                rollout_metrics = {}
             self._callbacks.on_event(
                 CallbackEvent.TRAIN_START,
                 step=global_step,
@@ -145,7 +163,7 @@ class PPOTrainer:
         returns: T.Tensor,
         advantages: T.Tensor,
         dones: T.Tensor,
-    ) -> dict[str, float]:
+    ) -> dict[str, T.Tensor]:
         """Single minibatch gradient step.
 
         Args:
@@ -179,24 +197,37 @@ class PPOTrainer:
         )
         loss = self.losses.calculate_losses(update_context)
         with T.no_grad():
-            update_metrics = self.metrics_factory.update.calculate(update_context)
+            if self._verbosity.logs_diagnostics:
+                update_metrics = self.metrics_factory.update.calculate(update_context)
+            elif self.cfg.kl.hard_stop:
+                approx_kl = calculate_approx_kl(
+                    update_context, include_per_action=False
+                )["approx_kl"]
+                update_metrics = {"update/approx_kl": approx_kl}
+            else:
+                update_metrics = {}
 
         self._optimizer.zero_grad()
         loss.total.backward()
 
         optimization_context = OptimizationContext(optimizer=self._optimizer)
         with T.no_grad():
-            optimization_metrics = self.metrics_factory.optimization.calculate(
-                optimization_context
+            optimization_metrics = (
+                self.metrics_factory.optimization.calculate(optimization_context)
+                if self._verbosity.logs_diagnostics
+                else {}
             )
         clip_grad_norm_(self.modules.parameters(), 0.5)
         self._optimizer.step()
         self.losses.entropy_decay.step()
 
+        loss_metrics = (
+            {f.name: getattr(loss, f.name).detach() for f in fields(loss)}
+            if self._verbosity.logs_core_losses
+            else {}
+        )
         return {
-            **tensor_metrics_to_scalars(
-                {f.name: getattr(loss, f.name) for f in fields(loss)}
-            ),
+            **loss_metrics,
             **update_metrics,
             **optimization_metrics,
         }
