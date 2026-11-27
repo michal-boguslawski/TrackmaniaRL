@@ -9,10 +9,8 @@ Provides MetricsLogger interface and implementations:
 
 from rl_lib.tracking.sinks.base import MetricsSink
 from rl_lib.tracking.sinks.local_sink import LocalMetricsSink
-from rl_lib.tracking.sinks.mlflow_sink import (
-    MLflowMetricsSink,
-    run_status_for_exception,
-)
+from rl_lib.tracking.sinks.mlflow_sink import MLflowMetricsSink
+from rl_lib.tracking.utils import run_status_for_exception
 
 __all__ = [
     "LocalMetricsSink",

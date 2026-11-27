@@ -16,35 +16,7 @@ import torch
 
 from rl_lib.tracking.artifacts import normalize_artifact_path
 from rl_lib.tracking.sinks.base import MetricsSink
-
-
-def run_status_for_exception(
-    exc_type: type[BaseException] | None, exc_val: BaseException | None = None
-) -> str:
-    """Map the exception leaving a run's `with` block onto an MLflow run status.
-
-    A run that ends because it was interrupted is `KILLED` rather than
-    `FAILED`, so the UI distinguishes a stop from a crash. `SystemExit(0)`
-    is a deliberate clean exit, so it still counts as `FINISHED`.
-
-    Args:
-        exc_type: Exception type from __exit__ (None if no exception).
-        exc_val: Exception value.
-
-    Returns:
-        MLflow run status string: FINISHED, KILLED, or FAILED.
-    """
-    if exc_type is None:
-        return "FINISHED"
-    if issubclass(exc_type, KeyboardInterrupt):
-        return "KILLED"
-    if (
-        issubclass(exc_type, SystemExit)
-        and exc_val is not None
-        and getattr(exc_val, "code", None) in (0, None)
-    ):
-        return "FINISHED"
-    return "FAILED"
+from rl_lib.tracking.utils import run_status_for_exception
 
 
 class MLflowMetricsSink(MetricsSink):
@@ -85,6 +57,12 @@ class MLflowMetricsSink(MetricsSink):
         self._run = mlflow.start_run(
             run_name=run_name, tags=tags, log_system_metrics=log_system_metrics
         )
+        self._closed = False
+
+    def _ensure_open(self) -> None:
+        """Reject logging calls after this sink has ended its run."""
+        if self._closed:
+            raise RuntimeError("Cannot log through a closed MLflow sink.")
 
     @staticmethod
     def _deduce_run_name() -> str:
@@ -103,16 +81,19 @@ class MLflowMetricsSink(MetricsSink):
 
     def log_metrics(self, metrics: dict[str, float], step: int | None = None) -> None:
         """Log metrics to MLflow."""
+        self._ensure_open()
         mlflow.log_metrics(metrics, step=step)
 
     def log_parameters(self, parameters: dict[str, object]) -> None:
         """Log parameters to MLflow (values converted to strings)."""
+        self._ensure_open()
         mlflow.log_params({k: str(v) for k, v in parameters.items()})
 
     def log_config(
         self, config: dict, artifact_file: str = "config/run_config.yaml"
     ) -> None:
         """Log full config dict as YAML artifact."""
+        self._ensure_open()
         mlflow.log_dict(config, artifact_file)
 
     def log_model(
@@ -122,6 +103,7 @@ class MLflowMetricsSink(MetricsSink):
         registered_model_name: str | None = None,
     ) -> None:
         """Log PyTorch model to MLflow with optional registry."""
+        self._ensure_open()
         mlflow.pytorch.log_model(
             model,
             name=artifact_path,
@@ -134,10 +116,12 @@ class MLflowMetricsSink(MetricsSink):
         self, state_dict: dict, artifact_path: str = "checkpoints/step"
     ) -> None:
         """Log state dict as MLflow artifact."""
+        self._ensure_open()
         mlflow.pytorch.log_state_dict(state_dict, artifact_path=artifact_path)
 
     def log_artifact(self, local_path: str, artifact_path: str | None = None) -> None:
         """Log local file (e.g., video) as MLflow artifact."""
+        self._ensure_open()
         mlflow.log_artifact(local_path, artifact_path=artifact_path)
 
     def log_evaluation(
@@ -145,11 +129,20 @@ class MLflowMetricsSink(MetricsSink):
         results: dict[str, float | dict[str, float] | list[dict[str, float]]],
         artifact_path: str = "evaluation/final_results.json",
     ) -> None:
+        """Log evaluation results as a JSON artifact."""
+        self._ensure_open()
         mlflow.log_dict(results, artifact_path)
 
     def close(self, status: str = "FINISHED") -> None:
-        """End MLflow run with given status."""
+        """End the owned MLflow run once with the given status.
+
+        Args:
+            status: Final MLflow run status.
+        """
+        if self._closed:
+            return
         mlflow.end_run(status=status)
+        self._closed = True
 
     def __enter__(self) -> "Self":
         return self

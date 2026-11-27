@@ -91,3 +91,15 @@ class MetricsSink(ABC):
             local_path: Path to local file.
             artifact_path: Destination path in artifact store.
         """
+
+    def close(self, status: str = "FINISHED") -> None:
+        """Stop accepting work and release resources owned by the sink.
+
+        Synchronous sinks without external resources may use this no-op
+        implementation. Queued sinks should drain and join their workers before
+        closing any underlying run.
+
+        Args:
+            status: Final run status, such as ``FINISHED``, ``KILLED``, or
+                ``FAILED``.
+        """

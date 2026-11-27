@@ -64,7 +64,6 @@ def run_training(
     Args:
         config: Validated RunConfig with all settings.
         config_path: Original config file path (for logging).
-        profiling_config: Optional settings for a bounded PyTorch profiler trace.
     """
     level = getattr(logging, config.run.log_level)
     session_id = resolve_session_id()
@@ -102,17 +101,21 @@ def run_training(
 
     verbosity = config.tracking.verbosity
     with ExitStack() as stack:
-        env = stack.enter_context(closing(make_env(config.environment, device=device)))
+        metrics_logger = stack.enter_context(
+            build_metrics_logger(
+                config.tracking,
+                run_paths=run_paths,
+            )
+        )
+        env = stack.enter_context(
+            closing(make_env(config.environment, device=device))
+        )
         build_ctx = BuildContext(
             config=config,
             device=device,
             verbosity=verbosity,
             obs_shape=env.observation_space.shape,
             action_space=env.single_action_space,
-        )
-        metrics_logger = build_metrics_logger(
-            config.tracking,
-            run_paths=run_paths,
         )
         policy, trainer = build_ppo(build_ctx)
         callbacks = build_callbacks(
@@ -146,14 +149,7 @@ def run_training(
             device,
             config_path or "<object>",
         )
-        try:
-            collector.run(config.run.total_steps)
-        except KeyboardInterrupt:
-            logger.warning("Rollout interrupted; stopping training")
-            raise
-        except Exception:
-            logger.exception("rollout_collector.run failed")
-            raise
+        collector.run(config.run.total_steps)
 
 
 def main(
@@ -163,10 +159,6 @@ def main(
 
     Args:
         config_path: YAML training configuration.
-        profiling_config_path: Separate YAML profiling configuration. Defaults
-            to the packaged ``profiling.yaml``.
-        profile: Optional CLI override for the profiling config's ``enabled``
-            setting. ``None`` follows the config value.
     """
     config = load_config(str(config_path))
     try:
