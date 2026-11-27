@@ -1,5 +1,8 @@
-"""CPU regression test for gradient flow through each PPO module group."""
+"""CPU regression tests for PPO gradient flow and tiny-batch overfitting."""
 
+from collections.abc import Iterator
+
+import pytest
 import torch as T
 
 from rl_lib.buffers.settings.rollout import RolloutSettings
@@ -127,6 +130,80 @@ def _minibatch_objective(
         return trainer.losses.calculate_losses(update_context).total
 
 
+def _make_overfit_minibatch(
+    modules: ActorCritic,
+) -> tuple[dict[str, T.Tensor], T.Tensor, T.Tensor]:
+    """Create a fixed synthetic batch and snapshot its initial Beta concentrations."""
+    batch_size, sequence_length = 8, modules.encoder.stack_size
+    observations = T.randint(
+        0,
+        256,
+        (batch_size, sequence_length, 16, 16, 1),
+        dtype=T.uint8,
+    )
+    dones = T.zeros(batch_size, sequence_length, dtype=T.bool)
+
+    with T.no_grad():
+        initial_dist, initial_values, _ = modules(observations, episode_mask(dones))
+        actions = initial_dist.sample()
+        old_log_probs = initial_dist.log_prob(actions)
+        initial_alpha = initial_dist.base_dist.concentration1.detach().clone()
+        initial_beta = initial_dist.base_dist.concentration0.detach().clone()
+
+    minibatch = {
+        "observation": observations,
+        "action": actions,
+        "old_log_probs": old_log_probs,
+        "old_values": initial_values,
+        "returns": initial_values
+        + T.tensor([0.5, -0.3, 0.2, -0.5, 0.4, -0.2, 0.3, 0.1]),
+        "advantages": T.tensor([1.0, -0.7, 0.3, 1.2, -1.1, 0.5, -0.4, 0.9]),
+        "dones": dones,
+    }
+    return minibatch, initial_alpha, initial_beta
+
+
+def _evaluate_policy_and_value_objectives(
+    trainer: PPOTrainer,
+    minibatch: dict[str, T.Tensor],
+) -> tuple[float, float, T.Tensor, T.Tensor]:
+    """Evaluate PPO policy/value losses and Beta concentrations without gradients."""
+    with T.no_grad():
+        action_dist, values, action_mean = trainer.modules(
+            minibatch["observation"], episode_mask(minibatch["dones"])
+        )
+        update_context = PPOUpdateContext(
+            values=values,
+            returns=minibatch["returns"],
+            dist=action_dist,
+            old_log_probs=minibatch["old_log_probs"],
+            new_log_probs=action_dist.log_prob(minibatch["action"]),
+            advantages=minibatch["advantages"],
+            actions=action_mean,
+            old_values=minibatch["old_values"],
+            actor_loss_cfg=trainer.cfg.loss.actor_loss_cfg,
+            entropy_decay=trainer.losses.entropy_decay,
+        )
+        losses = trainer.losses.calculate_losses(update_context)
+        return (
+            losses.policy.item(),
+            losses.value.item(),
+            action_dist.base_dist.concentration1.detach().clone(),
+            action_dist.base_dist.concentration0.detach().clone(),
+        )
+
+
+@pytest.fixture
+def single_threaded_torch() -> Iterator[None]:
+    """Use one CPU thread for fast updates to the tiny test network."""
+    previous_threads = T.get_num_threads()
+    T.set_num_threads(1)
+    try:
+        yield
+    finally:
+        T.set_num_threads(previous_threads)
+
+
 def test_representative_minibatch_reaches_every_parameter_group() -> None:
     """A PPO update should produce nonzero gradients in all four module groups."""
     trainer, modules = _make_trainer()
@@ -205,3 +282,27 @@ def test_excessive_learning_rate_overshoots_the_minibatch_objective() -> None:
         f"expected overshoot beyond {tolerance:g}, got "
         f"{objective_before.item():.6f} -> {objective_after.item():.6f}"
     )
+
+
+def test_tiny_batch_overfit_improves_policy_and_value_objectives(
+    single_threaded_torch: None,
+) -> None:
+    """Check PPO can fit a fixed synthetic batch; this is not a real-rollout claim."""
+    trainer, modules = _make_trainer(learning_rate=3e-3)
+    minibatch, initial_alpha, initial_beta = _make_overfit_minibatch(modules)
+    policy_before, value_before, _, _ = _evaluate_policy_and_value_objectives(
+        trainer, minibatch
+    )
+
+    for _ in range(200):
+        metrics = trainer.train_step(**minibatch)
+        assert all(T.isfinite(T.tensor(value)) for value in metrics.values())
+
+    policy_after, value_after, final_alpha, final_beta = (
+        _evaluate_policy_and_value_objectives(trainer, minibatch)
+    )
+
+    assert policy_after < policy_before - 0.05
+    assert value_after < value_before * 0.05
+    assert T.linalg.vector_norm(final_alpha - initial_alpha).item() > 0.1
+    assert T.linalg.vector_norm(final_beta - initial_beta).item() > 0.1

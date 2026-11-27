@@ -27,7 +27,7 @@ environment:
     - name: reward_on_done
       on_truncated: 0.0
       on_win: 70.0
-    # - name: action_couple
+    - name: action_couple
 
 algorithm:
   name: ppo
@@ -36,7 +36,7 @@ algorithm:
     encoder:
       stack_size: 4
     actor:
-      concentration_offset: 1.
+      concentration_offset: [1., 0.5]
     critic: {}
 
   trainer:
@@ -46,7 +46,7 @@ algorithm:
     loss:
       actor_loss_cfg:
         advantage_normalization_strategy: global
-        ppo_epsilon: 0.2
+        ppo_epsilon: 0.1
         # mean_reg_coef: 0.05
 
       critic_loss_cfg:
@@ -54,7 +54,7 @@ algorithm:
 
       entropy:
         coefficient: 0.05
-        decay: 0.9999
+        decay: 0.99999
         min_coefficient:  0.001
 
     optimizer:
@@ -65,16 +65,16 @@ algorithm:
         actor_lr: 3e-5
         critic_lr: 3e-5
 
-    # scheduler:
-    #   name: linear
-    #   end_fraction: 0.6
+    scheduler:
+      name: linear
+      end_fraction: 0.8
 
     rollout:
       steps_per_env: 2048
 
     optimization:
       minibatch_size: 256
-      epochs: 6
+      epochs: 4
       minibatch_indexing_mode: iid
 
 tracking:
